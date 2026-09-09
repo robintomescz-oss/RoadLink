@@ -52,20 +52,37 @@ function coordinatesFromValues(latitude: unknown, longitude: unknown): PickupCoo
   return { latitude: parsedLatitude, longitude: parsedLongitude };
 }
 
-async function geocodeAddress(address: string): Promise<PickupCoordinates | null> {
-  try {
-    const results = await Location.geocodeAsync(address);
-    const usableResult = results.find((result) =>
-      Number.isFinite(result.latitude) && Number.isFinite(result.longitude)
-    );
+const GEOCODING_TIMEOUT_MS = 6000;
 
-    return usableResult
-      ? { latitude: usableResult.latitude, longitude: usableResult.longitude }
-      : null;
-  } catch (error) {
-    console.warn("Forward geocoding failed:", error);
-    return null;
+async function geocodeAddress(address: string): Promise<PickupCoordinates | null> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const geocodingAttempt = Location.geocodeAsync(address)
+    .then((results) => {
+      const usableResult = results.find((result) =>
+        Number.isFinite(result.latitude) && Number.isFinite(result.longitude)
+      );
+
+      return usableResult
+        ? { latitude: usableResult.latitude, longitude: usableResult.longitude }
+        : null;
+    })
+    .catch((error) => {
+      console.warn("Forward geocoding failed:", error);
+      return null;
+    });
+
+  const timeoutFallback = new Promise<null>((resolve) => {
+    timeoutId = setTimeout(() => resolve(null), GEOCODING_TIMEOUT_MS);
+  });
+
+  const result = await Promise.race([geocodingAttempt, timeoutFallback]);
+
+  if (timeoutId) {
+    clearTimeout(timeoutId);
   }
+
+  return result;
 }
 
 type Job = {
@@ -742,10 +759,6 @@ export default function App() {
   async function createRoute() {
     if (!userId) return;
 
-    const coords = location?.coords || {
-      latitude: DEFAULT_REGION.latitude,
-      longitude: DEFAULT_REGION.longitude,
-    };
     const availableSpaces = Number(routeSpaces);
     const price = routePrice.trim() === "" ? null : Number(routePrice);
 
@@ -754,17 +767,25 @@ export default function App() {
       return;
     }
 
+    const fromAddress = routeFrom.trim();
+    const toAddress = routeTo.trim();
+    const vehicleType = routeVehicleTypes.trim();
+    const [fromCoordinates, toCoordinates] = await Promise.all([
+      geocodeAddress(fromAddress),
+      geocodeAddress(toAddress),
+    ]);
+
     const { error } = await supabase.from("carrier_routes").insert({
       driver_id: userId,
-      from_address: routeFrom,
-      from_lat: coords.latitude,
-      from_lng: coords.longitude,
-      to_address: routeTo,
-      to_lat: coords.latitude,
-      to_lng: coords.longitude,
+      from_address: fromAddress,
+      from_lat: fromCoordinates?.latitude ?? null,
+      from_lng: fromCoordinates?.longitude ?? null,
+      to_address: toAddress,
+      to_lat: toCoordinates?.latitude ?? null,
+      to_lng: toCoordinates?.longitude ?? null,
       departure_at: routeDeparture,
       available_spaces: availableSpaces,
-      vehicle_types: routeVehicleTypes,
+      vehicle_types: [vehicleType],
       price: routePriceMode === "negotiable" ? null : price,
       description: routeDescription,
       status: "open",
