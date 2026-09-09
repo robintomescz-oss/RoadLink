@@ -85,6 +85,26 @@ async function geocodeAddress(address: string): Promise<PickupCoordinates | null
   return result;
 }
 
+function carrierRouteDepartureLabel(value: string): string {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString("cs-CZ", {
+    day: "numeric",
+    month: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function carrierRoutePriceLabel(price: number): string {
+  return `${price.toLocaleString("cs-CZ")} Kč`;
+}
+
 type Job = {
   id: string;
   customerName: string;
@@ -112,6 +132,7 @@ type CarrierRoute = {
   vehicleTypes: string;
   price: number | null;
   description: string;
+  status: string;
 };
 
 type TowOffer = {
@@ -231,6 +252,9 @@ export default function App() {
   const [customerRequests, setCustomerRequests] = useState<Job[]>([]);
   const [offerCounts, setOfferCounts] = useState<Record<string, number>>({});
   const [routes, setRoutes] = useState<CarrierRoute[]>([]);
+  const [routesLoading, setRoutesLoading] = useState(false);
+  const [routesError, setRoutesError] = useState(false);
+  const [activeRouteId, setActiveRouteId] = useState<string | null>(null);
   const [offers, setOffers] = useState<TowOffer[]>([]);
   const [offersLoading, setOffersLoading] = useState(false);
   const [selectingOfferId, setSelectingOfferId] = useState<string | null>(null);
@@ -325,6 +349,7 @@ export default function App() {
     setCustomerRequests([]);
     setOfferCounts({});
     setRoutes([]);
+    setActiveRouteId(null);
     setOffers([]);
     setVehicles([]);
     setActiveJobId(null);
@@ -378,6 +403,7 @@ export default function App() {
     customerRequests.find((job) => job.id === activeJobId) ||
     activeAcceptedJob ||
     null;
+  const activeRoute = routes.find((route) => route.id === activeRouteId) || null;
 
   async function loadJobs() {
     const { data, error } = await supabase
@@ -532,15 +558,19 @@ export default function App() {
   async function loadRoutes() {
     if (!userId) return;
 
-    const { data, error } = await supabase
-      .from("carrier_routes")
-      .select("*")
-      .eq("driver_id", userId)
-      .in("status", ["open", "full", "in_progress"])
-      .order("departure_at", { ascending: true });
+    setRoutesLoading(true);
+    setRoutesError(false);
+    let query = supabase.from("carrier_routes").select("*");
+    query = screen === "driverHome"
+      ? query.eq("driver_id", userId).in("status", ["open", "full", "in_progress"])
+      : query.eq("status", "open");
+    const { data, error } = await query.order("departure_at", { ascending: true });
+    setRoutesLoading(false);
 
     if (error) {
       console.error("Load routes:", error.message);
+      setRoutesError(true);
+      setRoutes([]);
       return;
     }
 
@@ -556,6 +586,7 @@ export default function App() {
           : row.vehicle_types || "Neuvedeno",
         price: row.price ?? null,
         description: row.description || "",
+        status: row.status || "open",
       }))
     );
   }
@@ -2023,8 +2054,47 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
 
           {transportTab === "capacity" ? (
             <View>
-              <Text style={styles.sectionLabel}>VOLNÁ KAPACITA</Text>
-              <View style={styles.emptyPanel}><Text style={styles.emptyTitle}>Volná kapacita</Text><Text style={styles.emptyCopy}>Zůstává pro tento krok beze změny.</Text></View>
+              <View style={styles.transportSectionHeader}>
+                <Text style={styles.sectionLabel}>VOLNÁ KAPACITA</Text>
+                <Text style={styles.transportCount}>{routes.length}</Text>
+              </View>
+              {routesLoading ? (
+                <View style={styles.emptyPanel}><Text style={styles.emptyTitle}>Načítám volné kapacity…</Text></View>
+              ) : routesError ? (
+                <View style={styles.emptyPanel}>
+                  <Text style={styles.emptyTitle}>Volné kapacity se nepodařilo načíst</Text>
+                  <TouchableOpacity style={styles.secondary} onPress={loadRoutes}>
+                    <Text style={styles.secondaryText}>Zkusit znovu</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : routes.length === 0 ? (
+                <View style={styles.emptyPanel}>
+                  <Text style={styles.emptyTitle}>Žádné otevřené volné trasy</Text>
+                  <Text style={styles.emptyCopy}>Aktivní nabídky volné kapacity se zobrazí zde.</Text>
+                </View>
+              ) : routes.map((route) => (
+                <TouchableOpacity
+                  key={route.id}
+                  style={styles.dispatchCard}
+                  onPress={() => {
+                    setActiveRouteId(route.id);
+                    setScreen("routeDetail");
+                  }}
+                >
+                  <View style={styles.dispatchHeader}>
+                    <Text style={styles.dispatchLabel}>VOLNÁ KAPACITA</Text>
+                  </View>
+                  <Text style={styles.dispatchVehicle}>{route.vehicleTypes}</Text>
+                  <Text style={styles.routeLine}>{route.fromAddress} → {route.toAddress}</Text>
+                  <View style={styles.dispatchFooter}>
+                    <View>
+                      <Text style={styles.dispatchMeta}>Odjezd: {carrierRouteDepartureLabel(route.departureAt)}</Text>
+                      <Text style={styles.dispatchMeta}>{route.availableSpaces} {route.availableSpaces === 1 ? "volné místo" : route.availableSpaces >= 2 && route.availableSpaces <= 4 ? "volná místa" : "volných míst"}{route.price !== null ? ` · ${carrierRoutePriceLabel(route.price)}` : ""}</Text>
+                    </View>
+                    <Text style={styles.dispatchArrow}>→</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
             </View>
           ) : null}
 
@@ -2098,6 +2168,83 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
               ))}
             </View>
           ) : null}
+        </ScrollView>
+        <BottomNavigation />
+      </SafeAreaView>
+    );
+  }
+
+  if (screen === "routeDetail") {
+    if (!activeRoute) {
+      return (
+        <SafeAreaView style={styles.container}>
+          <Header title="Volná kapacita" />
+          <View style={styles.appContent}>
+            <View style={styles.emptyPanel}>
+              <Text style={styles.emptyTitle}>Trasa není dostupná</Text>
+              <Text style={styles.emptyCopy}>Zkuste se vrátit na přehled volných kapacit.</Text>
+            </View>
+            <TouchableOpacity style={styles.secondary} onPress={() => { setTransportTab("capacity"); setScreen("transport"); }}>
+              <Text style={styles.secondaryText}>Zpět na volné kapacity</Text>
+            </TouchableOpacity>
+          </View>
+          <BottomNavigation />
+        </SafeAreaView>
+      );
+    }
+
+    return (
+      <SafeAreaView style={styles.container}>
+        <Header title="Volná kapacita" />
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.requestDetailContent} keyboardShouldPersistTaps="handled">
+          <View style={styles.detailTopRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.sectionLabel}>VOLNÁ KAPACITA</Text>
+              <Text style={styles.detailHeroTitle}>{activeRoute.fromAddress} → {activeRoute.toAddress}</Text>
+            </View>
+          </View>
+
+          <View style={styles.detailSectionFlat}>
+            <Text style={styles.sectionLabel}>TRASA</Text>
+            <Text style={styles.routeEndpoint}>{activeRoute.fromAddress}</Text>
+            <Text style={styles.routeArrowDown}>↓</Text>
+            <Text style={styles.routeEndpoint}>{activeRoute.toAddress}</Text>
+          </View>
+
+          <View style={styles.detailTwoColumnRow}>
+            <View style={styles.detailMiniSection}>
+              <Text style={styles.sectionLabel}>ODJEZD</Text>
+              <Text style={styles.detailValueStrong}>{carrierRouteDepartureLabel(activeRoute.departureAt)}</Text>
+            </View>
+            <View style={styles.detailMiniSection}>
+              <Text style={styles.sectionLabel}>KAPACITA</Text>
+              <Text style={styles.detailValueStrong}>{activeRoute.availableSpaces} {activeRoute.availableSpaces === 1 ? "volné místo" : activeRoute.availableSpaces >= 2 && activeRoute.availableSpaces <= 4 ? "volná místa" : "volných míst"}</Text>
+            </View>
+          </View>
+
+          <View style={styles.detailTwoColumnRow}>
+            <View style={styles.detailMiniSection}>
+              <Text style={styles.sectionLabel}>VOZIDLO</Text>
+              <Text style={styles.detailValueStrong}>{activeRoute.vehicleTypes}</Text>
+            </View>
+            {activeRoute.price !== null ? (
+            <View style={styles.detailMiniSection}>
+              <Text style={styles.sectionLabel}>CENA</Text>
+              <Text style={styles.detailValueStrong}>{carrierRoutePriceLabel(activeRoute.price)}</Text>
+            </View>
+            ) : null}
+          </View>
+
+          {activeRoute.description ? (
+            <View style={styles.detailSectionFlat}>
+              <Text style={styles.sectionLabel}>POZNÁMKA</Text>
+              <Text style={styles.detailMuted}>{activeRoute.description}</Text>
+            </View>
+          ) : null}
+
+          <TouchableOpacity style={styles.secondary} onPress={() => { setTransportTab("capacity"); setScreen("transport"); }}>
+            <Text style={styles.secondaryText}>Zpět na volné kapacity</Text>
+          </TouchableOpacity>
         </ScrollView>
         <BottomNavigation />
       </SafeAreaView>
