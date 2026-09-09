@@ -3,9 +3,11 @@ import {
   Alert,
   FlatList,
   Image,
+  Platform,
   SafeAreaView,
   ScrollView,
   StyleSheet,
+  StatusBar as NativeStatusBar,
   Text,
   TextInput,
   TouchableOpacity,
@@ -103,6 +105,13 @@ function carrierRouteDepartureLabel(value: string): string {
 
 function carrierRoutePriceLabel(price: number): string {
   return `${price.toLocaleString("cs-CZ")} Kč`;
+}
+
+function canonicalVehicleType(value: string | null | undefined): string {
+  const normalized = (value || "").trim();
+  if (normalized === "Osobní auto") return "Osobní automobil";
+  if (normalized === "Motorka") return "Motocykl";
+  return normalized;
 }
 
 type Job = {
@@ -233,7 +242,7 @@ export default function App() {
   const [locationError, setLocationError] = useState("");
   const [pickupText, setPickupText] = useState("");
   const [destination, setDestination] = useState("");
-  const [vehicle, setVehicle] = useState("Osobní auto");
+  const [vehicle, setVehicle] = useState("Osobní automobil");
   const [problem, setProblem] = useState("Porucha");
   const [timePreference, setTimePreference] = useState<TimePreference>("asap");
   const [requestedDate, setRequestedDate] = useState<Date | null>(null);
@@ -274,7 +283,7 @@ export default function App() {
   const [routeDeparture, setRouteDeparture] = useState("");
   const [routeSpaces, setRouteSpaces] = useState("1");
   const [routeMaxDeviationKm, setRouteMaxDeviationKm] = useState("");
-  const [routeVehicleTypes, setRouteVehicleTypes] = useState("Osobní auto");
+  const [routeVehicleTypes, setRouteVehicleTypes] = useState("Osobní automobil");
   const [routePrice, setRoutePrice] = useState("");
   const [routePriceMode, setRoutePriceMode] = useState<"fixed" | "negotiable">("fixed");
   const [routeDescription, setRouteDescription] = useState("");
@@ -292,6 +301,9 @@ export default function App() {
   const [authInitialized, setAuthInitialized] = useState(false);
   const [signOutLoading, setSignOutLoading] = useState(false);
   const [transportTab, setTransportTab] = useState<"all" | "requests" | "capacity" | "mine">("all");
+  const [transportFromFilter, setTransportFromFilter] = useState("");
+  const [transportToFilter, setTransportToFilter] = useState("");
+  const [transportVehicleFilter, setTransportVehicleFilter] = useState("all");
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileEditing, setProfileEditing] = useState(false);
@@ -422,7 +434,7 @@ export default function App() {
     const mapped: Job[] = (data || []).map((row) => ({
       id: row.id,
       customerName: "Uživatel RoadLink",
-      vehicle: row.vehicle_type || "Vozidlo",
+      vehicle: canonicalVehicleType(row.vehicle_type || "Vozidlo"),
       problem: row.problem_description || "Porucha",
       pickup: coordinatesFromValues(row.pickup_lat, row.pickup_lng),
       pickupAddress: row.pickup_address || null,
@@ -480,7 +492,7 @@ export default function App() {
       return [{
         id: row.id,
         customerName: "Uživatel RoadLink",
-        vehicle: row.vehicle_type || "Vozidlo",
+        vehicle: canonicalVehicleType(row.vehicle_type || "Vozidlo"),
         problem: row.problem_description || "Porucha",
         pickup: coordinatesFromValues(row.pickup_lat, row.pickup_lng),
         pickupAddress: row.pickup_address || null,
@@ -517,7 +529,7 @@ export default function App() {
     const mapped: Job[] = (data || []).map((row) => ({
       id: row.id,
       customerName: "Uživatel RoadLink",
-      vehicle: row.vehicle_type || "Vozidlo",
+      vehicle: canonicalVehicleType(row.vehicle_type || "Vozidlo"),
       problem: row.problem_description || "Porucha",
       pickup: coordinatesFromValues(row.pickup_lat, row.pickup_lng),
       pickupAddress: row.pickup_address || null,
@@ -585,8 +597,8 @@ export default function App() {
         availableSpaces: row.available_spaces ?? 0,
         maxDeviationKm: row.max_deviation_km ?? null,
         vehicleTypes: Array.isArray(row.vehicle_types)
-          ? row.vehicle_types.join(", ")
-          : row.vehicle_types || "Neuvedeno",
+          ? row.vehicle_types.map((value: string) => canonicalVehicleType(value)).join(", ")
+          : canonicalVehicleType(row.vehicle_types || "Neuvedeno"),
         price: row.price ?? null,
         description: row.description || "",
         status: row.status || "open",
@@ -810,7 +822,7 @@ export default function App() {
 
     const fromAddress = routeFrom.trim();
     const toAddress = routeTo.trim();
-    const vehicleType = routeVehicleTypes.trim();
+    const vehicleType = canonicalVehicleType(routeVehicleTypes);
     const [fromCoordinates, toCoordinates] = await Promise.all([
       geocodeAddress(fromAddress),
       geocodeAddress(toAddress),
@@ -1526,7 +1538,7 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
       destination_address: trimmedDestination || "Servis dle domluvy",
       destination_lat: destinationCoordinates?.latitude ?? null,
       destination_lng: destinationCoordinates?.longitude ?? null,
-      vehicle_type: vehicle,
+      vehicle_type: canonicalVehicleType(vehicle),
       problem_description: problem,
       requested_date:
         timePreference === "specific" && requestedDate
@@ -1555,7 +1567,7 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
   const job: Job = {
     id: data.id,
     customerName: "Uživatel RoadLink",
-    vehicle: data.vehicle_type || vehicle,
+    vehicle: canonicalVehicleType(data.vehicle_type || vehicle),
     problem: data.problem_description || problem,
     pickup: coordinatesFromValues(data.pickup_lat, data.pickup_lng) ?? pickupCoordinates,
     pickupAddress: data.pickup_address || trimmedPickupAddress,
@@ -1617,6 +1629,36 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
         return (Date.parse(secondJob.createdAt || "") || 0) - (Date.parse(firstJob.createdAt || "") || 0);
       });
   }, [jobs, mobilityFilter, sortOption, timeFilter, vehicleFilter]);
+
+  const transportFilterText = (value: string | null | undefined) => (value || "").trim().toLocaleLowerCase("cs-CZ");
+  const filteredTransportRequests = useMemo(() => {
+    const from = transportFilterText(transportFromFilter);
+    const to = transportFilterText(transportToFilter);
+    return jobs.filter((job) => job.status === "open")
+      .filter((job) => !from || transportFilterText(job.pickupAddress).includes(from))
+      .filter((job) => !to || transportFilterText(job.destination).includes(to))
+      .filter((job) => transportVehicleFilter === "all" || canonicalVehicleType(job.vehicle) === transportVehicleFilter);
+  }, [jobs, transportFromFilter, transportToFilter, transportVehicleFilter]);
+
+  const filteredTransportRoutes = useMemo(() => {
+    const from = transportFilterText(transportFromFilter);
+    const to = transportFilterText(transportToFilter);
+    return routes.filter((route) => !from || transportFilterText(route.fromAddress).includes(from))
+      .filter((route) => !to || transportFilterText(route.toAddress).includes(to))
+      .filter((route) => transportVehicleFilter === "all" || route.vehicleTypes.split(", ").map(canonicalVehicleType).includes(transportVehicleFilter));
+  }, [routes, transportFromFilter, transportToFilter, transportVehicleFilter]);
+
+  const transportVehicleOptions = useMemo(() => Array.from(new Set([
+    ...jobs.map((job) => canonicalVehicleType(job.vehicle)).filter(Boolean),
+    ...routes.flatMap((route) => route.vehicleTypes.split(", ").map(canonicalVehicleType).filter(Boolean)),
+  ])), [jobs, routes]);
+
+  const transportFiltersActive = Boolean(transportFromFilter.trim() || transportToFilter.trim() || transportVehicleFilter !== "all");
+  const clearTransportFilters = () => {
+    setTransportFromFilter("");
+    setTransportToFilter("");
+    setTransportVehicleFilter("all");
+  };
 
 
   const mapRegion: Region = useMemo(() => {
@@ -1696,6 +1738,7 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
 
   function Header({ title }: { title: string }) {
     return (
+      <SafeAreaView style={styles.headerSafeArea}>
       <View style={styles.header}>
         <View>
           <Text style={styles.logo}>ROADLINK</Text>
@@ -1705,6 +1748,7 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
           <Text style={styles.headerSignOut}>⌁</Text>
         </TouchableOpacity>
       </View>
+      </SafeAreaView>
     );
   }
 
@@ -1755,6 +1799,7 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
     ];
 
     return (
+      <SafeAreaView style={styles.bottomNavSafeArea}>
       <View style={styles.bottomNav}>
         {navItems.map((item) => {
           const isActive = screen === item.key;
@@ -1787,6 +1832,7 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
           );
         })}
       </View>
+      </SafeAreaView>
     );
   }
 
@@ -2014,7 +2060,8 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
   }
 
   if (screen === "transport") {
-    const openRequestCards = filteredJobs;
+    const openRequestCards = filteredTransportRequests;
+    const openCapacityCards = filteredTransportRoutes;
     const myAcceptedTransportCards = acceptedJobs;
     const myRequestCards = customerRequests;
 
@@ -2036,6 +2083,41 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
             ))}
           </View>
 
+          {transportTab !== "mine" ? (
+            <View style={styles.filterPanel}>
+              <View style={styles.transportFilterHeader}>
+                <Text style={styles.sectionLabel}>FILTROVAT PŘEPRAVY</Text>
+                {transportFiltersActive ? (
+                  <TouchableOpacity onPress={clearTransportFilters}>
+                    <Text style={styles.detailLink}>Vymazat</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+              <TextInput
+                style={styles.input}
+                value={transportFromFilter}
+                onChangeText={setTransportFromFilter}
+                placeholder="Odkud"
+                autoCapitalize="none"
+              />
+              <TextInput
+                style={styles.input}
+                value={transportToFilter}
+                onChangeText={setTransportToFilter}
+                placeholder="Kam"
+                autoCapitalize="none"
+              />
+              <Text style={styles.label}>Typ vozidla</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+                {["all", ...transportVehicleOptions].map((value) => (
+                  <TouchableOpacity key={value} style={[styles.chip, transportVehicleFilter === value && styles.chipActive]} onPress={() => setTransportVehicleFilter(value)}>
+                    <Text>{value === "all" ? "Vše" : value}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
+
           {(transportTab === "all" || transportTab === "requests") ? (
             <View>
               <View style={styles.transportSectionHeader}>
@@ -2043,7 +2125,7 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
                 <Text style={styles.transportCount}>{openRequestCards.length}</Text>
               </View>
               {openRequestCards.length === 0 ? (
-                <View style={styles.emptyPanel}><Text style={styles.emptyTitle}>Žádné otevřené poptávky</Text></View>
+                <View style={styles.emptyPanel}><Text style={styles.emptyTitle}>{transportFiltersActive ? "Žádné poptávky neodpovídají filtrům" : "Žádné otevřené poptávky"}</Text></View>
               ) : openRequestCards.map((item) => (
                 <TouchableOpacity key={item.id} style={styles.dispatchCard} onPress={() => { setActiveJobId(item.id); setRequestViewMode("provider"); setScreen("job"); }}>
                   <View style={styles.dispatchHeader}>
@@ -2079,12 +2161,12 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
                     <Text style={styles.secondaryText}>Zkusit znovu</Text>
                   </TouchableOpacity>
                 </View>
-              ) : routes.length === 0 ? (
+              ) : openCapacityCards.length === 0 ? (
                 <View style={styles.emptyPanel}>
-                  <Text style={styles.emptyTitle}>Žádné otevřené volné trasy</Text>
-                  <Text style={styles.emptyCopy}>Aktivní nabídky volné kapacity se zobrazí zde.</Text>
+                  <Text style={styles.emptyTitle}>{transportFiltersActive ? "Žádné trasy neodpovídají filtrům" : "Žádné otevřené volné trasy"}</Text>
+                  <Text style={styles.emptyCopy}>{transportFiltersActive ? "Upravte nebo vymažte filtry a zkuste to znovu." : "Aktivní nabídky volné kapacity se zobrazí zde."}</Text>
                 </View>
-              ) : routes.map((route) => (
+              ) : openCapacityCards.map((route) => (
                 <TouchableOpacity
                   key={route.id}
                   style={styles.dispatchCard}
@@ -2478,10 +2560,10 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
                     {[
                       ["Všechna vozidla", "all"],
-                      ["Osobní auto", "Osobní auto"],
+                      ["Osobní automobil", "Osobní automobil"],
                       ["SUV", "SUV"],
                       ["Dodávka", "Dodávka"],
-                      ["Motorka", "Motorka"],
+                      ["Motocykl", "Motocykl"],
                     ].map(([label, value]) => (
                       <TouchableOpacity key={value} style={[styles.chip, vehicleFilter === value && styles.chipActive]} onPress={() => setVehicleFilter(value)}>
                         <Text>{label}</Text>
@@ -3878,7 +3960,8 @@ const styles = StyleSheet.create({
   introLoginText: { color: DESIGN.colors.textPrimary, fontSize: 15, fontWeight: "700" },
   introSignup: { alignItems: "center", paddingVertical: 10 },
   introSignupText: { color: DESIGN.colors.primary, fontSize: 14, fontWeight: "700" },
-  header: { paddingHorizontal: DESIGN.spacing.xl, paddingTop: DESIGN.spacing.lg, paddingBottom: DESIGN.spacing.md, flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: DESIGN.colors.surface, borderBottomWidth: 1, borderBottomColor: DESIGN.colors.border },
+  headerSafeArea: { backgroundColor: DESIGN.colors.surface, paddingTop: Platform.OS === "android" ? NativeStatusBar.currentHeight || 0 : 0 },
+  header: { paddingHorizontal: DESIGN.spacing.xl, paddingTop: DESIGN.spacing.md, paddingBottom: DESIGN.spacing.md, flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: DESIGN.colors.surface, borderBottomWidth: 1, borderBottomColor: DESIGN.colors.border },
   logo: { fontSize: 12, fontWeight: "800", color: DESIGN.colors.primary, letterSpacing: 1.6 },
   headerTitle: { color: DESIGN.colors.textPrimary, fontSize: 24, fontWeight: "800", marginTop: DESIGN.spacing.xs },
   headerIconButton: { width: 32, height: 32, borderRadius: DESIGN.radius.medium, borderWidth: 1, borderColor: DESIGN.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: DESIGN.colors.surface },
@@ -3969,6 +4052,7 @@ const styles = StyleSheet.create({
   actionCard: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: DESIGN.radius.large, padding: DESIGN.spacing.lg, marginTop: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface, shadowColor: DESIGN.colors.primaryDark, shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
   actionTitle: { color: DESIGN.colors.textPrimary, fontSize: 15, fontWeight: "700" },
   transportSectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: DESIGN.spacing.lg, marginBottom: DESIGN.spacing.sm },
+  transportFilterHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: DESIGN.spacing.sm },
   transportCount: { color: DESIGN.colors.textSecondary, fontSize: 12, fontWeight: "800" },
   segmentedBar: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: DESIGN.colors.border, marginBottom: DESIGN.spacing.lg },
   segmentedItem: { paddingRight: DESIGN.spacing.lg, paddingVertical: DESIGN.spacing.sm, alignItems: "flex-start" },
@@ -3998,13 +4082,14 @@ const styles = StyleSheet.create({
   transportStatus: { color: DESIGN.colors.textPrimary, fontSize: 12, fontWeight: "800" },
   transportOfferCount: { color: DESIGN.colors.primary, fontSize: 12, fontWeight: "800", marginTop: 8, textTransform: "uppercase" },
   transportArrow: { color: DESIGN.colors.textSecondary, fontSize: 20, fontWeight: "800" },
-  bottomNav: { flexDirection: "row", alignItems: "center", justifyContent: "space-around", borderTopWidth: 1, borderTopColor: DESIGN.colors.border, paddingTop: 6, paddingBottom: 8, backgroundColor: DESIGN.colors.surface },
-  bottomNavItem: { flex: 1, alignItems: "center", gap: 1 },
-  bottomNavIcon: { color: DESIGN.colors.textSecondary, fontSize: 15, fontWeight: "700" },
-  bottomNavText: { color: DESIGN.colors.textSecondary, fontSize: 10, fontWeight: "600" },
+  bottomNavSafeArea: { backgroundColor: DESIGN.colors.surface, paddingBottom: 10 },
+  bottomNav: { minHeight: 80, flexDirection: "row", alignItems: "center", justifyContent: "space-around", borderTopWidth: 1, borderTopColor: DESIGN.colors.border, paddingTop: 8, paddingBottom: 10, backgroundColor: DESIGN.colors.surface },
+  bottomNavItem: { flex: 1, minHeight: 64, alignItems: "center", justifyContent: "center", gap: 4 },
+  bottomNavIcon: { color: DESIGN.colors.textSecondary, fontSize: 23, lineHeight: 27, fontWeight: "700" },
+  bottomNavText: { color: DESIGN.colors.textSecondary, fontSize: 13, lineHeight: 17, fontWeight: "600" },
   bottomNavTextActive: { color: DESIGN.colors.primary },
   bottomNavSos: { color: DESIGN.colors.danger },
-  bottomNavPlus: { width: 36, height: 36, borderRadius: 18, overflow: "hidden", backgroundColor: DESIGN.colors.primary, color: DESIGN.colors.surface, fontSize: 23, lineHeight: 32, textAlign: "center", marginBottom: -6 },
+  bottomNavPlus: { width: 42, height: 42, borderRadius: 21, overflow: "hidden", backgroundColor: DESIGN.colors.primary, color: DESIGN.colors.surface, fontSize: 27, lineHeight: 38, textAlign: "center", marginBottom: -2 },
   profileHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
   profileBack: { color: DESIGN.colors.textPrimary, fontSize: 16, fontWeight: "700" },
   profileHeaderIcon: { color: DESIGN.colors.primary, fontSize: 24 },
