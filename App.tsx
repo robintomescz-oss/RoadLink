@@ -129,6 +129,7 @@ type CarrierRoute = {
   toAddress: string;
   departureAt: string;
   availableSpaces: number;
+  maxDeviationKm: number | null;
   vehicleTypes: string;
   price: number | null;
   description: string;
@@ -272,6 +273,7 @@ export default function App() {
   const [routeTo, setRouteTo] = useState("");
   const [routeDeparture, setRouteDeparture] = useState("");
   const [routeSpaces, setRouteSpaces] = useState("1");
+  const [routeMaxDeviationKm, setRouteMaxDeviationKm] = useState("");
   const [routeVehicleTypes, setRouteVehicleTypes] = useState("Osobní auto");
   const [routePrice, setRoutePrice] = useState("");
   const [routePriceMode, setRoutePriceMode] = useState<"fixed" | "negotiable">("fixed");
@@ -581,6 +583,7 @@ export default function App() {
         toAddress: row.to_address || "Neuvedeno",
         departureAt: row.departure_at || "Neuvedeno",
         availableSpaces: row.available_spaces ?? 0,
+        maxDeviationKm: row.max_deviation_km ?? null,
         vehicleTypes: Array.isArray(row.vehicle_types)
           ? row.vehicle_types.join(", ")
           : row.vehicle_types || "Neuvedeno",
@@ -790,6 +793,13 @@ export default function App() {
   async function createRoute() {
     if (!userId) return;
 
+    const deviationText = routeMaxDeviationKm.trim();
+    const maxDeviationKm = deviationText === "" ? null : Number(deviationText);
+    if (maxDeviationKm !== null && (!/^\d+$/.test(deviationText) || !Number.isSafeInteger(maxDeviationKm) || maxDeviationKm < 0 || maxDeviationKm > 2147483647)) {
+      Alert.alert("Neplatná odchylka", "Zadejte celé nezáporné číslo v km (nejvýše 2147483647), nebo pole ponechte prázdné.");
+      return;
+    }
+
     const availableSpaces = Number(routeSpaces);
     const price = routePrice.trim() === "" ? null : Number(routePrice);
 
@@ -816,6 +826,7 @@ export default function App() {
       to_lng: toCoordinates?.longitude ?? null,
       departure_at: routeDeparture,
       available_spaces: availableSpaces,
+      max_deviation_km: maxDeviationKm,
       vehicle_types: [vehicleType],
       price: routePriceMode === "negotiable" ? null : price,
       description: routeDescription,
@@ -829,6 +840,7 @@ export default function App() {
     }
 
     await loadRoutes();
+    setRouteMaxDeviationKm("");
     Alert.alert("Trasa vytvořena", "Vaše nabídka volné trasy byla uložena.");
     setScreen("transport");
   }
@@ -2089,6 +2101,7 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
                   <View style={styles.dispatchFooter}>
                     <View>
                       <Text style={styles.dispatchMeta}>Odjezd: {carrierRouteDepartureLabel(route.departureAt)}</Text>
+                      {route.maxDeviationKm !== null ? <Text style={styles.dispatchMeta}>Max. odchylka {route.maxDeviationKm} km</Text> : null}
                       <Text style={styles.dispatchMeta}>{route.availableSpaces} {route.availableSpaces === 1 ? "volné místo" : route.availableSpaces >= 2 && route.availableSpaces <= 4 ? "volná místa" : "volných míst"}{route.price !== null ? ` · ${carrierRoutePriceLabel(route.price)}` : ""}</Text>
                     </View>
                     <Text style={styles.dispatchArrow}>→</Text>
@@ -2234,6 +2247,12 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
             </View>
             ) : null}
           </View>
+
+          {activeRoute.maxDeviationKm !== null ? (
+            <View style={styles.detailSectionFlat}>
+              <Text style={styles.detailValueStrong}>Max. odchylka {activeRoute.maxDeviationKm} km</Text>
+            </View>
+          ) : null}
 
           {activeRoute.description ? (
             <View style={styles.detailSectionFlat}>
@@ -3005,6 +3024,8 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
           <TextInput style={styles.input} value={routeDeparture} onChangeText={setRouteDeparture} placeholder="Např. 2026-09-04 14:00" />
           <Text style={styles.label}>Počet volných míst</Text>
           <TextInput style={styles.input} value={routeSpaces} onChangeText={setRouteSpaces} placeholder="Počet míst" keyboardType="numeric" />
+          <Text style={styles.label}>Maximální odchylka od trasy (volitelné) · km</Text>
+          <TextInput style={styles.input} value={routeMaxDeviationKm} onChangeText={setRouteMaxDeviationKm} placeholder="Odchylka v km" keyboardType="numeric" accessibilityLabel="Maximální odchylka od trasy v km" />
           <Text style={styles.label}>Typ vozidla</Text>
           <TextInput style={styles.input} value={routeVehicleTypes} onChangeText={setRouteVehicleTypes} placeholder="Typ vozidla" />
           <Text style={styles.label}>Cena</Text>
