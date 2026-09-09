@@ -41,6 +41,33 @@ type JobStatus =
 
 type PickupCoordinates = { latitude: number; longitude: number };
 
+function coordinatesFromValues(latitude: unknown, longitude: unknown): PickupCoordinates | null {
+  const parsedLatitude = Number(latitude);
+  const parsedLongitude = Number(longitude);
+
+  if (!Number.isFinite(parsedLatitude) || !Number.isFinite(parsedLongitude)) {
+    return null;
+  }
+
+  return { latitude: parsedLatitude, longitude: parsedLongitude };
+}
+
+async function geocodeAddress(address: string): Promise<PickupCoordinates | null> {
+  try {
+    const results = await Location.geocodeAsync(address);
+    const usableResult = results.find((result) =>
+      Number.isFinite(result.latitude) && Number.isFinite(result.longitude)
+    );
+
+    return usableResult
+      ? { latitude: usableResult.latitude, longitude: usableResult.longitude }
+      : null;
+  } catch (error) {
+    console.warn("Forward geocoding failed:", error);
+    return null;
+  }
+}
+
 type Job = {
   id: string;
   customerName: string;
@@ -49,6 +76,7 @@ type Job = {
   pickup: PickupCoordinates | null;
   pickupAddress?: string | null;
   destination: string;
+  destinationCoordinates?: PickupCoordinates | null;
   status: JobStatus;
   driverName?: string;
   timePreference?: TimePreference;
@@ -351,12 +379,10 @@ export default function App() {
       customerName: "Uživatel RoadLink",
       vehicle: row.vehicle_type || "Vozidlo",
       problem: row.problem_description || "Porucha",
-      pickup:
-        row.pickup_lat !== null && row.pickup_lat !== undefined && row.pickup_lng !== null && row.pickup_lng !== undefined
-          ? { latitude: row.pickup_lat, longitude: row.pickup_lng }
-          : null,
+      pickup: coordinatesFromValues(row.pickup_lat, row.pickup_lng),
       pickupAddress: row.pickup_address || null,
       destination: row.destination_address || "Servis dle domluvy",
+      destinationCoordinates: coordinatesFromValues(row.destination_lat, row.destination_lng),
       status: row.status,
       timePreference: row.time_preference || "asap",
       requestedDate: row.requested_date || null,
@@ -411,12 +437,10 @@ export default function App() {
         customerName: "Uživatel RoadLink",
         vehicle: row.vehicle_type || "Vozidlo",
         problem: row.problem_description || "Porucha",
-        pickup:
-          row.pickup_lat !== null && row.pickup_lat !== undefined && row.pickup_lng !== null && row.pickup_lng !== undefined
-            ? { latitude: row.pickup_lat, longitude: row.pickup_lng }
-            : null,
+        pickup: coordinatesFromValues(row.pickup_lat, row.pickup_lng),
         pickupAddress: row.pickup_address || null,
         destination: row.destination_address || "Servis dle domluvy",
+        destinationCoordinates: coordinatesFromValues(row.destination_lat, row.destination_lng),
         status: row.status,
         timePreference: row.time_preference || "asap",
         requestedDate: row.requested_date || null,
@@ -450,12 +474,10 @@ export default function App() {
       customerName: "Uživatel RoadLink",
       vehicle: row.vehicle_type || "Vozidlo",
       problem: row.problem_description || "Porucha",
-      pickup:
-        row.pickup_lat !== null && row.pickup_lat !== undefined && row.pickup_lng !== null && row.pickup_lng !== undefined
-          ? { latitude: row.pickup_lat, longitude: row.pickup_lng }
-          : null,
+      pickup: coordinatesFromValues(row.pickup_lat, row.pickup_lng),
       pickupAddress: row.pickup_address || null,
       destination: row.destination_address || "Servis dle domluvy",
+      destinationCoordinates: coordinatesFromValues(row.destination_lat, row.destination_lng),
       status: row.status,
       timePreference: row.time_preference || "asap",
       requestedDate: row.requested_date || null,
@@ -1425,15 +1447,21 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
 
   const trimmedPickupAddress = pickupText.trim();
   const trimmedDestination = destination.trim();
+  const [pickupCoordinates, destinationCoordinates] = await Promise.all([
+    geocodeAddress(trimmedPickupAddress),
+    geocodeAddress(trimmedDestination),
+  ]);
 
   const { data, error } = await supabase
     .from("tow_requests")
     .insert({
       customer_id: userId,
       pickup_address: trimmedPickupAddress,
-      pickup_lat: null,
-      pickup_lng: null,
+      pickup_lat: pickupCoordinates?.latitude ?? null,
+      pickup_lng: pickupCoordinates?.longitude ?? null,
       destination_address: trimmedDestination || "Servis dle domluvy",
+      destination_lat: destinationCoordinates?.latitude ?? null,
+      destination_lng: destinationCoordinates?.longitude ?? null,
       vehicle_type: vehicle,
       problem_description: problem,
       requested_date:
@@ -1465,13 +1493,12 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
     customerName: "Uživatel RoadLink",
     vehicle: data.vehicle_type || vehicle,
     problem: data.problem_description || problem,
-    pickup:
-      data.pickup_lat !== null && data.pickup_lat !== undefined && data.pickup_lng !== null && data.pickup_lng !== undefined
-        ? { latitude: data.pickup_lat, longitude: data.pickup_lng }
-        : null,
+    pickup: coordinatesFromValues(data.pickup_lat, data.pickup_lng) ?? pickupCoordinates,
     pickupAddress: data.pickup_address || trimmedPickupAddress,
     destination:
       data.destination_address || "Servis dle domluvy",
+    destinationCoordinates:
+      coordinatesFromValues(data.destination_lat, data.destination_lng) ?? destinationCoordinates,
     status: data.status,
     timePreference: data.time_preference || timePreference,
     requestedDate: data.requested_date || null,
