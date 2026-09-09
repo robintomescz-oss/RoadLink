@@ -1,0 +1,6 @@
+.env
+.expo/
+.idea/
+dist/
+node_modules/
+ROADLINK_TEST_CONTEXT.md
