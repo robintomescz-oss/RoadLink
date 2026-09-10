@@ -759,15 +759,15 @@ export default function App() {
     if (nextStatus === "completed" && activeJob.status !== "in_progress") return;
 
     setTransportStatusLoading(true);
-    const { error } = await supabase
-      .from("tow_requests")
-      .update({ status: nextStatus })
-      .eq("id", activeJobId)
-      .eq("status", activeJob.status);
+    const { error } = await supabase.rpc("advance_tow_request_status", {
+      p_tow_request_id: activeJobId,
+      p_expected_status: activeJob.status,
+      p_next_status: nextStatus,
+    });
 
     if (error) {
       console.error("Update transport status:", error.message);
-      Alert.alert("Chyba", "Stav přepravy se nepodařilo změnit.");
+      Alert.alert("Chyba", "Stav přepravy se nepodařilo změnit. Zkuste to prosím znovu.");
       setTransportStatusLoading(false);
       return;
     }
