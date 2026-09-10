@@ -118,6 +118,7 @@ function canonicalVehicleType(value: string | null | undefined): string {
 type Job = {
   id: string;
   customerName: string;
+  customerId?: string;
   vehicle: string;
   problem: string;
   pickup: PickupCoordinates | null;
@@ -466,6 +467,7 @@ export default function App() {
     return {
       id: row.id,
       customerName: "Uživatel RoadLink",
+      customerId: row.customer_id || undefined,
       vehicle: canonicalVehicleType(row.vehicle_type || "Vozidlo"),
       problem: row.problem_description || "Porucha",
       pickup: coordinatesFromValues(row.pickup_lat, row.pickup_lng),
@@ -876,6 +878,11 @@ export default function App() {
 
   async function submitOffer() {
     if (!userId || !activeJob || submittingOffer) return;
+
+    if (activeJob.customerId && activeJob.customerId === userId) {
+      Alert.alert("RoadLink", "Na vlastní poptávku nelze odeslat cenovou nabídku.");
+      return;
+    }
 
     const providerProfile = carrierProfile || await ensureCarrierProfile();
     if (!providerProfile) {
@@ -3766,10 +3773,16 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
             <Text style={styles.sectionLabel}>AKCE</Text>
             {activeJob.status === "open" ? (
               <>
-                <Text style={styles.detailMuted}>Pošlete zákazníkovi svou cenu a dostupné informace k příjezdu.</Text>
-                <TouchableOpacity style={styles.primary} onPress={() => setScreen("offerForm")}>
-                  <Text style={styles.primaryText}>NABÍDNOUT CENU</Text>
-                </TouchableOpacity>
+                {activeJob.customerId && activeJob.customerId === userId ? (
+                  <Text style={styles.detailMuted}>Na vlastní poptávku nelze odeslat cenovou nabídku.</Text>
+                ) : (
+                  <>
+                    <Text style={styles.detailMuted}>Pošlete zákazníkovi svou cenu a dostupné informace k příjezdu.</Text>
+                    <TouchableOpacity style={styles.primary} onPress={() => setScreen("offerForm")}>
+                      <Text style={styles.primaryText}>NABÍDNOUT CENU</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
               </>
             ) : (
               <>
