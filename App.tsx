@@ -163,6 +163,19 @@ type ProviderIdentity = {
   company_name: string | null;
 };
 
+type OfferProviderProfile = {
+  user_id: string;
+  display_name: string | null;
+  company_name: string | null;
+  business_type: string;
+  ico: string | null;
+  description: string | null;
+  service_area: string | null;
+  max_radius_km: number | null;
+  years_experience: number | null;
+  available_24_7: boolean;
+};
+
 type AcceptedJob = Job & {
   acceptedOffer: TowOffer;
 };
@@ -280,6 +293,10 @@ export default function App() {
   const [offersLoading, setOffersLoading] = useState(false);
   const [submittingOffer, setSubmittingOffer] = useState(false);
   const [selectingOfferId, setSelectingOfferId] = useState<string | null>(null);
+  const [selectedOfferId, setSelectedOfferId] = useState<string | null>(null);
+  const [selectedProviderProfile, setSelectedProviderProfile] = useState<OfferProviderProfile | null>(null);
+  const [providerProfileLoading, setProviderProfileLoading] = useState(false);
+  const [providerProfileError, setProviderProfileError] = useState(false);
   const [transportStatusLoading, setTransportStatusLoading] = useState(false);
  const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [interestSelectionVisible, setInterestSelectionVisible] = useState(false);
@@ -693,6 +710,36 @@ export default function App() {
     if (displayName) return displayName;
 
     return "Přepravce";
+  }
+
+  async function openProviderProfile(offer: TowOffer) {
+    if (providerProfileLoading) return;
+
+    setSelectedOfferId(offer.id);
+    setSelectedProviderProfile(null);
+    setProviderProfileError(false);
+    setProviderProfileLoading(true);
+
+    const { data, error } = await supabase.rpc("get_offer_provider_profile", {
+      p_offer_id: offer.id,
+    });
+
+    setProviderProfileLoading(false);
+
+    if (error) {
+      console.error("Load provider profile:", error.message);
+      setProviderProfileError(true);
+      setScreen("providerProfile");
+      return;
+    }
+
+    const rows = (data || []) as OfferProviderProfile[];
+    if (rows.length === 0) {
+      setSelectedProviderProfile(null);
+    } else {
+      setSelectedProviderProfile(rows[0]);
+    }
+    setScreen("providerProfile");
   }
 
   async function selectOffer(offerId: string) {
@@ -3499,6 +3546,9 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
                     <Text style={styles.primaryText}>{selectingOfferId === offer.id ? "Vybírám…" : "VYBRAT PŘEPRAVCE"}</Text>
                   </TouchableOpacity>
                 ) : null}
+                <TouchableOpacity style={styles.secondary} disabled={providerProfileLoading} onPress={() => openProviderProfile(offer)}>
+                  <Text style={styles.secondaryText}>{providerProfileLoading && selectedOfferId === offer.id ? "Načítám…" : "ZOBRAZIT PROFIL"}</Text>
+                </TouchableOpacity>
               </View>
             ))
           )}
@@ -3516,6 +3566,90 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
           <TouchableOpacity style={styles.secondary} onPress={() => { setTransportTab("mine"); setScreen("transport"); }}>
             <Text style={styles.secondaryText}>Zpět na moje poptávky</Text>
           </TouchableOpacity>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  if (screen === "providerProfile") {
+    const profileOffer = offers.find((offer) => offer.id === selectedOfferId) || null;
+    const profileName = selectedProviderProfile
+      ? (selectedProviderProfile.company_name?.trim() ||
+        selectedProviderProfile.display_name?.trim() ||
+        "Přepravce")
+      : "Přepravce";
+    return (
+      <SafeAreaView style={styles.container}>
+        <Header title="Profil přepravce" />
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.requestDetailContent} keyboardShouldPersistTaps="handled">
+          {providerProfileLoading ? (
+            <View style={styles.emptyPanel}><Text style={styles.emptyTitle}>Načítám profil přepravce…</Text></View>
+          ) : providerProfileError ? (
+            <View style={styles.emptyPanel}><Text style={styles.emptyTitle}>Profil přepravce se nepodařilo načíst.</Text></View>
+          ) : !selectedProviderProfile ? (
+            <View style={styles.emptyPanel}><Text style={styles.emptyTitle}>Profil přepravce zatím není k dispozici.</Text></View>
+          ) : (
+            <>
+              <View style={styles.detailSectionFlat}>
+                <Text style={styles.sectionLabel}>PŘEPRAVCE</Text>
+                <Text style={styles.detailValueStrong}>{profileName}</Text>
+              </View>
+              {selectedProviderProfile.business_type ? (
+                <View style={styles.detailSectionFlat}>
+                  <Text style={styles.sectionLabel}>TYP PŘEPRAVCE</Text>
+                  <Text style={styles.detailValue}>{selectedProviderProfile.business_type}</Text>
+                </View>
+              ) : null}
+              {selectedProviderProfile.ico?.trim() ? (
+                <View style={styles.detailSectionFlat}>
+                  <Text style={styles.sectionLabel}>IČO</Text>
+                  <Text style={styles.detailValue}>{selectedProviderProfile.ico}</Text>
+                </View>
+              ) : null}
+              {selectedProviderProfile.description?.trim() ? (
+                <View style={styles.detailSectionFlat}>
+                  <Text style={styles.sectionLabel}>O PŘEPRAVCI</Text>
+                  <Text style={styles.detailValue}>{selectedProviderProfile.description}</Text>
+                </View>
+              ) : null}
+              {selectedProviderProfile.service_area?.trim() ? (
+                <View style={styles.detailSectionFlat}>
+                  <Text style={styles.sectionLabel}>OBLAST PŮSOBNOSTI</Text>
+                  <Text style={styles.detailValue}>{selectedProviderProfile.service_area}</Text>
+                </View>
+              ) : null}
+              {selectedProviderProfile.max_radius_km !== null ? (
+                <View style={styles.detailSectionFlat}>
+                  <Text style={styles.sectionLabel}>MAXIMÁLNÍ DOJEZD</Text>
+                  <Text style={styles.detailValue}>{selectedProviderProfile.max_radius_km} km</Text>
+                </View>
+              ) : null}
+              {selectedProviderProfile.years_experience !== null ? (
+                <View style={styles.detailSectionFlat}>
+                  <Text style={styles.sectionLabel}>ZKUŠENOSTI</Text>
+                  <Text style={styles.detailValue}>{selectedProviderProfile.years_experience} let</Text>
+                </View>
+              ) : null}
+              {selectedProviderProfile.available_24_7 ? (
+                <View style={styles.detailSectionFlat}>
+                  <Text style={styles.sectionLabel}>DOSTUPNOST</Text>
+                  <Text style={styles.detailValue}>24/7</Text>
+                </View>
+              ) : null}
+              <View style={styles.detailSectionFlat}>
+                <Text style={styles.sectionLabel}>KONTAKT</Text>
+                <Text style={styles.detailMuted}>Kontaktní údaje zatím nejsou v RoadLink veřejně dostupné.</Text>
+              </View>
+            </>
+          )}
+          <TouchableOpacity style={styles.secondary} onPress={() => setScreen("job")}>
+            <Text style={styles.secondaryText}>ZPĚT K NABÍDCE</Text>
+          </TouchableOpacity>
+          {profileOffer && activeJob && activeJob.status === "open" && profileOffer.status === "pending" ? (
+            <TouchableOpacity style={styles.primary} disabled={selectingOfferId !== null} onPress={() => confirmSelectOffer(profileOffer)}>
+              <Text style={styles.primaryText}>{selectingOfferId === profileOffer.id ? "Vybírám…" : "VYBRAT PŘEPRAVCE"}</Text>
+            </TouchableOpacity>
+          ) : null}
         </ScrollView>
       </SafeAreaView>
     );
