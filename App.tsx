@@ -278,6 +278,7 @@ export default function App() {
   const [offers, setOffers] = useState<TowOffer[]>([]);
   const [providerIdentities, setProviderIdentities] = useState<Record<string, ProviderIdentity>>({});
   const [offersLoading, setOffersLoading] = useState(false);
+  const [submittingOffer, setSubmittingOffer] = useState(false);
   const [selectingOfferId, setSelectingOfferId] = useState<string | null>(null);
   const [transportStatusLoading, setTransportStatusLoading] = useState(false);
  const [activeJobId, setActiveJobId] = useState<string | null>(null);
@@ -806,7 +807,7 @@ export default function App() {
   }
 
   async function submitOffer() {
-    if (!userId || !activeJob) return;
+    if (!userId || !activeJob || submittingOffer) return;
 
     const providerProfile = carrierProfile || await ensureCarrierProfile();
     if (!providerProfile) {
@@ -844,27 +845,39 @@ export default function App() {
       return;
     }
 
-    const { error } = await supabase.from("tow_offers").insert({
-      tow_request_id: activeJob.id,
-      driver_id: userId,
-      price,
-      estimated_arrival_at: offerArrivalDateTime.toISOString(),
-      message: offerMessage,
-      status: "pending",
-    });
+    setSubmittingOffer(true);
+    try {
+      const { error } = await supabase.from("tow_offers").insert({
+        tow_request_id: activeJob.id,
+        driver_id: userId,
+        price,
+        estimated_arrival_at: offerArrivalDateTime.toISOString(),
+        message: offerMessage,
+        status: "pending",
+      });
 
-    if (error) {
-      console.error("Create tow offer:", error.message);
-      Alert.alert("Chyba", "Nabídku se nepodařilo uložit.");
-      return;
+      if (error) {
+        console.error("Create tow offer:", error.message);
+        if ((error as { code?: string }).code === "23505") {
+          Alert.alert(
+            "Nabídka již existuje",
+            "Pro tuto poptávku už máte aktivní cenovou nabídku. Nejprve vyčkejte na její vyřízení."
+          );
+        } else {
+          Alert.alert("Chyba", "Nabídku se nepodařilo odeslat. Zkuste to prosím znovu.");
+        }
+        return;
+      }
+
+      Alert.alert("Nabídka odeslána", "Zadavatel poptávky nyní může vaši nabídku vybrat.");
+      setOfferPrice("");
+      setOfferArrivalDate(null);
+      setOfferArrivalTime(null);
+      setOfferMessage("");
+      setScreen("transport");
+    } finally {
+      setSubmittingOffer(false);
     }
-
-    Alert.alert("Nabídka odeslána", "Zadavatel poptávky nyní může vaši nabídku vybrat.");
-    setOfferPrice("");
-    setOfferArrivalDate(null);
-    setOfferArrivalTime(null);
-    setOfferMessage("");
-    setScreen("transport");
   }
 
   async function createRoute() {
@@ -3286,8 +3299,8 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
           ) : null}
           <Text style={styles.label}>Zpráva</Text>
           <TextInput style={styles.input} value={offerMessage} onChangeText={setOfferMessage} placeholder="Doplňující informace" multiline />
-          <TouchableOpacity style={styles.primary} onPress={submitOffer}>
-            <Text style={styles.primaryText}>Odeslat nabídku</Text>
+          <TouchableOpacity style={styles.primary} onPress={submitOffer} disabled={submittingOffer}>
+            <Text style={styles.primaryText}>{submittingOffer ? "ODESÍLÁM…" : "Odeslat nabídku"}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.secondary} onPress={() => setScreen("job")}>
             <Text style={styles.secondaryText}>Zpět na poptávku</Text>
