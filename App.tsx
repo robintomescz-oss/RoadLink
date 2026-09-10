@@ -266,6 +266,9 @@ export default function App() {
   const [routesLoading, setRoutesLoading] = useState(false);
   const [routesError, setRoutesError] = useState(false);
   const [activeRouteId, setActiveRouteId] = useState<string | null>(null);
+  const [routeInterestedRequests, setRouteInterestedRequests] = useState<Job[]>([]);
+  const [routeInterestsLoading, setRouteInterestsLoading] = useState(false);
+  const [routeInterestsError, setRouteInterestsError] = useState(false);
   const [offers, setOffers] = useState<TowOffer[]>([]);
   const [offersLoading, setOffersLoading] = useState(false);
   const [selectingOfferId, setSelectingOfferId] = useState<string | null>(null);
@@ -367,6 +370,8 @@ export default function App() {
     setOfferCounts({});
     setRoutes([]);
     setActiveRouteId(null);
+    setRouteInterestedRequests([]);
+    setRouteInterestsError(false);
     setOffers([]);
     setVehicles([]);
     setActiveJobId(null);
@@ -424,19 +429,8 @@ export default function App() {
     null;
   const activeRoute = routes.find((route) => route.id === activeRouteId) || null;
 
-  async function loadJobs() {
-    const { data, error } = await supabase
-      .from("tow_requests")
-      .select("*")
-      .eq("status", "open")
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.error("Load jobs:", error.message);
-      return;
-    }
-
-    const mapped: Job[] = (data || []).map((row) => ({
+  function mapTowRequestRow(row: any): Job {
+    return {
       id: row.id,
       customerName: "Uživatel RoadLink",
       vehicle: canonicalVehicleType(row.vehicle_type || "Vozidlo"),
@@ -451,7 +445,22 @@ export default function App() {
       requestedTime: row.requested_time || null,
       vehicleMobility: row.vehicle_mobility || "unknown",
       createdAt: row.created_at || "",
-    }));
+    };
+  }
+
+  async function loadJobs() {
+    const { data, error } = await supabase
+      .from("tow_requests")
+      .select("*")
+      .eq("status", "open")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Load jobs:", error.message);
+      return;
+    }
+
+    const mapped: Job[] = (data || []).map(mapTowRequestRow);
 
     setJobs(mapped);
   }
@@ -494,23 +503,7 @@ export default function App() {
       const acceptedOffer = offerRows.find((offer) => offer.tow_request_id === row.id);
       if (!acceptedOffer) return [];
 
-      return [{
-        id: row.id,
-        customerName: "Uživatel RoadLink",
-        vehicle: canonicalVehicleType(row.vehicle_type || "Vozidlo"),
-        problem: row.problem_description || "Porucha",
-        pickup: coordinatesFromValues(row.pickup_lat, row.pickup_lng),
-        pickupAddress: row.pickup_address || null,
-        destination: row.destination_address || "Servis dle domluvy",
-        destinationCoordinates: coordinatesFromValues(row.destination_lat, row.destination_lng),
-        status: row.status,
-        timePreference: row.time_preference || "asap",
-        requestedDate: row.requested_date || null,
-        requestedTime: row.requested_time || null,
-        vehicleMobility: row.vehicle_mobility || "unknown",
-        createdAt: row.created_at || "",
-        acceptedOffer,
-      }];
+      return [{ ...mapTowRequestRow(row), acceptedOffer }];
     });
 
     setAcceptedJobs(accepted);
@@ -531,22 +524,7 @@ export default function App() {
       return;
     }
 
-    const mapped: Job[] = (data || []).map((row) => ({
-      id: row.id,
-      customerName: "Uživatel RoadLink",
-      vehicle: canonicalVehicleType(row.vehicle_type || "Vozidlo"),
-      problem: row.problem_description || "Porucha",
-      pickup: coordinatesFromValues(row.pickup_lat, row.pickup_lng),
-      pickupAddress: row.pickup_address || null,
-      destination: row.destination_address || "Servis dle domluvy",
-      destinationCoordinates: coordinatesFromValues(row.destination_lat, row.destination_lng),
-      status: row.status,
-      timePreference: row.time_preference || "asap",
-      requestedDate: row.requested_date || null,
-      requestedTime: row.requested_time || null,
-      vehicleMobility: row.vehicle_mobility || "unknown",
-      createdAt: row.created_at || "",
-    }));
+    const mapped: Job[] = (data || []).map(mapTowRequestRow);
 
     setCustomerRequests(mapped);
 
@@ -610,6 +588,47 @@ export default function App() {
         status: row.status || "open",
       }))
     );
+  }
+
+  async function loadRouteInterestedRequests(routeId: string) {
+    setRouteInterestsLoading(true);
+    setRouteInterestsError(false);
+
+    const { data: interestRows, error: interestsError } = await supabase
+      .from("carrier_route_interests")
+      .select("tow_request_id")
+      .eq("carrier_route_id", routeId);
+
+    if (interestsError) {
+      console.error("Load route interests:", interestsError.message);
+      setRouteInterestedRequests([]);
+      setRouteInterestsError(true);
+      setRouteInterestsLoading(false);
+      return;
+    }
+
+    const requestIds = Array.from(new Set((interestRows || []).map((row) => row.tow_request_id).filter(Boolean)));
+    if (requestIds.length === 0) {
+      setRouteInterestedRequests([]);
+      setRouteInterestsLoading(false);
+      return;
+    }
+
+    const { data: requestRows, error: requestsError } = await supabase
+      .from("tow_requests")
+      .select("*")
+      .in("id", requestIds);
+
+    if (requestsError) {
+      console.error("Load interested requests:", requestsError.message);
+      setRouteInterestedRequests([]);
+      setRouteInterestsError(true);
+      setRouteInterestsLoading(false);
+      return;
+    }
+
+    setRouteInterestedRequests((requestRows || []).filter((row) => row.status === "open").map(mapTowRequestRow));
+    setRouteInterestsLoading(false);
   }
 
   async function loadOffers() {
@@ -909,6 +928,27 @@ export default function App() {
     Alert.alert("RoadLink", "Zájem byl odeslán.");
     setInterestSelectionVisible(false);
   }
+
+  function openInterestedRequest(request: Job) {
+    setJobs((current) =>
+      current.some((job) => job.id === request.id)
+        ? current.map((job) => job.id === request.id ? request : job)
+        : [...current, request]
+    );
+    setActiveJobId(request.id);
+    setRequestViewMode("provider");
+    setScreen("job");
+  }
+
+  useEffect(() => {
+    if (screen === "routeDetail" && activeRouteId && activeRoute?.driverId === userId) {
+      loadRouteInterestedRequests(activeRouteId);
+    } else {
+      setRouteInterestedRequests([]);
+      setRouteInterestsError(false);
+      setRouteInterestsLoading(false);
+    }
+  }, [screen, activeRouteId, activeRoute?.driverId, userId]);
 
   useEffect(() => {
     if (role === "driver" && screen === "driverHome" && userId) {
@@ -2427,6 +2467,35 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
                 <View style={styles.detailSectionFlat}>
                   <Text style={styles.sectionLabel}>POZNÁMKA</Text>
                   <Text style={styles.detailMuted}>{activeRoute.description}</Text>
+                </View>
+              ) : null}
+
+              {activeRoute.driverId === userId ? (
+                <View style={styles.detailSectionFlat}>
+                  <Text style={styles.sectionLabel}>PROJEVENÝ ZÁJEM</Text>
+                  {routeInterestsLoading ? (
+                    <Text style={styles.detailMuted}>Načítám projevený zájem…</Text>
+                  ) : routeInterestsError ? (
+                    <Text style={styles.detailMuted}>Projevený zájem se nepodařilo načíst. Zkuste to prosím znovu.</Text>
+                  ) : routeInterestedRequests.length === 0 ? (
+                    <Text style={styles.detailMuted}>Zatím žádná poptávka neprojevila zájem o tuto kapacitu.</Text>
+                  ) : routeInterestedRequests.map((item) => (
+                    <TouchableOpacity key={item.id} style={styles.dispatchCard} onPress={() => openInterestedRequest(item)}>
+                      <View style={styles.dispatchHeader}>
+                        <Text style={styles.dispatchLabel}>POPTÁVKA</Text>
+                        <Text style={styles.statusPill}>{transportStatusLabel(item.status)}</Text>
+                      </View>
+                      <Text style={styles.dispatchVehicle}>{item.vehicle}</Text>
+                      <Text style={styles.routeLine}>{routeDisplayLabel(item)}</Text>
+                      <View style={styles.dispatchFooter}>
+                        <View>
+                          <Text style={styles.dispatchMeta}>{requestTimingLabel(item)}</Text>
+                          <Text style={styles.dispatchMeta}>{vehicleMobilityLabel(item.vehicleMobility)}</Text>
+                        </View>
+                        <Text style={styles.dispatchArrow}>→</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
                 </View>
               ) : null}
 
