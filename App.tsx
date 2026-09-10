@@ -134,6 +134,7 @@ type Job = {
 
 type CarrierRoute = {
   id: string;
+  driverId?: string;
   fromAddress: string;
   toAddress: string;
   departureAt: string;
@@ -270,6 +271,8 @@ export default function App() {
   const [selectingOfferId, setSelectingOfferId] = useState<string | null>(null);
   const [transportStatusLoading, setTransportStatusLoading] = useState(false);
  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [interestSelectionVisible, setInterestSelectionVisible] = useState(false);
+  const [interestSubmitting, setInterestSubmitting] = useState(false);
  const [requestViewMode, setRequestViewMode] = useState<RequestViewMode>("owner");
  const [userId, setUserId] = useState<string | null>(null);
   const [offerPrice, setOfferPrice] = useState("");
@@ -371,6 +374,8 @@ export default function App() {
     setCarrierProfileEditing(false);
     setVehicleEditing(false);
     setEditingVehicleId(null);
+    setInterestSelectionVisible(false);
+    setInterestSubmitting(false);
   }
 
   useEffect(() => {
@@ -547,7 +552,7 @@ export default function App() {
 
     if (mapped.length === 0) {
       setOfferCounts({});
-      return;
+      return mapped;
     }
 
     const { data: offerRows, error: offersError } = await supabase
@@ -591,6 +596,7 @@ export default function App() {
     setRoutes(
       (data || []).map((row) => ({
         id: row.id,
+        driverId: row.driver_id,
         fromAddress: row.from_address || "Neuvedeno",
         toAddress: row.to_address || "Neuvedeno",
         departureAt: row.departure_at || "Neuvedeno",
@@ -855,6 +861,53 @@ export default function App() {
     setRouteMaxDeviationKm("");
     Alert.alert("Trasa vytvořena", "Vaše nabídka volné trasy byla uložena.");
     setScreen("transport");
+  }
+
+  async function handleInterestPress() {
+    if (!userId) return;
+    const requests = await loadCustomerRequests();
+    if (!requests) {
+      Alert.alert("Chyba", "Nepodařilo se načíst vaše poptávky. Zkuste to prosím znovu.");
+      return;
+    }
+    const openRequests = requests.filter((req) => req.status === "open");
+    if (openRequests.length === 0) {
+      Alert.alert(
+        "Žádná poptávka",
+        "Nejdřív vytvořte poptávku přepravy.",
+        [
+          { text: "Zrušit", style: "cancel" },
+          { text: "Vytvořit poptávku", onPress: () => openRequestFlow() },
+        ]
+      );
+    } else {
+      setInterestSelectionVisible(true);
+    }
+  }
+
+  async function submitInterest(requestId: string) {
+    if (!activeRouteId || !userId || interestSubmitting) return;
+
+    setInterestSubmitting(true);
+    const { error } = await supabase.from("carrier_route_interests").insert({
+      carrier_route_id: activeRouteId,
+      tow_request_id: requestId,
+    });
+
+    setInterestSubmitting(false);
+
+    if (error) {
+      if (error.code === "23505") {
+        Alert.alert("RoadLink", "Zájem o tuto volnou kapacitu už byl odeslán.");
+      } else {
+        console.error("Submit interest error:", error.message);
+        Alert.alert("Chyba", "Zájem se nepodařilo odeslat.");
+      }
+      return;
+    }
+
+    Alert.alert("RoadLink", "Zájem byl odeslán.");
+    setInterestSelectionVisible(false);
   }
 
   useEffect(() => {
@@ -2288,64 +2341,106 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
       );
     }
 
+    const openRequestsForInterest = customerRequests.filter((r) => r.status === "open");
+
     return (
       <SafeAreaView style={styles.container}>
-        <Header title="Volná kapacita" />
+        <Header title={interestSelectionVisible ? "Vybrat poptávku" : "Volná kapacita"} />
         <ScrollView style={styles.scroll} contentContainerStyle={styles.requestDetailContent} keyboardShouldPersistTaps="handled">
-          <View style={styles.detailTopRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.sectionLabel}>VOLNÁ KAPACITA</Text>
-              <Text style={styles.detailHeroTitle}>{activeRoute.fromAddress} → {activeRoute.toAddress}</Text>
+          {interestSelectionVisible ? (
+            <View>
+              <Text style={styles.bigTitle}>Vyberte vaši poptávku</Text>
+              <Text style={styles.customerDescription}>Kterou poptávku chcete k této trase připojit?</Text>
+              {openRequestsForInterest.map((item) => (
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.dispatchCard}
+                  onPress={() => submitInterest(item.id)}
+                  disabled={interestSubmitting}
+                >
+                  <View style={styles.dispatchHeader}>
+                    <Text style={styles.dispatchLabel}>MOJE POPTÁVKA</Text>
+                  </View>
+                  <Text style={styles.dispatchVehicle}>{item.vehicle}</Text>
+                  <Text style={styles.routeLine}>{routeDisplayLabel(item)}</Text>
+                  <View style={styles.dispatchFooter}>
+                    <Text style={styles.dispatchMeta}>{requestTimingLabel(item)}</Text>
+                    <Text style={styles.dispatchArrow}>→</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+              <TouchableOpacity
+                style={styles.secondary}
+                onPress={() => setInterestSelectionVisible(false)}
+                disabled={interestSubmitting}
+              >
+                <Text style={styles.secondaryText}>Zrušit</Text>
+              </TouchableOpacity>
             </View>
-          </View>
+          ) : (
+            <>
+              <View style={styles.detailTopRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.sectionLabel}>VOLNÁ KAPACITA</Text>
+                  <Text style={styles.detailHeroTitle}>{activeRoute.fromAddress} → {activeRoute.toAddress}</Text>
+                </View>
+              </View>
 
-          <View style={styles.detailSectionFlat}>
-            <Text style={styles.sectionLabel}>TRASA</Text>
-            <Text style={styles.routeEndpoint}>{activeRoute.fromAddress}</Text>
-            <Text style={styles.routeArrowDown}>↓</Text>
-            <Text style={styles.routeEndpoint}>{activeRoute.toAddress}</Text>
-          </View>
+              <View style={styles.detailSectionFlat}>
+                <Text style={styles.sectionLabel}>TRASA</Text>
+                <Text style={styles.routeEndpoint}>{activeRoute.fromAddress}</Text>
+                <Text style={styles.routeArrowDown}>↓</Text>
+                <Text style={styles.routeEndpoint}>{activeRoute.toAddress}</Text>
+              </View>
 
-          <View style={styles.detailTwoColumnRow}>
-            <View style={styles.detailMiniSection}>
-              <Text style={styles.sectionLabel}>ODJEZD</Text>
-              <Text style={styles.detailValueStrong}>{carrierRouteDepartureLabel(activeRoute.departureAt)}</Text>
-            </View>
-            <View style={styles.detailMiniSection}>
-              <Text style={styles.sectionLabel}>KAPACITA</Text>
-              <Text style={styles.detailValueStrong}>{activeRoute.availableSpaces} {activeRoute.availableSpaces === 1 ? "volné místo" : activeRoute.availableSpaces >= 2 && activeRoute.availableSpaces <= 4 ? "volná místa" : "volných míst"}</Text>
-            </View>
-          </View>
+              <View style={styles.detailTwoColumnRow}>
+                <View style={styles.detailMiniSection}>
+                  <Text style={styles.sectionLabel}>ODJEZD</Text>
+                  <Text style={styles.detailValueStrong}>{carrierRouteDepartureLabel(activeRoute.departureAt)}</Text>
+                </View>
+                <View style={styles.detailMiniSection}>
+                  <Text style={styles.sectionLabel}>KAPACITA</Text>
+                  <Text style={styles.detailValueStrong}>{activeRoute.availableSpaces} {activeRoute.availableSpaces === 1 ? "volné místo" : activeRoute.availableSpaces >= 2 && activeRoute.availableSpaces <= 4 ? "volná místa" : "volných míst"}</Text>
+                </View>
+              </View>
 
-          <View style={styles.detailTwoColumnRow}>
-            <View style={styles.detailMiniSection}>
-              <Text style={styles.sectionLabel}>VOZIDLO</Text>
-              <Text style={styles.detailValueStrong}>{activeRoute.vehicleTypes}</Text>
-            </View>
-            {activeRoute.price !== null ? (
-            <View style={styles.detailMiniSection}>
-              <Text style={styles.sectionLabel}>CENA</Text>
-              <Text style={styles.detailValueStrong}>{carrierRoutePriceLabel(activeRoute.price)}</Text>
-            </View>
-            ) : null}
-          </View>
+              <View style={styles.detailTwoColumnRow}>
+                <View style={styles.detailMiniSection}>
+                  <Text style={styles.sectionLabel}>VOZIDLO</Text>
+                  <Text style={styles.detailValueStrong}>{activeRoute.vehicleTypes}</Text>
+                </View>
+                {activeRoute.price !== null ? (
+                  <View style={styles.detailMiniSection}>
+                    <Text style={styles.sectionLabel}>CENA</Text>
+                    <Text style={styles.detailValueStrong}>{carrierRoutePriceLabel(activeRoute.price)}</Text>
+                  </View>
+                ) : null}
+              </View>
 
-          {activeRoute.maxDeviationKm !== null ? (
-            <View style={styles.detailSectionFlat}>
-              <Text style={styles.detailValueStrong}>Max. odchylka {activeRoute.maxDeviationKm} km</Text>
-            </View>
-          ) : null}
+              {activeRoute.maxDeviationKm !== null ? (
+                <View style={styles.detailSectionFlat}>
+                  <Text style={styles.detailValueStrong}>Max. odchylka {activeRoute.maxDeviationKm} km</Text>
+                </View>
+              ) : null}
 
-          {activeRoute.description ? (
-            <View style={styles.detailSectionFlat}>
-              <Text style={styles.sectionLabel}>POZNÁMKA</Text>
-              <Text style={styles.detailMuted}>{activeRoute.description}</Text>
-            </View>
-          ) : null}
+              {activeRoute.description ? (
+                <View style={styles.detailSectionFlat}>
+                  <Text style={styles.sectionLabel}>POZNÁMKA</Text>
+                  <Text style={styles.detailMuted}>{activeRoute.description}</Text>
+                </View>
+              ) : null}
 
-          <TouchableOpacity style={styles.secondary} onPress={() => { setTransportTab("capacity"); setScreen("transport"); }}>
-            <Text style={styles.secondaryText}>Zpět na volné kapacity</Text>
-          </TouchableOpacity>
+              {activeRoute.driverId !== userId && (
+                <TouchableOpacity style={styles.primary} onPress={handleInterestPress}>
+                  <Text style={styles.primaryText}>MÁM ZÁJEM O PŘEPRAVU</Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity style={styles.secondary} onPress={() => { setTransportTab("capacity"); setScreen("transport"); }}>
+                <Text style={styles.secondaryText}>Zpět na volné kapacity</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </ScrollView>
         <BottomNavigation />
       </SafeAreaView>
