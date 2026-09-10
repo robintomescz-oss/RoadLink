@@ -3,6 +3,7 @@ import {
   Alert,
   FlatList,
   Image,
+  Linking,
   Platform,
   SafeAreaView,
   ScrollView,
@@ -174,6 +175,8 @@ type OfferProviderProfile = {
   max_radius_km: number | null;
   years_experience: number | null;
   available_24_7: boolean;
+  public_phone: string | null;
+  public_email: string | null;
 };
 
 type AcceptedJob = Job & {
@@ -203,6 +206,8 @@ type CarrierProfile = {
   available_24_7: boolean | null;
   phone_public: boolean | null;
   email_public: boolean | null;
+  public_phone: string | null;
+  public_email: string | null;
   status: string | null;
 };
 
@@ -355,6 +360,8 @@ export default function App() {
   const [carrierAvailable247, setCarrierAvailable247] = useState(false);
   const [carrierPhonePublic, setCarrierPhonePublic] = useState<boolean>(true);
   const [carrierEmailPublic, setCarrierEmailPublic] = useState<boolean>(false);
+  const [carrierPublicPhone, setCarrierPublicPhone] = useState("");
+  const [carrierPublicEmail, setCarrierPublicEmail] = useState("");
   const [verificationStatus, setVerificationStatus] = useState<string | null>(null);
   const [insuranceStatus, setInsuranceStatus] = useState<string | null>(null);
   const [vehicles, setVehicles] = useState<CarrierVehicle[]>([]);
@@ -710,6 +717,20 @@ export default function App() {
     if (displayName) return displayName;
 
     return "Přepravce";
+  }
+
+  async function openContactUrl(url: string, failureMessage: string) {
+    try {
+      const supported = await Linking.canOpenURL(url);
+      if (!supported) {
+        Alert.alert("Chyba", failureMessage);
+        return;
+      }
+      await Linking.openURL(url);
+    } catch (e) {
+      console.error("Open contact URL:", e);
+      Alert.alert("Chyba", failureMessage);
+    }
   }
 
   async function openProviderProfile(offer: TowOffer) {
@@ -1310,6 +1331,8 @@ export default function App() {
     setCarrierAvailable247(loadedProfile.available_24_7 || false);
 setCarrierPhonePublic(loadedProfile.phone_public ?? true);
 setCarrierEmailPublic(loadedProfile.email_public ?? false);
+setCarrierPublicPhone(loadedProfile.public_phone || "");
+setCarrierPublicEmail(loadedProfile.public_email || "");
 
 const [{ data: verification }, { data: insurance }] = await Promise.all([
   supabase
@@ -1537,6 +1560,13 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
     }
 
     setCarrierProfileLoading(true);
+    const publicPhone = carrierPublicPhone.trim() || null;
+    const publicEmail = carrierPublicEmail.trim().toLowerCase() || null;
+    if (publicEmail !== null && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(publicEmail)) {
+      Alert.alert("Chyba", "Zadejte platnou e-mailovou adresu.");
+      setCarrierProfileLoading(false);
+      return;
+    }
     const { data, error } = await supabase
       .from("carrier_profiles")
       .update({
@@ -1551,6 +1581,8 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
         available_24_7: carrierAvailable247,
         phone_public: carrierPhonePublic,
         email_public: carrierEmailPublic,
+        public_phone: publicPhone,
+        public_email: publicEmail,
       })
       .eq("user_id", userId)
       .select("*")
@@ -3056,6 +3088,12 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
                         <Text>Ne</Text>
                       </TouchableOpacity>
                     </View>
+                    <Text style={styles.label}>Kontakt pro zákazníky</Text>
+                    <Text style={styles.detailMuted}>Tyto údaje se zobrazí zákazníkům, kterým odešlete cenovou nabídku.</Text>
+                    <Text style={styles.label}>Telefon</Text>
+                    <TextInput style={styles.input} value={carrierPublicPhone} onChangeText={setCarrierPublicPhone} placeholder="+420 777 123 456" keyboardType="phone-pad" />
+                    <Text style={styles.label}>E-mail</Text>
+                    <TextInput style={styles.input} value={carrierPublicEmail} onChangeText={setCarrierPublicEmail} placeholder="napriklad@dopravce.cz" keyboardType="email-address" autoCapitalize="none" />
                     <TouchableOpacity style={styles.primary} onPress={saveCarrierProfile} disabled={carrierProfileLoading}>
                       <Text style={styles.primaryText}>{carrierProfileLoading ? "Ukládám..." : "Uložit přepravní profil"}</Text>
                     </TouchableOpacity>
@@ -3082,9 +3120,9 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
                     <Text style={styles.profileFieldLabel}>Dostupnost 24/7</Text>
                     <Text style={styles.profileFieldValue}>{carrierProfile.available_24_7 ? "Ano" : "Ne"}</Text>
                     <Text style={styles.profileFieldLabel}>Veřejný telefon</Text>
-                    <Text style={styles.profileFieldValue}>{carrierProfile.phone_public || "Neuvedeno"}</Text>
+                    <Text style={styles.profileFieldValue}>{carrierProfile.public_phone || "Neuvedeno"}</Text>
                     <Text style={styles.profileFieldLabel}>Veřejný e-mail</Text>
-                    <Text style={styles.profileFieldValue}>{carrierProfile.email_public || "Neuvedeno"}</Text>
+                    <Text style={styles.profileFieldValue}>{carrierProfile.public_email || "Neuvedeno"}</Text>
                     <Text style={styles.profileFieldLabel}>Stav profilu</Text>
                     <Text style={styles.profileFieldValue}>{carrierProfile.status || "Neuvedeno"}</Text>
                     <TouchableOpacity style={styles.primary} onPress={() => setCarrierProfileEditing(true)}>
@@ -3638,7 +3676,25 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
               ) : null}
               <View style={styles.detailSectionFlat}>
                 <Text style={styles.sectionLabel}>KONTAKT</Text>
-                <Text style={styles.detailMuted}>Kontaktní údaje zatím nejsou v RoadLink veřejně dostupné.</Text>
+                {selectedProviderProfile.public_phone?.trim() ? (
+                  <>
+                    <Text style={styles.detailValue}>{selectedProviderProfile.public_phone}</Text>
+                    <TouchableOpacity style={styles.primary} onPress={() => openContactUrl(`tel:${selectedProviderProfile.public_phone}`, "Telefon se nepodařilo otevřít.")}>
+                      <Text style={styles.primaryText}>ZAVOLAT</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : null}
+                {selectedProviderProfile.public_email?.trim() ? (
+                  <>
+                    <Text style={styles.detailValue}>{selectedProviderProfile.public_email}</Text>
+                    <TouchableOpacity style={styles.primary} onPress={() => openContactUrl(`mailto:${selectedProviderProfile.public_email}`, "E-mailovou aplikaci se nepodařilo otevřít.")}>
+                      <Text style={styles.primaryText}>NAPSAT E-MAIL</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : null}
+                {!selectedProviderProfile.public_phone?.trim() && !selectedProviderProfile.public_email?.trim() ? (
+                  <Text style={styles.detailMuted}>Kontaktní údaje nejsou zveřejněny.</Text>
+                ) : null}
               </View>
             </>
           )}
