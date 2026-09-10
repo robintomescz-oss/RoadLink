@@ -129,8 +129,11 @@ type Job = {
   driverName?: string;
   timePreference?: TimePreference;
   requestedDate?: string | null;
+  requestedEndDate?: string | null;
   requestedTime?: string | null;
   vehicleMobility?: VehicleMobility;
+  vehicleModel?: string | null;
+  canTrailer?: boolean | null;
   createdAt?: string;
 };
 
@@ -272,11 +275,14 @@ export default function App() {
   const [problem, setProblem] = useState("Porucha");
   const [timePreference, setTimePreference] = useState<TimePreference>("asap");
   const [requestedDate, setRequestedDate] = useState<Date | null>(null);
-  const [requestedTime, setRequestedTime] = useState<Date | null>(null);
+  const [requestedEndDate, setRequestedEndDate] = useState<Date | null>(null);
+  const [dateMode, setDateMode] = useState<"concrete" | "window">("concrete");
   const [vehicleMobility, setVehicleMobility] = useState<VehicleMobility>("drivable");
+  const [requestVehicleModel, setRequestVehicleModel] = useState("");
+  const [canTrailer, setCanTrailer] = useState<boolean | null>(null);
+  const [creatingRequest, setCreatingRequest] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [showTimePicker, setShowTimePicker] = useState(false);
-  const [requestStep, setRequestStep] = useState<1 | 2 | 3 | 4>(1);
+  const [showEndDatePicker, setShowEndDatePicker] = useState(false);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("all");
   const [vehicleFilter, setVehicleFilter] = useState("all");
   const [mobilityFilter, setMobilityFilter] = useState<VehicleMobility | "all">("all");
@@ -318,7 +324,11 @@ export default function App() {
   const [offerMessage, setOfferMessage] = useState("");
   const [routeFrom, setRouteFrom] = useState("");
   const [routeTo, setRouteTo] = useState("");
-  const [routeDeparture, setRouteDeparture] = useState("");
+  const [routeDepartureDate, setRouteDepartureDate] = useState<Date | null>(null);
+  const [routeDepartureTime, setRouteDepartureTime] = useState<Date | null>(null);
+  const [showRouteDatePicker, setShowRouteDatePicker] = useState(false);
+  const [showRouteTimePicker, setShowRouteTimePicker] = useState(false);
+  const [creatingRoute, setCreatingRoute] = useState(false);
   const [routeSpaces, setRouteSpaces] = useState("1");
   const [routeMaxDeviationKm, setRouteMaxDeviationKm] = useState("");
   const [routeVehicleTypes, setRouteVehicleTypes] = useState("Osobní automobil");
@@ -478,8 +488,11 @@ export default function App() {
       status: row.status,
       timePreference: row.time_preference || "asap",
       requestedDate: row.requested_date || null,
+      requestedEndDate: row.date_to || null,
       requestedTime: row.requested_time || null,
       vehicleMobility: row.vehicle_mobility || "unknown",
+      vehicleModel: row.vehicle_model || null,
+      canTrailer: row.can_drive_onto_trailer ?? null,
       createdAt: row.created_at || "",
     };
   }
@@ -1011,20 +1024,25 @@ export default function App() {
     const availableSpaces = Number(routeSpaces);
     const price = routePrice.trim() === "" ? null : Number(routePrice);
 
-    if (!routeFrom || !routeTo || !routeDeparture || !Number.isFinite(availableSpaces) || (price !== null && !Number.isFinite(price))) {
-      Alert.alert("Chyba", "Vyplňte prosím všechna povinná pole trasy.");
+    if (!routeFrom || !routeTo || !routeDepartureDate || !routeDepartureTime || !Number.isFinite(availableSpaces) || (price !== null && !Number.isFinite(price))) {
+      Alert.alert("Chyba", "Vyplňte prosím všechna povinná pole trasy včetně data a času odjezdu.");
       return;
     }
 
-    const fromAddress = routeFrom.trim();
-    const toAddress = routeTo.trim();
+    if (creatingRoute) return;
+    setCreatingRoute(true);
+    try {
+      const fromAddress = routeFrom.trim();
+      const toAddress = routeTo.trim();
     const vehicleType = canonicalVehicleType(routeVehicleTypes);
     const [fromCoordinates, toCoordinates] = await Promise.all([
       geocodeAddress(fromAddress),
       geocodeAddress(toAddress),
     ]);
 
-    const { error } = await supabase.from("carrier_routes").insert({
+      const departureAt = new Date(routeDepartureDate);
+      departureAt.setHours(routeDepartureTime.getHours(), routeDepartureTime.getMinutes(), 0, 0);
+      const { error } = await supabase.from("carrier_routes").insert({
       driver_id: userId,
       from_address: fromAddress,
       from_lat: fromCoordinates?.latitude ?? null,
@@ -1032,7 +1050,7 @@ export default function App() {
       to_address: toAddress,
       to_lat: toCoordinates?.latitude ?? null,
       to_lng: toCoordinates?.longitude ?? null,
-      departure_at: routeDeparture,
+      departure_at: departureAt.toISOString(),
       available_spaces: availableSpaces,
       max_deviation_km: maxDeviationKm,
       vehicle_types: [vehicleType],
@@ -1047,10 +1065,15 @@ export default function App() {
       return;
     }
 
-    await loadRoutes();
-    setRouteMaxDeviationKm("");
-    Alert.alert("Trasa vytvořena", "Vaše nabídka volné trasy byla uložena.");
-    setScreen("transport");
+      await loadRoutes();
+      setRouteDepartureDate(null);
+      setRouteDepartureTime(null);
+      setRouteMaxDeviationKm("");
+      Alert.alert("Trasa vytvořena", "Vaše nabídka volné trasy byla uložena.");
+      setScreen("transport");
+    } finally {
+      setCreatingRoute(false);
+    }
   }
 
   async function handleInterestPress() {
@@ -1768,108 +1791,131 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
   }
 
  async function createJob() {
-  if (!userId) {
-    Alert.alert(
-      "RoadLink",
-      "Probíhá připojování k účtu. Zkuste to za chvíli."
-    );
-    return;
-  }
+   if (!userId) {
+     Alert.alert(
+       "RoadLink",
+       "Probíhá připojování k účtu. Zkuste to za chvíli."
+     );
+     return;
+   }
 
-  if (!vehicle) {
-    Alert.alert("RoadLink", "Vyberte prosím typ vozidla.");
-    return;
-  }
+   if (creatingRequest) return;
 
-  if (!pickupText.trim()) {
-    Alert.alert("RoadLink", "Vyplňte prosím místo vyzvednutí.");
-    return;
-  }
+   if (!vehicle) {
+     Alert.alert("RoadLink", "Vyberte prosím typ vozidla.");
+     return;
+   }
 
-  if (!destination.trim()) {
-    Alert.alert("RoadLink", "Vyplňte prosím cíl přepravy.");
-    return;
-  }
+   if (!pickupText.trim()) {
+     Alert.alert("RoadLink", "Vyplňte prosím místo vyzvednutí.");
+     return;
+   }
 
-  if (timePreference === "specific" && !requestedDate) {
-    Alert.alert("RoadLink", "Vyberte prosím datum přepravy.");
-    return;
-  }
+   if (!destination.trim()) {
+     Alert.alert("RoadLink", "Vyplňte prosím cíl přepravy.");
+     return;
+   }
 
-  const trimmedPickupAddress = pickupText.trim();
-  const trimmedDestination = destination.trim();
-  const [pickupCoordinates, destinationCoordinates] = await Promise.all([
-    geocodeAddress(trimmedPickupAddress),
-    geocodeAddress(trimmedDestination),
-  ]);
+   if (!requestedDate) {
+     Alert.alert("RoadLink", "Vyberte prosím datum přepravy.");
+     return;
+   }
 
-  const { data, error } = await supabase
-    .from("tow_requests")
-    .insert({
-      customer_id: userId,
-      pickup_address: trimmedPickupAddress,
-      pickup_lat: pickupCoordinates?.latitude ?? null,
-      pickup_lng: pickupCoordinates?.longitude ?? null,
-      destination_address: trimmedDestination || "Servis dle domluvy",
-      destination_lat: destinationCoordinates?.latitude ?? null,
-      destination_lng: destinationCoordinates?.longitude ?? null,
-      vehicle_type: canonicalVehicleType(vehicle),
-      problem_description: problem,
-      requested_date:
-        timePreference === "specific" && requestedDate
-          ? formatPostgresDate(requestedDate)
-          : null,
-      requested_time:
-        timePreference === "specific" && requestedTime
-          ? formatPostgresTime(requestedTime)
-          : null,
-      time_preference: timePreference,
-      vehicle_mobility: vehicleMobility,
-      status: "open",
-    })
-    .select()
-    .single();
+   let endDate: Date = requestedDate;
+   if (dateMode === "window") {
+     if (!requestedEndDate) {
+       Alert.alert("RoadLink", "Vyberte prosím konec časového okna.");
+       return;
+     }
+     const startDay = new Date(requestedDate);
+     startDay.setHours(0, 0, 0, 0);
+     const endDay = new Date(requestedEndDate);
+     endDay.setHours(0, 0, 0, 0);
+     if (endDay < startDay) {
+       Alert.alert("RoadLink", "Konec časového okna nesmí být před jeho začátkem.");
+       return;
+     }
+     endDate = requestedEndDate;
+   }
 
-  if (error) {
-    console.error("Create tow request:", error.message);
-    Alert.alert(
-      "Chyba",
-      "Zakázku se nepodařilo uložit do RoadLinku."
-    );
-    return;
-  }
+   setCreatingRequest(true);
+   try {
+     const trimmedPickupAddress = pickupText.trim();
+     const trimmedDestination = destination.trim();
+     const [pickupCoordinates, destinationCoordinates] = await Promise.all([
+       geocodeAddress(trimmedPickupAddress),
+       geocodeAddress(trimmedDestination),
+     ]);
 
-  const job: Job = {
-    id: data.id,
-    customerName: "Uživatel RoadLink",
-    vehicle: canonicalVehicleType(data.vehicle_type || vehicle),
-    problem: data.problem_description || problem,
-    pickup: coordinatesFromValues(data.pickup_lat, data.pickup_lng) ?? pickupCoordinates,
-    pickupAddress: data.pickup_address || trimmedPickupAddress,
-    destination:
-      data.destination_address || "Servis dle domluvy",
-    destinationCoordinates:
-      coordinatesFromValues(data.destination_lat, data.destination_lng) ?? destinationCoordinates,
-    status: data.status,
-    timePreference: data.time_preference || timePreference,
-    requestedDate: data.requested_date || null,
-    requestedTime: data.requested_time || null,
-    vehicleMobility: data.vehicle_mobility || vehicleMobility,
-    createdAt: data.created_at || "",
-  };
+     const { data, error } = await supabase
+       .from("tow_requests")
+       .insert({
+         customer_id: userId,
+         pickup_address: trimmedPickupAddress,
+         pickup_lat: pickupCoordinates?.latitude ?? null,
+         pickup_lng: pickupCoordinates?.longitude ?? null,
+         destination_address: trimmedDestination || "Servis dle domluvy",
+         destination_lat: destinationCoordinates?.latitude ?? null,
+         destination_lng: destinationCoordinates?.longitude ?? null,
+         vehicle_type: canonicalVehicleType(vehicle),
+         vehicle_model: requestVehicleModel.trim() || null,
+         problem_description: problem.trim() || null,
+         requested_date: formatPostgresDate(requestedDate),
+         date_to: formatPostgresDate(endDate),
+         requested_time: null,
+         time_preference: "specific",
+         vehicle_mobility: vehicleMobility,
+         can_drive_onto_trailer: canTrailer,
+         status: "open",
+       })
+       .select()
+       .single();
 
-  setJobs((current) => [job, ...current]);
-  setCustomerRequests((current) => [job, ...current]);
-  setActiveJobId(job.id);
-  setTransportTab("mine");
-  await loadJobs();
-  await loadCustomerRequests();
+     if (error || !data) {
+       console.error("Create tow request:", error?.message);
+       Alert.alert(
+         "Chyba",
+         "Zakázku se nepodařilo uložit do RoadLinku."
+       );
+       return;
+     }
 
-  setPickupText(trimmedPickupAddress);
+     const job: Job = {
+       id: data.id,
+       customerName: "Uživatel RoadLink",
+       customerId: data.customer_id || userId,
+       vehicle: canonicalVehicleType(data.vehicle_type || vehicle),
+       problem: data.problem_description || "",
+       pickup: coordinatesFromValues(data.pickup_lat, data.pickup_lng) ?? pickupCoordinates,
+       pickupAddress: data.pickup_address || trimmedPickupAddress,
+       destination:
+         data.destination_address || "Servis dle domluvy",
+       destinationCoordinates:
+         coordinatesFromValues(data.destination_lat, data.destination_lng) ?? destinationCoordinates,
+       status: data.status,
+       timePreference: data.time_preference || "specific",
+       requestedDate: data.requested_date || null,
+       requestedEndDate: data.date_to || null,
+       requestedTime: data.requested_time || null,
+       vehicleMobility: data.vehicle_mobility || vehicleMobility,
+       vehicleModel: data.vehicle_model || null,
+       canTrailer: data.can_drive_onto_trailer ?? null,
+       createdAt: data.created_at || "",
+     };
 
-  setRequestStep(1);
-  setScreen("requestSuccess");
-}
+     setJobs((current) => [job, ...current]);
+     setCustomerRequests((current) => [job, ...current]);
+     setActiveJobId(job.id);
+     setTransportTab("mine");
+     await loadJobs();
+     await loadCustomerRequests();
+
+     setPickupText(trimmedPickupAddress);
+     setScreen("requestSuccess");
+   } finally {
+     setCreatingRequest(false);
+   }
+ }
 
   const filteredJobs = useMemo(() => {
     const timePriority: Record<TimePreference, number> = {
@@ -1958,7 +2004,12 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
 
   function openRequestFlow() {
     setRequestViewMode("owner");
-    setRequestStep(1);
+    setDateMode("concrete");
+    setRequestedDate(null);
+    setRequestedEndDate(null);
+    setRequestVehicleModel("");
+    setCanTrailer(null);
+    setCreatingRequest(false);
     setScreen("request");
   }
 
@@ -1967,43 +2018,6 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
     if (!providerProfile) return;
     await loadCarrierProfile();
     setScreen("routeForm");
-  }
-
-  function validateRequestStep(step: typeof requestStep) {
-    if (step === 1 && !vehicle) {
-      Alert.alert("RoadLink", "Vyberte prosím typ vozidla.");
-      return false;
-    }
-
-    if (step === 2) {
-      if (!pickupText.trim()) {
-        Alert.alert("RoadLink", "Vyplňte prosím místo vyzvednutí.");
-        return false;
-      }
-      if (!destination.trim()) {
-        Alert.alert("RoadLink", "Vyplňte prosím cíl přepravy.");
-        return false;
-      }
-      if (timePreference === "specific" && !requestedDate) {
-        Alert.alert("RoadLink", "Vyberte prosím datum přepravy.");
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  function goToNextRequestStep() {
-    if (!validateRequestStep(requestStep)) return;
-    setRequestStep((current) => Math.min(current + 1, 4) as typeof requestStep);
-  }
-
-  function goToPreviousRequestStep() {
-    if (requestStep === 1) {
-      setScreen("overview");
-      return;
-    }
-    setRequestStep((current) => Math.max(current - 1, 1) as typeof requestStep);
   }
 
   function openMyRequestsAfterSuccess() {
@@ -3230,139 +3244,128 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
       <SafeAreaView style={styles.container}>
         <Header title="Nová poptávka" />
         <ScrollView style={styles.scroll} contentContainerStyle={styles.requestContent} keyboardShouldPersistTaps="handled">
-          <View style={styles.stepHeader}>
-            <Text style={styles.stepCounter}>Krok {Math.min(requestStep, 3)} z 3</Text>
-            <Text style={styles.stepTitle}>{requestStep === 1 ? "Vozidlo" : requestStep === 2 ? "Trasa a čas" : requestStep === 3 ? "Detaily" : "Kontrola"}</Text>
-            <View style={styles.stepRule} />
-          </View>
-
-          <View style={styles.requestProgressLine}>
-            {[1, 2, 3].map((step) => (
-              <View key={step} style={[styles.requestProgressSegment, requestStep >= step && styles.requestProgressSegmentActive]} />
-            ))}
-          </View>
-
-          {requestStep === 1 ? (
-            <View style={styles.requestPanelFlat}>
-              <Text style={styles.formSectionLabel}>Typ vozidla</Text>
-              <View style={styles.chipGrid}>
-                {["Osobní automobil", "SUV / 4x4", "Motocykl", "Dodávka", "Užitkové", "Ostatní"].map((value) => (
-                  <TouchableOpacity key={value} style={[styles.selectChip, vehicle === value && styles.selectChipActive]} onPress={() => setVehicle(value)}>
-                    <Text style={[styles.selectChipText, vehicle === value && styles.selectChipTextActive]}>{value}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              <Text style={styles.formSectionLabel}>Pojízdnost</Text>
-              <View style={styles.chipGrid}>
-                {[
-                  ["Ano", "drivable"],
-                  ["Ne", "not_drivable"],
-                  ["Nevím", "unknown"],
-                ].map(([label, value]) => (
-                  <TouchableOpacity key={value} style={[styles.selectChip, vehicleMobility === value && styles.selectChipActive]} onPress={() => setVehicleMobility(value as VehicleMobility)}>
-                    <Text style={[styles.selectChipText, vehicleMobility === value && styles.selectChipTextActive]}>{label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              {vehicleMobility === "not_drivable" ? (
-                <Text style={styles.requestHint}>Nakládkové požadavky doplňte do poznámky. Stav se ukládá přes existující vehicle_mobility.</Text>
-              ) : null}
-            </View>
-          ) : null}
-
-          {requestStep === 2 ? (
-            <View style={styles.requestPanelFlat}>
-              <Text style={styles.formSectionLabel}>Trasa</Text>
-              <TextInput style={styles.compactInput} value={pickupText} onChangeText={setPickupText} placeholder="Místo vyzvednutí" />
-              <TextInput style={styles.compactInput} value={destination} onChangeText={setDestination} placeholder="Cíl přepravy" />
-              <TouchableOpacity style={styles.inlineSecondary} onPress={requestLocation}>
-                <Text style={styles.secondaryText}>⌖ Použít aktuální polohu</Text>
-              </TouchableOpacity>
-
-              <Text style={styles.formSectionLabel}>Čas přepravy</Text>
-              <View style={styles.chipGrid}>
-                {[
-                  ["Co nejdříve", "asap"],
-                  ["Do 24 h", "within_24h"],
-                  ["Do 3 dnů", "within_3_days"],
-                  ["Konkrétní čas", "specific"],
-                ].map(([label, value]) => (
-                  <TouchableOpacity key={value} style={[styles.selectChip, timePreference === value && styles.selectChipActive]} onPress={() => setTimePreference(value as TimePreference)}>
-                    <Text style={[styles.selectChipText, timePreference === value && styles.selectChipTextActive]}>{label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {timePreference === "specific" ? (
-                <View style={styles.inlinePickerRow}>
-                  <TouchableOpacity style={[styles.inlineSecondary, styles.inlinePicker]} onPress={() => setShowDatePicker(true)}>
-                    <Text style={styles.secondaryText}>{requestedDate ? requestedDate.toLocaleDateString("cs-CZ") : "Vybrat datum"}</Text>
-                  </TouchableOpacity>
-                  {showDatePicker ? (
-                    <DateTimePicker
-                      value={requestedDate || new Date()}
-                      mode="date"
-                      display="default"
-                      onChange={(event: DateTimePickerEvent, date?: Date) => {
-                        setShowDatePicker(false);
-                        if (event.type === "set" && date) setRequestedDate(date);
-                      }}
-                    />
-                  ) : null}
-                  <TouchableOpacity style={[styles.inlineSecondary, styles.inlinePicker]} onPress={() => setShowTimePicker(true)}>
-                    <Text style={styles.secondaryText}>{requestedTime ? formatPostgresTime(requestedTime).slice(0, 5) : "Vybrat čas"}</Text>
-                  </TouchableOpacity>
-                  {showTimePicker ? (
-                    <DateTimePicker
-                      value={requestedTime || new Date()}
-                      mode="time"
-                      display="default"
-                      onChange={(event: DateTimePickerEvent, date?: Date) => {
-                        setShowTimePicker(false);
-                        if (event.type === "set" && date) setRequestedTime(date);
-                      }}
-                    />
-                  ) : null}
-                </View>
-              ) : null}
-              <Text style={styles.requestHint}>Vzdálenost v km se nezadává ručně.</Text>
-            </View>
-          ) : null}
-
-          {requestStep === 3 ? (
-            <View style={styles.requestPanelFlat}>
-              <Text style={styles.formSectionLabel}>Detaily přepravy</Text>
-              <TextInput style={[styles.compactInput, styles.multilineInput]} value={problem} onChangeText={setProblem} placeholder="Poznámka, stav vozidla, specifika nakládky" multiline />
-              <View style={styles.pricePrincipleBox}>
-                <Text style={styles.pricePrincipleTitle}>Cena</Text>
-                <Text style={styles.muted}>Chci získat nabídky přepravců.</Text>
-              </View>
-            </View>
-          ) : null}
-
-          {requestStep === 4 ? (
-            <View style={styles.requestPanelFlat}>
-              <Text style={styles.formSectionLabel}>Souhrn</Text>
-              <View style={styles.summaryLine}><Text style={styles.summaryLabel}>VOZIDLO</Text><Text style={styles.summaryValue}>{vehicle} · {vehicleMobilityLabel(vehicleMobility)}</Text></View>
-              <View style={styles.summaryLine}><Text style={styles.summaryLabel}>TRASA</Text><Text style={styles.summaryValue}>{pickupText || "Místo vyzvednutí neuvedeno"} → {destination || "Cíl neuveden"}</Text></View>
-              <View style={styles.summaryLine}><Text style={styles.summaryLabel}>TERMÍN</Text><Text style={styles.summaryValue}>{requestTimingLabel({ id: "preview", customerName: "", vehicle, problem, pickup: null, pickupAddress: pickupText.trim() || null, destination, status: "open", timePreference, requestedDate: requestedDate ? formatPostgresDate(requestedDate) : null, requestedTime: requestedTime ? formatPostgresTime(requestedTime) : null, vehicleMobility })}</Text></View>
-              <View style={styles.summaryLine}><Text style={styles.summaryLabel}>DETAILY</Text><Text style={styles.summaryValue}>{problem || "Bez poznámky"}</Text></View>
-              <TouchableOpacity style={styles.primary} onPress={createJob}>
-                <Text style={styles.primaryText}>ODESLAT POPTÁVKU</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-
-          <View style={styles.requestNavRowSplit}>
-            <TouchableOpacity style={[styles.secondary, styles.requestNavButton]} onPress={goToPreviousRequestStep}>
-              <Text style={styles.secondaryText}>Zpět</Text>
+          <View style={styles.requestPanelFlat}>
+            <Text style={styles.formSectionLabel}>Trasa</Text>
+            <Text style={styles.label}>Odkud</Text>
+            <TextInput style={styles.compactInput} value={pickupText} onChangeText={setPickupText} placeholder="Např. Praha" />
+            <Text style={styles.label}>Kam</Text>
+            <TextInput style={styles.compactInput} value={destination} onChangeText={setDestination} placeholder="Např. München" />
+            <TouchableOpacity style={styles.inlineSecondary} onPress={requestLocation}>
+              <Text style={styles.secondaryText}>⌖ Použít aktuální polohu</Text>
             </TouchableOpacity>
-            {requestStep < 4 ? (
-              <TouchableOpacity style={[styles.primary, styles.requestNavButton]} onPress={requestStep === 3 ? () => { if (validateRequestStep(requestStep)) setRequestStep(4); } : goToNextRequestStep}>
-                <Text style={styles.primaryText}>{requestStep === 3 ? "Zkontrolovat" : "Pokračovat"}</Text>
+          </View>
+
+          <View style={styles.requestPanelFlat}>
+            <Text style={styles.formSectionLabel}>Kdy</Text>
+            <View style={styles.chipGrid}>
+              <TouchableOpacity style={[styles.selectChip, dateMode === "concrete" && styles.selectChipActive]} onPress={() => setDateMode("concrete")}>
+                <Text style={[styles.selectChipText, dateMode === "concrete" && styles.selectChipTextActive]}>Konkrétní datum</Text>
               </TouchableOpacity>
-            ) : null}
+              <TouchableOpacity style={[styles.selectChip, dateMode === "window" && styles.selectChipActive]} onPress={() => setDateMode("window")}>
+                <Text style={[styles.selectChipText, dateMode === "window" && styles.selectChipTextActive]}>Časové okno</Text>
+              </TouchableOpacity>
+            </View>
+            {dateMode === "concrete" ? (
+              <>
+                <Text style={styles.label}>Datum přepravy</Text>
+                <TouchableOpacity style={[styles.inlineSecondary, styles.inlinePicker]} onPress={() => setShowDatePicker(true)}>
+                  <Text style={styles.secondaryText}>{requestedDate ? requestedDate.toLocaleDateString("cs-CZ") : "Vybrat datum"}</Text>
+                </TouchableOpacity>
+                {showDatePicker ? (
+                  <DateTimePicker
+                    value={requestedDate || new Date()}
+                    mode="date"
+                    display="default"
+                    onChange={(event: DateTimePickerEvent, date?: Date) => {
+                      setShowDatePicker(false);
+                      if (event.type === "set" && date) setRequestedDate(date);
+                    }}
+                  />
+                ) : null}
+              </>
+            ) : (
+              <>
+                <Text style={styles.label}>Od</Text>
+                <TouchableOpacity style={[styles.inlineSecondary, styles.inlinePicker]} onPress={() => setShowDatePicker(true)}>
+                  <Text style={styles.secondaryText}>{requestedDate ? requestedDate.toLocaleDateString("cs-CZ") : "Vybrat datum"}</Text>
+                </TouchableOpacity>
+                {showDatePicker ? (
+                  <DateTimePicker
+                    value={requestedDate || new Date()}
+                    mode="date"
+                    display="default"
+                    onChange={(event: DateTimePickerEvent, date?: Date) => {
+                      setShowDatePicker(false);
+                      if (event.type === "set" && date) setRequestedDate(date);
+                    }}
+                  />
+                ) : null}
+                <Text style={styles.label}>Do</Text>
+                <TouchableOpacity style={[styles.inlineSecondary, styles.inlinePicker]} onPress={() => setShowEndDatePicker(true)}>
+                  <Text style={styles.secondaryText}>{requestedEndDate ? requestedEndDate.toLocaleDateString("cs-CZ") : "Vybrat datum"}</Text>
+                </TouchableOpacity>
+                {showEndDatePicker ? (
+                  <DateTimePicker
+                    value={requestedEndDate || requestedDate || new Date()}
+                    mode="date"
+                    display="default"
+                    onChange={(event: DateTimePickerEvent, date?: Date) => {
+                      setShowEndDatePicker(false);
+                      if (event.type === "set" && date) setRequestedEndDate(date);
+                    }}
+                  />
+                ) : null}
+              </>
+            )}
+          </View>
+
+          <View style={styles.requestPanelFlat}>
+            <Text style={styles.formSectionLabel}>Co přepravujete</Text>
+            <View style={styles.chipGrid}>
+              {["Osobní automobil", "SUV / 4x4", "Motocykl", "Dodávka", "Užitkové", "Ostatní"].map((value) => (
+                <TouchableOpacity key={value} style={[styles.selectChip, vehicle === value && styles.selectChipActive]} onPress={() => setVehicle(value)}>
+                  <Text style={[styles.selectChipText, vehicle === value && styles.selectChipTextActive]}>{value}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.label}>Značka a model</Text>
+            <TextInput style={styles.compactInput} value={requestVehicleModel} onChangeText={setRequestVehicleModel} placeholder="Škoda Octavia" />
+          </View>
+
+          <View style={styles.requestPanelFlat}>
+            <Text style={styles.formSectionLabel}>Stav vozidla</Text>
+            <Text style={styles.label}>Vozidlo je pojízdné</Text>
+            <View style={styles.chipGrid}>
+              {[
+                ["Ano", "drivable"],
+                ["Ne", "not_drivable"],
+                ["Nevím", "unknown"],
+              ].map(([label, value]) => (
+                <TouchableOpacity key={value} style={[styles.selectChip, vehicleMobility === value && styles.selectChipActive]} onPress={() => setVehicleMobility(value as VehicleMobility)}>
+                  <Text style={[styles.selectChipText, vehicleMobility === value && styles.selectChipTextActive]}>{label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.label}>Lze s vozidlem najet na vlek</Text>
+            <View style={styles.chipGrid}>
+              <TouchableOpacity style={[styles.selectChip, canTrailer === true && styles.selectChipActive]} onPress={() => setCanTrailer(true)}>
+                <Text style={[styles.selectChipText, canTrailer === true && styles.selectChipTextActive]}>Ano</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.selectChip, canTrailer === false && styles.selectChipActive]} onPress={() => setCanTrailer(false)}>
+                <Text style={[styles.selectChipText, canTrailer === false && styles.selectChipTextActive]}>Ne</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.selectChip, canTrailer === null && styles.selectChipActive]} onPress={() => setCanTrailer(null)}>
+                <Text style={[styles.selectChipText, canTrailer === null && styles.selectChipTextActive]}>Nevím</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={styles.requestPanelFlat}>
+            <Text style={styles.formSectionLabel}>Další informace</Text>
+            <TextInput style={[styles.compactInput, styles.multilineInput]} value={problem} onChangeText={setProblem} placeholder="Např. vozidlo má zablokované kolo, přístup je z úzké ulice…" multiline />
+            <TouchableOpacity style={styles.primary} disabled={creatingRequest} onPress={createJob}>
+              <Text style={styles.primaryText}>{creatingRequest ? "Odesílám…" : "ODESLAT POPTÁVKU"}</Text>
+            </TouchableOpacity>
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -3454,8 +3457,36 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
           <TextInput style={styles.input} value={routeFrom} onChangeText={setRouteFrom} placeholder="Místo odjezdu" />
           <Text style={styles.label}>Kam</Text>
           <TextInput style={styles.input} value={routeTo} onChangeText={setRouteTo} placeholder="Cíl trasy" />
-          <Text style={styles.label}>Datum a čas odjezdu</Text>
-          <TextInput style={styles.input} value={routeDeparture} onChangeText={setRouteDeparture} placeholder="Např. 2026-09-04 14:00" />
+          <Text style={styles.label}>Datum odjezdu</Text>
+          <TouchableOpacity style={styles.input} onPress={() => setShowRouteDatePicker(true)}>
+            <Text>{routeDepartureDate ? routeDepartureDate.toLocaleDateString("cs-CZ") : "Vybrat datum"}</Text>
+          </TouchableOpacity>
+          {showRouteDatePicker ? (
+            <DateTimePicker
+              value={routeDepartureDate || new Date()}
+              mode="date"
+              display="default"
+              onChange={(event: DateTimePickerEvent, date?: Date) => {
+                setShowRouteDatePicker(false);
+                if (event.type === "set" && date) setRouteDepartureDate(date);
+              }}
+            />
+          ) : null}
+          <Text style={styles.label}>Přibližný čas odjezdu</Text>
+          <TouchableOpacity style={styles.input} onPress={() => setShowRouteTimePicker(true)}>
+            <Text>{routeDepartureTime ? `${String(routeDepartureTime.getHours()).padStart(2, "0")}:${String(routeDepartureTime.getMinutes()).padStart(2, "0")}` : "Vybrat čas"}</Text>
+          </TouchableOpacity>
+          {showRouteTimePicker ? (
+            <DateTimePicker
+              value={routeDepartureTime || new Date()}
+              mode="time"
+              display="default"
+              onChange={(event: DateTimePickerEvent, date?: Date) => {
+                setShowRouteTimePicker(false);
+                if (event.type === "set" && date) setRouteDepartureTime(date);
+              }}
+            />
+          ) : null}
           <Text style={styles.label}>Počet volných míst</Text>
           <TextInput style={styles.input} value={routeSpaces} onChangeText={setRouteSpaces} placeholder="Počet míst" keyboardType="numeric" />
           <Text style={styles.label}>Maximální odchylka od trasy (volitelné) · km</Text>
@@ -3480,8 +3511,8 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
           <TextInput style={styles.input} value={routePrice} onChangeText={setRoutePrice} placeholder="Cena v Kč" keyboardType="numeric" />
           <Text style={styles.label}>Poznámka</Text>
           <TextInput style={styles.input} value={routeDescription} onChangeText={setRouteDescription} placeholder="Doplňující informace" multiline />
-          <TouchableOpacity style={styles.primary} onPress={createRoute}>
-            <Text style={styles.primaryText}>Vytvořit nabídku trasy</Text>
+          <TouchableOpacity style={styles.primary} onPress={createRoute} disabled={creatingRoute}>
+            <Text style={styles.primaryText}>{creatingRoute ? "Ukládám…" : "Vytvořit nabídku trasy"}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.secondary} onPress={() => { setTransportTab("capacity"); setScreen("transport"); }}>
             <Text style={styles.secondaryText}>Zpět na přepravu</Text>
@@ -3592,7 +3623,7 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
           <View style={styles.detailTwoColumnRow}>
             <View style={styles.detailMiniSection}>
               <Text style={styles.sectionLabel}>VOZIDLO</Text>
-              <Text style={styles.detailValueStrong}>{activeJob.vehicle} · {vehicleMobilityLabel(activeJob.vehicleMobility)}</Text>
+              <Text style={styles.detailValueStrong}>{activeJob.vehicle}{activeJob.vehicleModel ? ` · ${activeJob.vehicleModel}` : ""} · {vehicleMobilityLabel(activeJob.vehicleMobility)}</Text>
             </View>
             <View style={styles.detailMiniSection}>
               <Text style={styles.sectionLabel}>TERMÍN</Text>
@@ -3604,6 +3635,12 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
             <Text style={styles.sectionLabel}>DETAILY</Text>
             <Text style={styles.detailValue}>{activeJob.problem || "Bez poznámky"}</Text>
           </View>
+          {activeJob.canTrailer !== null && activeJob.canTrailer !== undefined ? (
+            <View style={styles.detailSectionFlat}>
+              <Text style={styles.sectionLabel}>STAV VOZIDLA</Text>
+              <Text style={styles.detailValue}>Pojízdné: {mobilityOperableLabel(activeJob.vehicleMobility)}{"\n"}Lze najet na vlek: {triStateLabel(activeJob.canTrailer)}</Text>
+            </View>
+          ) : null}
 
           <View style={styles.offerHeaderStrip}>
             <Text style={styles.sectionLabel}>CENOVÉ NABÍDKY</Text>
@@ -3790,7 +3827,7 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
           <View style={styles.detailTwoColumnRow}>
             <View style={styles.detailMiniSection}>
               <Text style={styles.sectionLabel}>VOZIDLO</Text>
-              <Text style={styles.detailValueStrong}>{activeJob.vehicle} · {vehicleMobilityLabel(activeJob.vehicleMobility)}</Text>
+              <Text style={styles.detailValueStrong}>{activeJob.vehicle}{activeJob.vehicleModel ? ` · ${activeJob.vehicleModel}` : ""} · {vehicleMobilityLabel(activeJob.vehicleMobility)}</Text>
             </View>
             <View style={styles.detailMiniSection}>
               <Text style={styles.sectionLabel}>TERMÍN</Text>
@@ -3802,6 +3839,12 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
             <Text style={styles.sectionLabel}>DETAILY</Text>
             <Text style={styles.detailValue}>{activeJob.problem || "Bez poznámky"}</Text>
           </View>
+          {activeJob.canTrailer !== null && activeJob.canTrailer !== undefined ? (
+            <View style={styles.detailSectionFlat}>
+              <Text style={styles.sectionLabel}>STAV VOZIDLA</Text>
+              <Text style={styles.detailValue}>Pojízdné: {mobilityOperableLabel(activeJob.vehicleMobility)}{"\n"}Lze najet na vlek: {triStateLabel(activeJob.canTrailer)}</Text>
+            </View>
+          ) : null}
 
           {activeJob.status === "offer_selected" &&
           activeAcceptedJob?.id === activeJob.id &&
@@ -4286,12 +4329,40 @@ function routeDisplayLabel(job: Job) {
 }
 
 function requestTimingLabel(job: Job) {
-  if (job.timePreference === "specific" && job.requestedDate) {
+  if (job.requestedDate) {
+    if (job.requestedEndDate && job.requestedEndDate !== job.requestedDate) {
+      return formatDateRange(job.requestedDate, job.requestedEndDate);
+    }
+    if (job.timePreference === "specific") {
+      const date = formatDate(job.requestedDate);
+      const time = formatTime(job.requestedTime);
+      return time ? `${date}, ${time}` : date || "Konkrétní termín";
+    }
     const date = formatDate(job.requestedDate);
-    const time = formatTime(job.requestedTime);
-    return time ? `${date}, ${time}` : date || "Konkrétní termín";
+    if (date) return date;
   }
   return timePreferenceLabel(job.timePreference);
+}
+
+function formatDateRange(from: string, to: string) {
+  const [fromYear, fromMonth, fromDay] = from.slice(0, 10).split("-").map(Number);
+  const [toYear, toMonth, toDay] = to.slice(0, 10).split("-").map(Number);
+  if (fromYear === toYear && fromMonth === toMonth) {
+    return `${fromDay}.–${toDay}. ${toMonth}. ${toYear}`;
+  }
+  return `${formatDate(from)} – ${formatDate(to)}`;
+}
+
+function triStateLabel(value: boolean | null | undefined): string {
+  if (value === true) return "Ano";
+  if (value === false) return "Ne";
+  return "Neví se";
+}
+
+function mobilityOperableLabel(mobility?: VehicleMobility): string {
+  if (mobility === "drivable") return "Ano";
+  if (mobility === "not_drivable") return "Ne";
+  return "Neví se";
 }
 
 function offerCountLabel(count: number) {
