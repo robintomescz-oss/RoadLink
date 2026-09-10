@@ -157,6 +157,12 @@ type TowOffer = {
   status: "pending" | "accepted" | "rejected" | "withdrawn";
 };
 
+type ProviderIdentity = {
+  user_id: string;
+  display_name: string | null;
+  company_name: string | null;
+};
+
 type AcceptedJob = Job & {
   acceptedOffer: TowOffer;
 };
@@ -270,6 +276,7 @@ export default function App() {
   const [routeInterestsLoading, setRouteInterestsLoading] = useState(false);
   const [routeInterestsError, setRouteInterestsError] = useState(false);
   const [offers, setOffers] = useState<TowOffer[]>([]);
+  const [providerIdentities, setProviderIdentities] = useState<Record<string, ProviderIdentity>>({});
   const [offersLoading, setOffersLoading] = useState(false);
   const [selectingOfferId, setSelectingOfferId] = useState<string | null>(null);
   const [transportStatusLoading, setTransportStatusLoading] = useState(false);
@@ -373,6 +380,7 @@ export default function App() {
     setRouteInterestedRequests([]);
     setRouteInterestsError(false);
     setOffers([]);
+    setProviderIdentities({});
     setVehicles([]);
     setActiveJobId(null);
     setProfileEditing(false);
@@ -634,24 +642,56 @@ export default function App() {
   async function loadOffers() {
     if (!activeJobId) {
       setOffers([]);
+      setProviderIdentities({});
       return;
     }
 
+    const requestId = activeJobId;
     setOffersLoading(true);
     const { data, error } = await supabase
       .from("tow_offers")
       .select("*")
-      .eq("tow_request_id", activeJobId)
+      .eq("tow_request_id", requestId)
       .order("created_at", { ascending: true });
 
     if (error) {
       console.error("Load offers:", error.message);
+      setProviderIdentities({});
       setOffersLoading(false);
       return;
     }
 
-    setOffers((data || []) as TowOffer[]);
+    const loadedOffers = (data || []) as TowOffer[];
+    setOffers(loadedOffers);
+
+    const { data: identityRows, error: identityError } = await supabase.rpc("get_offer_provider_identities", {
+      p_tow_request_id: requestId,
+    });
+
+    if (identityError) {
+      console.error("Load offer provider identities:", identityError.message);
+      setProviderIdentities({});
+      setOffersLoading(false);
+      return;
+    }
+
+    const identities = ((identityRows || []) as ProviderIdentity[]).reduce<Record<string, ProviderIdentity>>((current, identity) => {
+      current[identity.user_id] = identity;
+      return current;
+    }, {});
+    setProviderIdentities(identities);
     setOffersLoading(false);
+  }
+
+  function providerNameForOffer(offer: TowOffer) {
+    const identity = providerIdentities[offer.driver_id];
+    const companyName = identity?.company_name?.trim();
+    if (companyName) return companyName;
+
+    const displayName = identity?.display_name?.trim();
+    if (displayName) return displayName;
+
+    return "Přepravce";
   }
 
   async function selectOffer(offerId: string) {
@@ -3435,6 +3475,8 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
                   <Text style={styles.dispatchLabel}>CENOVÁ NABÍDKA</Text>
                   <Text style={styles.statusPill}>{offerStatusLabel(offer.status)}</Text>
                 </View>
+                <Text style={styles.sectionLabel}>PŘEPRAVCE</Text>
+                <Text style={styles.detailValueStrong}>{providerNameForOffer(offer)}</Text>
                 <Text style={styles.offerPriceCompact}>{offer.price === null ? "Cena dohodou" : `${offer.price.toLocaleString("cs-CZ")} Kč`}</Text>
                 {offer.estimated_arrival_minutes ? <Text style={styles.detailMuted}>Příjezd: {offer.estimated_arrival_minutes} min</Text> : null}
                 {offer.estimated_arrival_at ? <Text style={styles.detailMuted}>Příjezd: {formatOfferArrivalDateTime(offer.estimated_arrival_at)}</Text> : null}
