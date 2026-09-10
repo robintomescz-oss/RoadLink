@@ -304,6 +304,7 @@ export default function App() {
   const [providerProfileLoading, setProviderProfileLoading] = useState(false);
   const [providerProfileError, setProviderProfileError] = useState(false);
   const [transportStatusLoading, setTransportStatusLoading] = useState(false);
+  const [cancellingRequest, setCancellingRequest] = useState(false);
  const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [interestSelectionVisible, setInterestSelectionVisible] = useState(false);
   const [interestSubmitting, setInterestSubmitting] = useState(false);
@@ -809,6 +810,48 @@ export default function App() {
       [
         { text: "Zrušit", style: "cancel" },
         { text: "Vybrat přepravce", onPress: () => selectOffer(offer.id) },
+      ]
+    );
+  }
+
+  async function cancelRequest() {
+    if (!activeJobId || !activeJob || cancellingRequest) return;
+    if (activeJob.status !== "open") return;
+
+    setCancellingRequest(true);
+    const { error } = await supabase.rpc("cancel_tow_request", {
+      p_tow_request_id: activeJobId,
+    });
+
+    if (error) {
+      console.error("Cancel request:", error.message);
+      Alert.alert("Chyba", "Poptávku se nepodařilo zrušit. Zkuste to prosím znovu.");
+      setCancellingRequest(false);
+      return;
+    }
+
+    const refreshedRequests = await loadCustomerRequests();
+    const refreshedJob = refreshedRequests?.find((job) => job.id === activeJobId);
+    if (refreshedJob) {
+      setJobs((current) =>
+        current.map((job) => job.id === activeJobId ? refreshedJob : job)
+      );
+      setCustomerRequests((current) =>
+        current.map((job) => job.id === activeJobId ? refreshedJob : job)
+      );
+    }
+    await loadOffers();
+    setCancellingRequest(false);
+    Alert.alert("Poptávka zrušena", "Poptávka byla zrušena.");
+  }
+
+  function confirmCancelRequest() {
+    Alert.alert(
+      "Zrušit poptávku?",
+      "Opravdu chcete tuto poptávku zrušit? Přepravci už na ni nebudou moci odesílat nabídky.",
+      [
+        { text: "ZPĚT", style: "cancel" },
+        { text: "ZRUŠIT POPTÁVKU", style: "destructive", onPress: () => cancelRequest() },
       ]
     );
   }
@@ -3608,6 +3651,11 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
             </View>
           ) : null}
 
+          {activeJob.status === "open" ? (
+            <TouchableOpacity style={styles.secondary} disabled={cancellingRequest} onPress={confirmCancelRequest}>
+              <Text style={styles.secondaryText}>{cancellingRequest ? "Ruším…" : "ZRUŠIT POPTÁVKU"}</Text>
+            </TouchableOpacity>
+          ) : null}
           <TouchableOpacity style={styles.secondary} onPress={() => { setTransportTab("mine"); setScreen("transport"); }}>
             <Text style={styles.secondaryText}>Zpět na moje poptávky</Text>
           </TouchableOpacity>
