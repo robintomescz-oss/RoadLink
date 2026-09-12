@@ -15,10 +15,12 @@ import {
   View,
 } from "react-native";
 import { supabase } from "./lib/supabase";
+import GlobalHome from "./lib/GlobalHome";
 import * as Location from "expo-location";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import MapView, { Marker, Polyline, Region } from "react-native-maps";
 import { StatusBar } from "expo-status-bar";
+
 
 type Role = "customer" | "driver";
 type RequestViewMode = "owner" | "provider";
@@ -265,7 +267,7 @@ const DEFAULT_REGION: Region = {
 };
 
 export default function App() {
-  const [screen, setScreen] = useState("welcome");
+  const [screen, setScreen] = useState("home");
   const [role, setRole] = useState<Role>("customer");
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [locationError, setLocationError] = useState("");
@@ -441,7 +443,7 @@ export default function App() {
         setUserId(sessionUserId);
         setScreen((currentScreen) =>
           currentScreen === "welcome" || currentScreen === "login" || currentScreen === "signup"
-            ? "overview"
+            ? "home"
             : currentScreen
         );
       } else {
@@ -456,7 +458,7 @@ export default function App() {
         setUserId(sessionUserId);
       } else {
         clearLocalUserState();
-        setScreen("welcome");
+        setScreen("home");
       }
       setAuthInitialized(true);
     });
@@ -1077,7 +1079,10 @@ export default function App() {
   }
 
   async function handleInterestPress() {
-    if (!userId) return;
+    if (!userId) {
+      setScreen("login");
+      return;
+    }
     const requests = await loadCustomerRequests();
     if (!requests) {
       Alert.alert("Chyba", "Nepodařilo se načíst vaše poptávky. Zkuste to prosím znovu.");
@@ -1250,7 +1255,7 @@ export default function App() {
     }
 
     setLoginLoading(false);
-    setScreen("overview");
+    setScreen("home");
   }
 
   async function signOutUser() {
@@ -1266,7 +1271,7 @@ export default function App() {
 
     clearLocalUserState();
     setLoginPassword("");
-    setScreen("welcome");
+    setScreen("home");
     setSignOutLoading(false);
   }
 
@@ -1782,7 +1787,7 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
     setRegistrationLoading(false);
     if (data.session) {
       setUserId(user.id);
-      setScreen("overview");
+      setScreen("home");
       Alert.alert("Registrace dokončena", "Váš účet byl vytvořen.");
     } else {
       Alert.alert("Registrace dokončena", "Účet byl vytvořen. Pro pokračování potvrďte e-mail.");
@@ -2003,6 +2008,10 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
   }, [location, activeJob]);
 
   function openRequestFlow() {
+    if (!userId) {
+      setScreen("login");
+      return;
+    }
     setRequestViewMode("owner");
     setDateMode("concrete");
     setRequestedDate(null);
@@ -2014,6 +2023,10 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
   }
 
   async function openCapacityFlow() {
+    if (!userId) {
+      setScreen("login");
+      return;
+    }
     const providerProfile = carrierProfile || await ensureCarrierProfile();
     if (!providerProfile) return;
     await loadCarrierProfile();
@@ -2080,6 +2093,7 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
 
   function BottomNavigation() {
     const navItems = [
+      { key: "home", label: "Domů", icon: "⌂" },
       { key: "overview", label: "Přehled", icon: "▦" },
       { key: "transport", label: "Přeprava", icon: "⇄" },
       { key: "create", label: "+", icon: "+" },
@@ -2100,6 +2114,10 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
               onPress={() => {
                 if (item.key === "transport") {
                   setTransportTab("requests");
+                }
+                if (item.key === "profile" && !userId) {
+                  setScreen("login");
+                  return;
                 }
                 setScreen(item.key);
               }}
@@ -2125,73 +2143,6 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
     );
   }
 
-  if (screen === "welcome") {
-    return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar style="dark" />
-        <ScrollView style={styles.scroll} contentContainerStyle={styles.introScroll} keyboardShouldPersistTaps="handled">
-          <View style={styles.introHero}>
-            <Image source={require("./assets/roadlink-hero.png")} style={styles.heroImage} resizeMode="cover" />
-          </View>
-          <View style={styles.introPanel}>
-            <Text style={styles.introClaim}>Pomoc na cestě.{"\n"}Když ji potřebujete.</Text>
-            <View style={styles.benefitRow}>
-              <View style={styles.benefitItem}>
-                <Text style={styles.benefitIcon}>✓</Text>
-                <Text style={styles.benefitText}>Ověření{"\n"}přepravci</Text>
-              </View>
-              <View style={styles.benefitItem}>
-                <Text style={styles.benefitIcon}>◷</Text>
-                <Text style={styles.benefitText}>Rychlá{"\n"}odezva</Text>
-              </View>
-              <View style={styles.benefitItem}>
-                <Text style={styles.benefitIcon}>◆</Text>
-                <Text style={styles.benefitText}>Transparentní{"\n"}ceny</Text>
-              </View>
-            </View>
-            <TouchableOpacity
-              style={styles.introTransport}
-              onPress={() => {
-                if (userId) {
-                  setTransportTab("requests");
-                  setScreen("transport");
-                  return;
-                }
-                setScreen("login");
-              }}
-            >
-              <Text style={styles.serviceIcon}>🚚</Text>
-              <Text style={styles.transportText}>Transport</Text>
-              <Text style={styles.serviceArrow}>›</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.introServiceRow}
-              onPress={() => Alert.alert("SOS", "SOS pomoc při poruše bude dostupná v další verzi.")}
-            >
-              <Text style={styles.serviceIcon}>🆘</Text>
-              <Text style={styles.serviceText}>SOS – Potřebuji pomoc</Text>
-              <Text style={styles.serviceArrow}>›</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.introServiceRow}
-              onPress={() => Alert.alert("Servisy", "Seznam servisů bude dostupný v další verzi.")}
-            >
-              <Text style={styles.serviceIcon}>🔧</Text>
-              <Text style={styles.serviceText}>Servisy v okolí</Text>
-              <Text style={styles.serviceArrow}>›</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.introLogin} onPress={() => setScreen("login")}>
-              <Text style={styles.introLoginText}>Máte účet? Přihlášení</Text>
-              <Text style={styles.serviceArrow}>›</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.introSignup} onPress={() => setScreen("signup")}>
-              <Text style={styles.introSignupText}>Nemáte účet? Vytvořit účet</Text>
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
 
   if (screen === "login" || screen === "signup") {
     return (
@@ -2212,7 +2163,7 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
             <TouchableOpacity onPress={() => setScreen("login")} disabled={registrationLoading}>
               <Text style={styles.link}>Už účet mám – Přihlásit se</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => setScreen("welcome")} disabled={registrationLoading}>
+            <TouchableOpacity onPress={() => setScreen("home")} disabled={registrationLoading}>
               <Text style={styles.link}>Zpět na úvod</Text>
             </TouchableOpacity>
           </ScrollView>
@@ -2242,13 +2193,17 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
           <TouchableOpacity onPress={() => setScreen("signup")} disabled={loginLoading}>
             <Text style={styles.link}>Nemám účet</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => setScreen("welcome")} disabled={loginLoading}>
+          <TouchableOpacity onPress={() => setScreen("home")} disabled={loginLoading}>
             <Text style={styles.link}>Zpět na úvod</Text>
           </TouchableOpacity>
         </View>
         )}
       </SafeAreaView>
     );
+  }
+
+  if (screen === "home" || screen === "welcome") {
+    return <GlobalHome onAccount={() => setScreen(userId ? "profile" : "login")} onTransport={() => { setTransportTab("requests"); setScreen("transport"); }} />;
   }
 
   if (screen === "overview") {
@@ -2259,6 +2214,9 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
         <StatusBar style="dark" />
         <Header title="Přehled" />
         <ScrollView style={styles.scroll} contentContainerStyle={styles.appContent} keyboardShouldPersistTaps="handled">
+          <TouchableOpacity onPress={() => setScreen("home")}>
+            <Text style={styles.link}>‹ Domů</Text>
+          </TouchableOpacity>
           <View style={styles.dashboardPanel}>
             <TouchableOpacity style={styles.actionRow} onPress={openRequestFlow}>
               <Text style={styles.actionIcon}>↗</Text>
@@ -3226,9 +3184,9 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
             <Text style={styles.profileLinkTitle}>Moje poptávky</Text>
             <Text style={styles.profileLinkText}>Otevřít moje přepravní poptávky</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.profileLinkCard} onPress={() => setScreen("welcome")}>
-            <Text style={styles.profileLinkTitle}>Zobrazit úvodní obrazovku</Text>
-            <Text style={styles.profileLinkText}>Otevřít veřejný úvod bez odhlášení</Text>
+          <TouchableOpacity style={styles.profileLinkCard} onPress={() => setScreen("home")}>
+            <Text style={styles.profileLinkTitle}>RoadLink domů</Text>
+            <Text style={styles.profileLinkText}>Otevřít hlavní nabídku služeb</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.profileLogoutRow} onPress={signOutUser} disabled={signOutLoading}>
             <Text style={styles.profileLogoutText}>{signOutLoading ? "Odhlašuji…" : "Odhlásit se"}</Text>
