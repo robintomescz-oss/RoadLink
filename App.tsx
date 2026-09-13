@@ -16,10 +16,13 @@ import {
 } from "react-native";
 import { supabase } from "./lib/supabase";
 import GlobalHome from "./lib/GlobalHome";
+import TransportCard from "./lib/TransportCard";
+import TransportPreviewScreen from "./lib/TransportPreviewScreen";
 import * as Location from "expo-location";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import MapView, { Marker, Polyline, Region } from "react-native-maps";
 import { StatusBar } from "expo-status-bar";
+import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 
 
 type Role = "customer" | "driver";
@@ -266,7 +269,7 @@ const DEFAULT_REGION: Region = {
   longitudeDelta: 0.08,
 };
 
-export default function App() {
+function App() {
   const [screen, setScreen] = useState("home");
   const [role, setRole] = useState<Role>("customer");
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
@@ -2039,8 +2042,9 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
   }
 
   function Header({ title }: { title: string }) {
+    const insets = useSafeAreaInsets();
     return (
-      <SafeAreaView style={styles.headerSafeArea}>
+      <View style={[styles.headerSafeArea, { paddingTop: (styles.headerSafeArea.paddingTop as number) + insets.top }]}>
       <View style={styles.header}>
         <View>
           <Text style={styles.logo}>ROADLINK</Text>
@@ -2050,7 +2054,7 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
           <Text style={styles.headerSignOut}>⌁</Text>
         </TouchableOpacity>
       </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -2092,6 +2096,7 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
   }
 
   function BottomNavigation() {
+    const insets = useSafeAreaInsets();
     const navItems = [
       { key: "home", label: "Domů", icon: "⌂" },
       { key: "overview", label: "Přehled", icon: "▦" },
@@ -2102,7 +2107,7 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
     ];
 
     return (
-      <SafeAreaView style={styles.bottomNavSafeArea}>
+      <View style={[styles.bottomNavSafeArea, { paddingBottom: (styles.bottomNavSafeArea.paddingBottom as number) + insets.bottom }]}>
       <View style={styles.bottomNav}>
         {navItems.map((item) => {
           const isActive = screen === item.key;
@@ -2139,7 +2144,7 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
           );
         })}
       </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -2306,6 +2311,10 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
     );
   }
 
+  if (__DEV__ && screen === "transportPreview") {
+    return <TransportPreviewScreen onBack={() => setScreen("transport")} />;
+  }
+
   if (screen === "transport") {
     const openRequestCards = filteredTransportRequests;
     const openCapacityCards = filteredTransportRoutes;
@@ -2313,7 +2322,7 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
     const myRequestCards = customerRequests;
 
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
         <Header title="Přeprava" />
         <ScrollView style={styles.scroll} contentContainerStyle={styles.appContent} keyboardShouldPersistTaps="handled">
           <View style={styles.segmentedBar}>
@@ -2329,6 +2338,11 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
               </TouchableOpacity>
             ))}
           </View>
+          {__DEV__ ? (
+            <TouchableOpacity style={styles.devPreviewButton} onPress={() => setScreen("transportPreview")} accessibilityRole="button" accessibilityLabel="Náhled karet, pouze vývoj">
+              <Text style={styles.devPreviewLink}>Náhled karet (DEV)</Text>
+            </TouchableOpacity>
+          ) : null}
 
           {transportTab !== "mine" ? (
             <View style={styles.filterPanel}>
@@ -2374,21 +2388,18 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
               {openRequestCards.length === 0 ? (
                 <View style={styles.emptyPanel}><Text style={styles.emptyTitle}>{transportFiltersActive ? "Žádné poptávky neodpovídají filtrům" : "Žádné otevřené poptávky"}</Text></View>
               ) : openRequestCards.map((item) => (
-                <TouchableOpacity key={item.id} style={styles.dispatchCard} onPress={() => { setActiveJobId(item.id); setRequestViewMode("provider"); setScreen("job"); }}>
-                  <View style={styles.dispatchHeader}>
-                    <Text style={styles.dispatchLabel}>POPTÁVKA</Text>
-                    <Text style={styles.statusPill}>{transportStatusLabel(item.status)}</Text>
-                  </View>
-                  <Text style={styles.dispatchVehicle}>{item.vehicle}</Text>
-                  <Text style={styles.routeLine}>{routeDisplayLabel(item)}</Text>
-                  <View style={styles.dispatchFooter}>
-                    <View>
-                      <Text style={styles.dispatchMeta}>{requestTimingLabel(item)}</Text>
-                      <Text style={styles.dispatchMeta}>{vehicleMobilityLabel(item.vehicleMobility)}</Text>
-                    </View>
-                    <Text style={styles.dispatchArrow}>→</Text>
-                  </View>
-                </TouchableOpacity>
+                <TransportCard
+                  key={item.id}
+                  kind="request"
+                  badge="POPTÁVKA"
+                  route={routeDisplayLabel(item)}
+                  vehicle={item.vehicle}
+                  meta={[requestTimingLabel(item), vehicleMobilityLabel(item.vehicleMobility)]}
+                  status={transportStatusLabel(item.status)}
+                  actionLabel="Otevřít"
+                  accessibilityLabel={`Poptávka ${routeDisplayLabel(item)}`}
+                  onPress={() => { setActiveJobId(item.id); setRequestViewMode("provider"); setScreen("job"); }}
+                />
               ))}
             </View>
           ) : null}
@@ -2414,28 +2425,24 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
                   <Text style={styles.emptyCopy}>{transportFiltersActive ? "Upravte nebo vymažte filtry a zkuste to znovu." : "Aktivní nabídky volné kapacity se zobrazí zde."}</Text>
                 </View>
               ) : openCapacityCards.map((route) => (
-                <TouchableOpacity
+                <TransportCard
                   key={route.id}
-                  style={styles.dispatchCard}
+                  kind="capacity"
+                  badge="VOLNÁ KAPACITA"
+                  route={`${route.fromAddress} → ${route.toAddress}`}
+                  vehicle={route.vehicleTypes}
+                  meta={[
+                    `Odjezd: ${carrierRouteDepartureLabel(route.departureAt)}`,
+                    route.maxDeviationKm !== null ? `Max. odchylka ${route.maxDeviationKm} km` : null,
+                    `${route.availableSpaces} ${route.availableSpaces === 1 ? "volné místo" : route.availableSpaces >= 2 && route.availableSpaces <= 4 ? "volná místa" : "volných míst"}${route.price !== null ? ` · ${carrierRoutePriceLabel(route.price)}` : ""}`,
+                  ]}
+                  accessibilityLabel={`Volná kapacita ${route.fromAddress} ${route.toAddress}`}
+                  actionLabel="Detail trasy"
                   onPress={() => {
                     setActiveRouteId(route.id);
                     setScreen("routeDetail");
                   }}
-                >
-                  <View style={styles.dispatchHeader}>
-                    <Text style={styles.dispatchLabel}>VOLNÁ KAPACITA</Text>
-                  </View>
-                  <Text style={styles.dispatchVehicle}>{route.vehicleTypes}</Text>
-                  <Text style={styles.routeLine}>{route.fromAddress} → {route.toAddress}</Text>
-                  <View style={styles.dispatchFooter}>
-                    <View>
-                      <Text style={styles.dispatchMeta}>Odjezd: {carrierRouteDepartureLabel(route.departureAt)}</Text>
-                      {route.maxDeviationKm !== null ? <Text style={styles.dispatchMeta}>Max. odchylka {route.maxDeviationKm} km</Text> : null}
-                      <Text style={styles.dispatchMeta}>{route.availableSpaces} {route.availableSpaces === 1 ? "volné místo" : route.availableSpaces >= 2 && route.availableSpaces <= 4 ? "volná místa" : "volných míst"}{route.price !== null ? ` · ${carrierRoutePriceLabel(route.price)}` : ""}</Text>
-                    </View>
-                    <Text style={styles.dispatchArrow}>→</Text>
-                  </View>
-                </TouchableOpacity>
+                />
               ))}
             </View>
           ) : null}
@@ -2451,9 +2458,19 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
               ) : myAcceptedTransportCards.length === 0 ? (
                 <View style={styles.emptyPanel}><Text style={styles.emptyTitle}>Zatím nemáte žádnou přijatou přepravu</Text></View>
               ) : myAcceptedTransportCards.map((item) => (
-                <TouchableOpacity
+                <TransportCard
                   key={item.id}
-                  style={styles.dispatchCard}
+                  kind="capacity"
+                  badge="PŘEPRAVA"
+                  route={routeDisplayLabel(item)}
+                  vehicle={`${item.vehicle} · ${vehicleMobilityLabel(item.vehicleMobility)}`}
+                  meta={[
+                    requestTimingLabel(item),
+                    item.acceptedOffer.price === null ? "Cena dohodou" : `${item.acceptedOffer.price.toLocaleString("cs-CZ")} Kč`,
+                  ]}
+                  status={transportStatusLabel(item.status)}
+                  actionLabel="Spravovat"
+                  accessibilityLabel={`Přeprava ${routeDisplayLabel(item)}`}
                   onPress={() => {
                     setActiveJobId(item.id);
                     setRequestViewMode("provider");
@@ -2464,25 +2481,7 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
                     );
                     setScreen("tracking");
                   }}
-                >
-                  <View style={styles.dispatchHeader}>
-                    <Text style={styles.dispatchLabel}>PŘEPRAVA</Text>
-                    <Text style={styles.statusPill}>{transportStatusLabel(item.status)}</Text>
-                  </View>
-                  <Text style={styles.dispatchVehicle}>{item.vehicle} · {vehicleMobilityLabel(item.vehicleMobility)}</Text>
-                  <Text style={styles.routeLine}>{routeDisplayLabel(item)}</Text>
-                  <View style={styles.dispatchFooter}>
-                    <View>
-                      <Text style={styles.dispatchMeta}>{requestTimingLabel(item)}</Text>
-                      <Text style={styles.dispatchMeta}>
-                        {item.acceptedOffer.price === null
-                          ? "Cena dohodou"
-                          : `${item.acceptedOffer.price.toLocaleString("cs-CZ")} Kč`}
-                      </Text>
-                    </View>
-                    <Text style={styles.dispatchArrow}>→</Text>
-                  </View>
-                </TouchableOpacity>
+                />
               ))}
 
               <View style={styles.transportSectionHeader}>
@@ -2492,27 +2491,27 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
               {myRequestCards.length === 0 ? (
                 <View style={styles.emptyPanel}><Text style={styles.emptyTitle}>Zatím nemáte žádnou vlastní poptávku</Text></View>
               ) : myRequestCards.map((item) => (
-                <TouchableOpacity key={item.id} style={styles.dispatchCard} onPress={() => { setActiveJobId(item.id); setRequestViewMode("owner"); setJobs((current) => current.some((job) => job.id === item.id) ? current : [...current, item]); setScreen("job"); }}>
-                  <View style={styles.dispatchHeader}>
-                    <Text style={styles.dispatchLabel}>MOJE POPTÁVKA</Text>
-                    <Text style={styles.statusPill}>{transportStatusLabel(item.status)}</Text>
-                  </View>
-                  <Text style={styles.dispatchVehicle}>{item.vehicle}</Text>
-                  <Text style={styles.routeLine}>{routeDisplayLabel(item)}</Text>
-                  <View style={styles.dispatchFooter}>
-                    <View>
-                      <Text style={styles.dispatchMeta}>{requestTimingLabel(item)}</Text>
-                      <Text style={styles.dispatchMeta}>{offerCounts[item.id] ? `${offerCounts[item.id]} ${offerCounts[item.id] === 1 ? "nabídka" : "nabídky"}` : "Bez nabídek"}</Text>
-                    </View>
-                    <Text style={styles.dispatchArrow}>→</Text>
-                  </View>
-                </TouchableOpacity>
+                <TransportCard
+                  key={item.id}
+                  kind="request"
+                  badge="MOJE POPTÁVKA"
+                  route={routeDisplayLabel(item)}
+                  vehicle={item.vehicle}
+                  meta={[
+                    requestTimingLabel(item),
+                    offerCounts[item.id] ? `${offerCounts[item.id]} ${offerCounts[item.id] === 1 ? "nabídka" : "nabídky"}` : "Bez nabídek",
+                  ]}
+                  status={transportStatusLabel(item.status)}
+                  actionLabel="Detail"
+                  accessibilityLabel={`Moje poptávka ${routeDisplayLabel(item)}`}
+                  onPress={() => { setActiveJobId(item.id); setRequestViewMode("owner"); setJobs((current) => current.some((job) => job.id === item.id) ? current : [...current, item]); setScreen("job"); }}
+                />
               ))}
             </View>
           ) : null}
         </ScrollView>
         <BottomNavigation />
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -4558,6 +4557,8 @@ const styles = StyleSheet.create({
   segmentedText: { color: DESIGN.colors.textSecondary, fontSize: 13, fontWeight: "600" },
   segmentedTextActive: { color: DESIGN.colors.textPrimary, fontWeight: "800" },
   segmentedUnderline: { height: 2, width: "100%", backgroundColor: DESIGN.colors.primary, marginTop: DESIGN.spacing.sm, borderRadius: 2 },
+  devPreviewButton: { minHeight: 40, justifyContent: "center", alignItems: "center", marginTop: DESIGN.spacing.sm, marginBottom: DESIGN.spacing.sm },
+  devPreviewLink: { color: DESIGN.colors.textSecondary, fontSize: 12, textAlign: "center", fontWeight: "700" },
   dispatchCard: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: DESIGN.radius.medium, paddingHorizontal: DESIGN.spacing.md, paddingVertical: DESIGN.spacing.sm, marginBottom: DESIGN.spacing.sm, backgroundColor: DESIGN.colors.surface },
   dispatchHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 },
   dispatchLabel: { color: DESIGN.colors.textSecondary, fontSize: 10, fontWeight: "800", letterSpacing: 0.9 },
@@ -4839,3 +4840,11 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
   },
 });
+
+export default function RoadLinkApp() {
+  return (
+    <SafeAreaProvider>
+      <App />
+    </SafeAreaProvider>
+  );
+}
