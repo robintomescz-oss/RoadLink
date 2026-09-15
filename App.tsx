@@ -248,15 +248,16 @@ const DESIGN = {
   colors: {
     background: "#F6F8FB",
     surface: "#FFFFFF",
-    primary: "#0B1F36",
+    primary: "#102A43",
     primaryDark: "#061525",
-    textPrimary: "#0F172A",
-    textSecondary: "#667085",
-    border: "#E5EAF0",
-    success: "#15803d",
-    danger: "#b91c1c",
-    warning: "#b45309",
-    primarySoft: "#eaf4ff",
+    actionBlue: "#2563EB",
+    textPrimary: "#17212B",
+    textSecondary: "#66788A",
+    border: "#E2E8F0",
+    success: "#15803D",
+    danger: "#DC2626",
+    warning: "#D97706",
+    primarySoft: "#EAF3FF",
   },
   spacing: { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24 },
   radius: { small: 10, medium: 12, large: 14 },
@@ -2148,6 +2149,100 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
     );
   }
 
+  function DetailShell({ title, onBack, children }: { title: string; onBack: () => void; children: React.ReactNode }) {
+    const insets = useSafeAreaInsets();
+    return (
+      <View style={styles.detailScreen}>
+        <StatusBar style="dark" />
+        <View style={[styles.detailTopBar, { paddingTop: insets.top + DESIGN.spacing.sm }]}>
+          <TouchableOpacity style={styles.detailBackButton} onPress={onBack} accessibilityRole="button" accessibilityLabel="Zpět">
+            <Text style={styles.detailBackText}>‹ Zpět</Text>
+          </TouchableOpacity>
+          <Text style={styles.detailTopTitle}>{title}</Text>
+          <View style={styles.detailTopSpacer} />
+        </View>
+        <ScrollView style={styles.scroll} contentContainerStyle={[styles.requestDetailContent, { paddingBottom: 40 + insets.bottom }]} keyboardShouldPersistTaps="handled">
+          {children}
+        </ScrollView>
+      </View>
+    );
+  }
+
+  function DetailStatusHeader({ job, label }: { job: Job; label: string }) {
+    return (
+      <View style={styles.detailStatusCard}>
+        <View style={styles.detailStatusTopRow}>
+          <Text style={styles.detailEyebrow}>{label}</Text>
+          <Text style={styles.detailStatusPill}>{transportStatusLabel(job.status)}</Text>
+        </View>
+        <Text style={styles.detailVehicleTitle}>{job.vehicle}</Text>
+        {job.vehicleModel?.trim() ? <Text style={styles.detailSubtle}>{job.vehicleModel}</Text> : null}
+        <View style={styles.detailRouteBlock}>
+          <View style={styles.detailRoutePoint}>
+            <View style={styles.detailRouteDot} />
+            <View style={styles.detailRouteTextBlock}>
+              <Text style={styles.detailRouteLabel}>Vyzvednutí</Text>
+              <Text style={styles.detailRouteValue}>{pickupDisplayLabel(job)}</Text>
+            </View>
+          </View>
+          <View style={styles.detailRouteConnector} />
+          <View style={styles.detailRoutePoint}>
+            <View style={[styles.detailRouteDot, styles.detailRouteDotDestination]} />
+            <View style={styles.detailRouteTextBlock}>
+              <Text style={styles.detailRouteLabel}>Cíl</Text>
+              <Text style={styles.detailRouteValue}>{job.destination}</Text>
+            </View>
+          </View>
+        </View>
+        <View style={styles.detailMetaStrip}>
+          <Text style={styles.detailMetaLabel}>Termín</Text>
+          <Text style={styles.detailMetaValue}>{requestTimingLabel(job)}</Text>
+        </View>
+        {job.timePreference && job.timePreference !== "specific" ? (
+          <View style={styles.detailMetaStripMuted}>
+            <Text style={styles.detailMetaLabel}>Preference</Text>
+            <Text style={styles.detailMetaValue}>{timePreferenceLabel(job.timePreference)}</Text>
+          </View>
+        ) : null}
+      </View>
+    );
+  }
+
+  function DetailSection({ title, children }: { title: string; children: React.ReactNode }) {
+    return (
+      <View style={styles.detailCard}>
+        <Text style={styles.detailSectionTitleV2}>{title}</Text>
+        {children}
+      </View>
+    );
+  }
+
+  function DetailInfoRow({ label, value }: { label: string; value: React.ReactNode }) {
+    if (value === null || value === undefined || value === "") return null;
+    return (
+      <View style={styles.detailInfoRow}>
+        <Text style={styles.detailInfoLabel}>{label}</Text>
+        <Text style={styles.detailInfoValue}>{value}</Text>
+      </View>
+    );
+  }
+
+  function DetailPrimaryAction({ label, loadingLabel, loading, onPress }: { label: string; loadingLabel?: string; loading?: boolean; onPress: () => void }) {
+    return (
+      <TouchableOpacity style={styles.detailPrimaryButton} disabled={loading} onPress={onPress}>
+        <Text style={styles.detailPrimaryButtonText}>{loading && loadingLabel ? loadingLabel : label}</Text>
+      </TouchableOpacity>
+    );
+  }
+
+  function DetailSecondaryAction({ label, loadingLabel, loading, destructive = false, onPress }: { label: string; loadingLabel?: string; loading?: boolean; destructive?: boolean; onPress: () => void }) {
+    return (
+      <TouchableOpacity style={[styles.detailSecondaryButton, destructive && styles.detailDangerButton]} disabled={loading} onPress={onPress}>
+        <Text style={[styles.detailSecondaryButtonText, destructive && styles.detailDangerButtonText]}>{loading && loadingLabel ? loadingLabel : label}</Text>
+      </TouchableOpacity>
+    );
+  }
+
 
   if (screen === "login" || screen === "signup") {
     return (
@@ -3488,173 +3583,97 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
     const canDriverUpdateTransport = Boolean(selectedOffer && selectedOffer.driver_id === userId);
 
     return (
-      <SafeAreaView style={styles.container}>
-        <Header title="Řízení přepravy" />
-        <ScrollView style={styles.scroll} contentContainerStyle={styles.requestDetailContent} keyboardShouldPersistTaps="handled">
-          <View style={styles.detailTopRow}>
-            <View>
-              <Text style={styles.sectionLabel}>PŘEPRAVA</Text>
-              <Text style={styles.detailHeroTitle}>{transportLifecycleStatusLabel(activeJob.status)}</Text>
-            </View>
-            <Text style={styles.statusPill}>{transportLifecycleStatusLabel(activeJob.status)}</Text>
-          </View>
-          <Text style={[styles.detailMuted, styles.transportLead]}>{transportLifecycleMessage(activeJob.status)}</Text>
-
-          <View style={styles.detailSectionFlat}>
-            <Text style={styles.sectionLabel}>TRASA</Text>
-            <Text style={styles.routeEndpoint}>Vyzvednutí {pickupDisplayLabel(activeJob)}</Text>
-            <Text style={styles.routeArrowDown}>↓</Text>
-            <Text style={styles.routeEndpoint}>{activeJob.destination}</Text>
-          </View>
-
-          <View style={styles.detailTwoColumnRow}>
-            <View style={styles.detailMiniSection}>
-              <Text style={styles.sectionLabel}>VOZIDLO</Text>
-              <Text style={styles.detailValueStrong}>{activeJob.vehicle}</Text>
-              <Text style={styles.detailMuted}>{vehicleMobilityLabel(activeJob.vehicleMobility)}</Text>
-            </View>
-            <View style={styles.detailMiniSection}>
-              <Text style={styles.sectionLabel}>TERMÍN</Text>
-              <Text style={styles.detailValueStrong}>{requestTimingLabel(activeJob)}</Text>
-            </View>
-          </View>
-
-          {selectedOffer ? (
-            <View style={styles.offerRowCard}>
-              <Text style={styles.sectionLabel}>CENOVÁ NABÍDKA</Text>
-              <Text style={styles.offerPriceCompact}>
-                {selectedOffer.price === null ? "Cena dohodou" : `${selectedOffer.price.toLocaleString("cs-CZ")} Kč`}
-              </Text>
-              {selectedOffer.estimated_arrival_minutes ? <Text style={styles.detailMuted}>Příjezd: {selectedOffer.estimated_arrival_minutes} min</Text> : null}
-              {selectedOffer.estimated_arrival_at ? <Text style={styles.detailMuted}>Příjezd: {formatOfferArrivalDateTime(selectedOffer.estimated_arrival_at)}</Text> : null}
-              {selectedOffer.message ? <Text style={styles.detailValue}>Zpráva přepravce: {selectedOffer.message}</Text> : null}
-            </View>
-          ) : null}
-
-          <View style={styles.detailSectionFlat}>
-            <Text style={styles.sectionLabel}>STAV</Text>
-            <Text style={styles.detailValueStrong}>● {transportLifecycleStatusLabel(activeJob.status)}</Text>
-          </View>
-
-          {canDriverUpdateTransport && activeJob.status === "offer_selected" ? (
-            <TouchableOpacity style={styles.primary} disabled={transportStatusLoading} onPress={() => updateTransportStatus("in_progress")}>
-              <Text style={styles.primaryText}>{transportStatusLoading ? "Ukládám…" : "ZAHÁJIT PŘEPRAVU"}</Text>
-            </TouchableOpacity>
-          ) : null}
-
-          {canDriverUpdateTransport && activeJob.status === "in_progress" ? (
-            <TouchableOpacity style={styles.primary} disabled={transportStatusLoading} onPress={() => updateTransportStatus("completed")}>
-              <Text style={styles.primaryText}>{transportStatusLoading ? "Ukládám…" : "OZNAČIT JAKO DORUČENO"}</Text>
-            </TouchableOpacity>
-          ) : null}
-
-          <TouchableOpacity style={styles.secondary} onPress={() => { setTransportTab(requestViewMode === "owner" ? "mine" : "requests"); setScreen("transport"); }}>
-            <Text style={styles.secondaryText}>Zpět na přepravu</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </SafeAreaView>
+      <DetailShell
+        title="Detail přepravy"
+        onBack={() => { setTransportTab(requestViewMode === "owner" ? "mine" : "requests"); setScreen("transport"); }}
+      >
+        <DetailStatusHeader job={activeJob} label="Přeprava" />
+        <DetailSection title="Stav přepravy">
+          <Text style={styles.detailBodyText}>{transportLifecycleMessage(activeJob.status)}</Text>
+          <DetailInfoRow label="Aktuální stav" value={transportLifecycleStatusLabel(activeJob.status)} />
+        </DetailSection>
+        <DetailSection title="Informace o vozidle">
+          <DetailInfoRow label="Typ vozidla" value={activeJob.vehicle} />
+          {activeJob.vehicleModel?.trim() ? <DetailInfoRow label="Model" value={activeJob.vehicleModel} /> : null}
+          <DetailInfoRow label="Pojízdnost" value={vehicleMobilityLabel(activeJob.vehicleMobility)} />
+          {activeJob.canTrailer !== null && activeJob.canTrailer !== undefined ? <DetailInfoRow label="Najede na vlek" value={triStateLabel(activeJob.canTrailer)} /> : null}
+          {activeJob.problem?.trim() ? <DetailInfoRow label="Popis" value={activeJob.problem} /> : null}
+        </DetailSection>
+        {selectedOffer ? (
+          <DetailSection title="Vybraná nabídka">
+            <Text style={styles.detailPriceText}>{selectedOffer.price === null ? "Cena dohodou" : `${selectedOffer.price.toLocaleString("cs-CZ")} Kč`}</Text>
+            {selectedOffer.estimated_arrival_minutes ? <DetailInfoRow label="Příjezd" value={`${selectedOffer.estimated_arrival_minutes} min`} /> : null}
+            {selectedOffer.estimated_arrival_at ? <DetailInfoRow label="Příjezd" value={formatOfferArrivalDateTime(selectedOffer.estimated_arrival_at)} /> : null}
+            {selectedOffer.message?.trim() ? <DetailInfoRow label="Zpráva" value={selectedOffer.message} /> : null}
+          </DetailSection>
+        ) : null}
+        {canDriverUpdateTransport && activeJob.status === "offer_selected" ? (
+          <DetailPrimaryAction label="Zahájit přepravu" loadingLabel="Ukládám…" loading={transportStatusLoading} onPress={() => updateTransportStatus("in_progress")} />
+        ) : null}
+        {canDriverUpdateTransport && activeJob.status === "in_progress" ? (
+          <DetailPrimaryAction label="Označit jako doručené" loadingLabel="Ukládám…" loading={transportStatusLoading} onPress={() => updateTransportStatus("completed")} />
+        ) : null}
+        <DetailSecondaryAction label="Zpět na přepravu" onPress={() => { setTransportTab(requestViewMode === "owner" ? "mine" : "requests"); setScreen("transport"); }} />
+      </DetailShell>
     );
   }
 
   if (screen === "job" && requestViewMode === "owner") {
     if (!activeJob) return null;
     return (
-      <SafeAreaView style={styles.container}>
-        <Header title="Poptávka" />
-        <ScrollView style={styles.scroll} contentContainerStyle={styles.requestDetailContent} keyboardShouldPersistTaps="handled">
-          <View style={styles.detailTopRow}>
-            <View>
-              <Text style={styles.sectionLabel}>POPTÁVKA</Text>
-              <Text style={styles.detailHeroTitle}>{activeJob.vehicle}</Text>
-            </View>
-            <Text style={styles.statusPill}>{transportStatusLabel(activeJob.status)}</Text>
-          </View>
-
-          <View style={styles.detailSectionFlat}>
-            <Text style={styles.sectionLabel}>TRASA</Text>
-            <Text style={styles.routeEndpoint}>Vyzvednutí {pickupDisplayLabel(activeJob)}</Text>
-            <Text style={styles.routeArrowDown}>↓</Text>
-            <Text style={styles.routeEndpoint}>{activeJob.destination}</Text>
-          </View>
-
-          <View style={styles.detailTwoColumnRow}>
-            <View style={styles.detailMiniSection}>
-              <Text style={styles.sectionLabel}>VOZIDLO</Text>
-              <Text style={styles.detailValueStrong}>{activeJob.vehicle}{activeJob.vehicleModel ? ` · ${activeJob.vehicleModel}` : ""} · {vehicleMobilityLabel(activeJob.vehicleMobility)}</Text>
-            </View>
-            <View style={styles.detailMiniSection}>
-              <Text style={styles.sectionLabel}>TERMÍN</Text>
-              <Text style={styles.detailValueStrong}>{requestTimingLabel(activeJob)}</Text>
-            </View>
-          </View>
-
-          <View style={styles.detailSectionFlat}>
-            <Text style={styles.sectionLabel}>DETAILY</Text>
-            <Text style={styles.detailValue}>{activeJob.problem || "Bez poznámky"}</Text>
-          </View>
-          {activeJob.canTrailer !== null && activeJob.canTrailer !== undefined ? (
-            <View style={styles.detailSectionFlat}>
-              <Text style={styles.sectionLabel}>STAV VOZIDLA</Text>
-              <Text style={styles.detailValue}>Pojízdné: {mobilityOperableLabel(activeJob.vehicleMobility)}{"\n"}Lze najet na vlek: {triStateLabel(activeJob.canTrailer)}</Text>
-            </View>
-          ) : null}
-
-          <View style={styles.offerHeaderStrip}>
-            <Text style={styles.sectionLabel}>CENOVÉ NABÍDKY</Text>
-            <TouchableOpacity style={styles.refreshButton} onPress={loadOffers}>
-              <Text style={styles.refreshButtonText}>Obnovit</Text>
-            </TouchableOpacity>
-          </View>
-
-          {offersLoading ? (
-            <View style={styles.emptyPanel}><Text style={styles.emptyTitle}>Načítám cenové nabídky…</Text></View>
-          ) : offers.length === 0 ? (
-            <View style={styles.emptyPanel}><Text style={styles.emptyTitle}>Zatím nemáte žádné cenové nabídky.</Text></View>
-          ) : (
-            offers.map((offer) => (
-              <View key={offer.id} style={styles.offerRowCard}>
-                <View style={styles.dispatchHeader}>
-                  <Text style={styles.dispatchLabel}>CENOVÁ NABÍDKA</Text>
-                  <Text style={styles.statusPill}>{offerStatusLabel(offer.status)}</Text>
-                </View>
-                <Text style={styles.sectionLabel}>PŘEPRAVCE</Text>
-                <Text style={styles.detailValueStrong}>{providerNameForOffer(offer)}</Text>
-                <Text style={styles.offerPriceCompact}>{offer.price === null ? "Cena dohodou" : `${offer.price.toLocaleString("cs-CZ")} Kč`}</Text>
-                {offer.estimated_arrival_minutes ? <Text style={styles.detailMuted}>Příjezd: {offer.estimated_arrival_minutes} min</Text> : null}
-                {offer.estimated_arrival_at ? <Text style={styles.detailMuted}>Příjezd: {formatOfferArrivalDateTime(offer.estimated_arrival_at)}</Text> : null}
-                {offer.message ? <Text style={styles.detailValue}>Zpráva přepravce: {offer.message}</Text> : null}
-                {activeJob.status === "open" && offer.status === "pending" ? (
-                  <TouchableOpacity style={styles.primary} disabled={selectingOfferId !== null} onPress={() => confirmSelectOffer(offer)}>
-                    <Text style={styles.primaryText}>{selectingOfferId === offer.id ? "Vybírám…" : "VYBRAT PŘEPRAVCE"}</Text>
-                  </TouchableOpacity>
-                ) : null}
-                <TouchableOpacity style={styles.secondary} disabled={providerProfileLoading} onPress={() => openProviderProfile(offer)}>
-                  <Text style={styles.secondaryText}>{providerProfileLoading && selectedOfferId === offer.id ? "Načítám…" : "ZOBRAZIT PROFIL"}</Text>
-                </TouchableOpacity>
-              </View>
-            ))
-          )}
-
-          {(activeJob.status === "offer_selected" || activeJob.status === "in_progress" || activeJob.status === "completed") ? (
-            <View style={styles.detailSectionFlat}>
-              <Text style={styles.sectionLabel}>PŘEPRAVA</Text>
-              <Text style={styles.detailValue}>{transportLifecycleMessage(activeJob.status)}</Text>
-              <TouchableOpacity style={styles.primary} onPress={() => setScreen("tracking")}>
-                <Text style={styles.primaryText}>PŘEJÍT K PŘEPRAVĚ</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-
-          {activeJob.status === "open" ? (
-            <TouchableOpacity style={styles.secondary} disabled={cancellingRequest} onPress={confirmCancelRequest}>
-              <Text style={styles.secondaryText}>{cancellingRequest ? "Ruším…" : "ZRUŠIT POPTÁVKU"}</Text>
-            </TouchableOpacity>
-          ) : null}
-          <TouchableOpacity style={styles.secondary} onPress={() => { setTransportTab("mine"); setScreen("transport"); }}>
-            <Text style={styles.secondaryText}>Zpět na moje poptávky</Text>
+      <DetailShell title="Detail poptávky" onBack={() => { setTransportTab("mine"); setScreen("transport"); }}>
+        <DetailStatusHeader job={activeJob} label="Moje poptávka" />
+        <DetailSection title="Informace o přepravě">
+          <DetailInfoRow label="Vozidlo" value={activeJob.vehicle} />
+          {activeJob.vehicleModel?.trim() ? <DetailInfoRow label="Model" value={activeJob.vehicleModel} /> : null}
+          <DetailInfoRow label="Pojízdnost" value={vehicleMobilityLabel(activeJob.vehicleMobility)} />
+          {activeJob.canTrailer !== null && activeJob.canTrailer !== undefined ? <DetailInfoRow label="Najede na vlek" value={triStateLabel(activeJob.canTrailer)} /> : null}
+          {activeJob.problem?.trim() ? <DetailInfoRow label="Popis" value={activeJob.problem} /> : null}
+        </DetailSection>
+        <View style={styles.detailSectionHeaderRow}>
+          <Text style={styles.detailSectionTitleV2}>Cenové nabídky</Text>
+          <TouchableOpacity style={styles.detailRefreshButton} onPress={loadOffers}>
+            <Text style={styles.detailRefreshText}>Obnovit</Text>
           </TouchableOpacity>
-        </ScrollView>
-      </SafeAreaView>
+        </View>
+        {offersLoading ? (
+          <View style={styles.detailEmptyCard}><Text style={styles.detailEmptyTitle}>Načítám cenové nabídky…</Text></View>
+        ) : offers.length === 0 ? (
+          <View style={styles.detailEmptyCard}><Text style={styles.detailEmptyTitle}>Zatím bez cenových nabídek.</Text><Text style={styles.detailEmptyText}>Jakmile přepravce odešle cenu, zobrazí se tady.</Text></View>
+        ) : (
+          offers.map((offer) => (
+            <View key={offer.id} style={[styles.detailOfferCard, offer.status === "accepted" && styles.detailOfferAccepted, offer.status === "rejected" && styles.detailOfferRejected]}>
+              <View style={styles.detailStatusTopRow}>
+                <Text style={styles.detailEyebrow}>Přepravce</Text>
+                <Text style={styles.detailStatusPill}>{offerStatusLabel(offer.status)}</Text>
+              </View>
+              <Text style={styles.detailProviderName}>{providerNameForOffer(offer)}</Text>
+              <Text style={styles.detailPriceText}>{offer.price === null ? "Cena dohodou" : `${offer.price.toLocaleString("cs-CZ")} Kč`}</Text>
+              {offer.estimated_arrival_minutes ? <DetailInfoRow label="Příjezd" value={`${offer.estimated_arrival_minutes} min`} /> : null}
+              {offer.estimated_arrival_at ? <DetailInfoRow label="Příjezd" value={formatOfferArrivalDateTime(offer.estimated_arrival_at)} /> : null}
+              {offer.message?.trim() ? <Text style={styles.detailOfferMessage}>{offer.message}</Text> : null}
+              {activeJob.status === "open" && offer.status === "pending" ? (
+                <DetailPrimaryAction label="Vybrat přepravce" loadingLabel="Vybírám…" loading={selectingOfferId === offer.id} onPress={() => confirmSelectOffer(offer)} />
+              ) : null}
+              <DetailSecondaryAction label="Zobrazit profil" loadingLabel="Načítám…" loading={providerProfileLoading && selectedOfferId === offer.id} onPress={() => openProviderProfile(offer)} />
+            </View>
+          ))
+        )}
+        {(activeJob.status === "offer_selected" || activeJob.status === "in_progress" || activeJob.status === "completed") ? (
+          <DetailSection title="Přeprava">
+            <Text style={styles.detailBodyText}>{transportLifecycleMessage(activeJob.status)}</Text>
+            <DetailPrimaryAction label="Přejít k přepravě" onPress={() => setScreen("tracking")} />
+          </DetailSection>
+        ) : null}
+        {activeJob.status === "open" ? (
+          <View style={styles.detailDangerZone}>
+            <Text style={styles.detailDangerTitle}>Zrušení poptávky</Text>
+            <Text style={styles.detailDangerCopy}>Sekundární akce. Po potvrzení už přepravci nebudou moci posílat nabídky.</Text>
+            <DetailSecondaryAction label="Zrušit poptávku" loadingLabel="Ruším…" loading={cancellingRequest} destructive onPress={confirmCancelRequest} />
+          </View>
+        ) : null}
+        <DetailSecondaryAction label="Zpět na moje poptávky" onPress={() => { setTransportTab("mine"); setScreen("transport"); }} />
+      </DetailShell>
     );
   }
 
@@ -3763,92 +3782,48 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
   if (screen === "job") {
     if (!activeJob) return null;
     return (
-      <SafeAreaView style={styles.container}>
-        <Header title="Detail poptávky" />
-        <ScrollView style={styles.scroll} contentContainerStyle={styles.requestDetailContent} keyboardShouldPersistTaps="handled">
-          <View style={styles.detailTopRow}>
-            <View>
-              <Text style={styles.sectionLabel}>POPTÁVKA</Text>
-              <Text style={styles.detailHeroTitle}>{activeJob.vehicle}</Text>
-            </View>
-            <Text style={styles.statusPill}>{transportStatusLabel(activeJob.status)}</Text>
-          </View>
-
-          <View style={styles.detailSectionFlat}>
-            <Text style={styles.sectionLabel}>TRASA</Text>
-            <Text style={styles.routeEndpoint}>Vyzvednutí {pickupDisplayLabel(activeJob)}</Text>
-            <Text style={styles.routeArrowDown}>↓</Text>
-            <Text style={styles.routeEndpoint}>{activeJob.destination}</Text>
-          </View>
-
-          <View style={styles.detailTwoColumnRow}>
-            <View style={styles.detailMiniSection}>
-              <Text style={styles.sectionLabel}>VOZIDLO</Text>
-              <Text style={styles.detailValueStrong}>{activeJob.vehicle}{activeJob.vehicleModel ? ` · ${activeJob.vehicleModel}` : ""} · {vehicleMobilityLabel(activeJob.vehicleMobility)}</Text>
-            </View>
-            <View style={styles.detailMiniSection}>
-              <Text style={styles.sectionLabel}>TERMÍN</Text>
-              <Text style={styles.detailValueStrong}>{requestTimingLabel(activeJob)}</Text>
-            </View>
-          </View>
-
-          <View style={styles.detailSectionFlat}>
-            <Text style={styles.sectionLabel}>DETAILY</Text>
-            <Text style={styles.detailValue}>{activeJob.problem || "Bez poznámky"}</Text>
-          </View>
-          {activeJob.canTrailer !== null && activeJob.canTrailer !== undefined ? (
-            <View style={styles.detailSectionFlat}>
-              <Text style={styles.sectionLabel}>STAV VOZIDLA</Text>
-              <Text style={styles.detailValue}>Pojízdné: {mobilityOperableLabel(activeJob.vehicleMobility)}{"\n"}Lze najet na vlek: {triStateLabel(activeJob.canTrailer)}</Text>
-            </View>
-          ) : null}
-
-          {activeJob.status === "offer_selected" &&
-          activeAcceptedJob?.id === activeJob.id &&
-          activeAcceptedJob.acceptedOffer.driver_id === userId &&
-          activeAcceptedJob.acceptedOffer.tow_request_id === activeJob.id ? (
-            <View style={styles.offerRowCard}>
-              <Text style={styles.sectionLabel}>VAŠE NABÍDKA BYLA PŘIJATA</Text>
-              <Text style={styles.offerPriceCompact}>
-                {activeAcceptedJob.acceptedOffer.price === null
-                  ? "Cena dohodou"
-                  : `${activeAcceptedJob.acceptedOffer.price.toLocaleString("cs-CZ")} Kč`}
-              </Text>
-            </View>
-          ) : null}
-
-          <View style={styles.detailSectionFlat}>
-            <Text style={styles.sectionLabel}>AKCE</Text>
-            {activeJob.status === "open" ? (
-              <>
-                {activeJob.customerId && activeJob.customerId === userId ? (
-                  <Text style={styles.detailMuted}>Na vlastní poptávku nelze odeslat cenovou nabídku.</Text>
-                ) : (
-                  <>
-                    <Text style={styles.detailMuted}>Pošlete zákazníkovi svou cenu a dostupné informace k příjezdu.</Text>
-                    <TouchableOpacity style={styles.primary} onPress={() => setScreen("offerForm")}>
-                      <Text style={styles.primaryText}>NABÍDNOUT CENU</Text>
-                    </TouchableOpacity>
-                  </>
-                )}
-              </>
+      <DetailShell title="Detail poptávky" onBack={() => { setTransportTab("requests"); setScreen("transport"); }}>
+        <DetailStatusHeader job={activeJob} label="Poptávka" />
+        <DetailSection title="Informace o přepravě">
+          <DetailInfoRow label="Vozidlo" value={activeJob.vehicle} />
+          {activeJob.vehicleModel?.trim() ? <DetailInfoRow label="Model" value={activeJob.vehicleModel} /> : null}
+          <DetailInfoRow label="Pojízdnost" value={vehicleMobilityLabel(activeJob.vehicleMobility)} />
+          {activeJob.canTrailer !== null && activeJob.canTrailer !== undefined ? <DetailInfoRow label="Najede na vlek" value={triStateLabel(activeJob.canTrailer)} /> : null}
+          {activeJob.problem?.trim() ? <DetailInfoRow label="Popis" value={activeJob.problem} /> : null}
+        </DetailSection>
+        {activeJob.status === "offer_selected" &&
+        activeAcceptedJob?.id === activeJob.id &&
+        activeAcceptedJob.acceptedOffer.driver_id === userId &&
+        activeAcceptedJob.acceptedOffer.tow_request_id === activeJob.id ? (
+          <DetailSection title="Vaše přijatá nabídka">
+            <Text style={styles.detailPriceText}>
+              {activeAcceptedJob.acceptedOffer.price === null
+                ? "Cena dohodou"
+                : `${activeAcceptedJob.acceptedOffer.price.toLocaleString("cs-CZ")} Kč`}
+            </Text>
+          </DetailSection>
+        ) : null}
+        <DetailSection title="Akce">
+          {activeJob.status === "open" ? (
+            activeJob.customerId && activeJob.customerId === userId ? (
+              <Text style={styles.detailBodyMuted}>Na vlastní poptávku nelze odeslat cenovou nabídku.</Text>
             ) : (
               <>
-                <Text style={styles.detailMuted}>Stav poptávky: {transportLifecycleStatusLabel(activeJob.status)}</Text>
-                {(activeJob.status === "offer_selected" || activeJob.status === "in_progress" || activeJob.status === "completed") ? (
-                  <TouchableOpacity style={styles.primary} onPress={() => setScreen("tracking")}>
-                    <Text style={styles.primaryText}>PŘEJÍT K PŘEPRAVĚ</Text>
-                  </TouchableOpacity>
-                ) : null}
+                <Text style={styles.detailBodyMuted}>Pošlete zákazníkovi svou cenu a dostupné informace k příjezdu.</Text>
+                <DetailPrimaryAction label="Nabídnout cenu" onPress={() => setScreen("offerForm")} />
               </>
-            )}
-          </View>
-
-          <TouchableOpacity style={styles.secondary} onPress={() => { setTransportTab("requests"); setScreen("transport"); }}>
-            <Text style={styles.secondaryText}>Zpět na přepravu</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </SafeAreaView>
+            )
+          ) : (
+            <>
+              <DetailInfoRow label="Stav" value={transportLifecycleStatusLabel(activeJob.status)} />
+              {(activeJob.status === "offer_selected" || activeJob.status === "in_progress" || activeJob.status === "completed") ? (
+                <DetailPrimaryAction label="Přejít k přepravě" onPress={() => setScreen("tracking")} />
+              ) : null}
+            </>
+          )}
+        </DetailSection>
+        <DetailSecondaryAction label="Zpět na přepravu" onPress={() => { setTransportTab("requests"); setScreen("transport"); }} />
+      </DetailShell>
     );
   }
 
@@ -4507,6 +4482,58 @@ const styles = StyleSheet.create({
   requestSuccessContent: { flex: 1, padding: 28, alignItems: "center", justifyContent: "center", backgroundColor: DESIGN.colors.background },
   successMark: { width: 56, height: 56, borderRadius: 28, overflow: "hidden", backgroundColor: DESIGN.colors.textPrimary, color: DESIGN.colors.surface, fontSize: 34, lineHeight: 54, textAlign: "center", marginBottom: 18 },
   requestDetailContent: { padding: DESIGN.spacing.xl, paddingTop: DESIGN.spacing.md, paddingBottom: 40, backgroundColor: DESIGN.colors.background },
+  detailScreen: { flex: 1, backgroundColor: DESIGN.colors.background },
+  detailTopBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: DESIGN.spacing.lg, paddingBottom: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface, borderBottomWidth: 1, borderBottomColor: DESIGN.colors.border },
+  detailBackButton: { minHeight: 40, minWidth: 84, justifyContent: "center" },
+  detailBackText: { color: DESIGN.colors.primary, fontSize: 15, fontWeight: "800" },
+  detailTopTitle: { flex: 1, color: DESIGN.colors.textPrimary, fontSize: 17, fontWeight: "800", textAlign: "center" },
+  detailTopSpacer: { width: 84 },
+  detailStatusCard: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: 16, padding: DESIGN.spacing.lg, marginBottom: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface, shadowColor: DESIGN.colors.primaryDark, shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
+  detailStatusTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: DESIGN.spacing.md, marginBottom: DESIGN.spacing.sm },
+  detailEyebrow: { color: DESIGN.colors.primary, fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase" },
+  detailStatusPill: { alignSelf: "flex-start", maxWidth: "48%", color: DESIGN.colors.primary, backgroundColor: DESIGN.colors.primarySoft, borderRadius: 999, overflow: "hidden", paddingHorizontal: 9, paddingVertical: 5, fontSize: 10, fontWeight: "800", textTransform: "uppercase" },
+  detailVehicleTitle: { color: DESIGN.colors.textPrimary, fontSize: 22, lineHeight: 28, fontWeight: "800" },
+  detailSubtle: { color: DESIGN.colors.textSecondary, fontSize: 13, lineHeight: 18, marginTop: 3 },
+  detailRouteBlock: { marginTop: DESIGN.spacing.lg, paddingTop: DESIGN.spacing.md, borderTopWidth: 1, borderTopColor: DESIGN.colors.border },
+  detailRoutePoint: { flexDirection: "row", alignItems: "flex-start" },
+  detailRouteDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: DESIGN.colors.primary, marginTop: 5, marginRight: DESIGN.spacing.md },
+  detailRouteDotDestination: { backgroundColor: DESIGN.colors.actionBlue },
+  detailRouteConnector: { width: 1, height: 18, marginLeft: 4.5, marginVertical: 3, backgroundColor: DESIGN.colors.border },
+  detailRouteTextBlock: { flex: 1 },
+  detailRouteLabel: { color: DESIGN.colors.textSecondary, fontSize: 11, fontWeight: "800", letterSpacing: 0.7, textTransform: "uppercase" },
+  detailRouteValue: { color: DESIGN.colors.textPrimary, fontSize: 16, lineHeight: 22, fontWeight: "700", marginTop: 2 },
+  detailMetaStrip: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: DESIGN.spacing.md, marginTop: DESIGN.spacing.lg, paddingTop: DESIGN.spacing.md, borderTopWidth: 1, borderTopColor: DESIGN.colors.border },
+  detailMetaStripMuted: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: DESIGN.spacing.md, marginTop: DESIGN.spacing.sm },
+  detailMetaLabel: { color: DESIGN.colors.textSecondary, fontSize: 12, fontWeight: "800" },
+  detailMetaValue: { flex: 1, color: DESIGN.colors.textPrimary, fontSize: 14, lineHeight: 20, fontWeight: "700", textAlign: "right" },
+  detailCard: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: 16, padding: DESIGN.spacing.lg, marginBottom: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface },
+  detailSectionTitleV2: { color: DESIGN.colors.textPrimary, fontSize: 15, fontWeight: "800", marginBottom: DESIGN.spacing.md },
+  detailSectionHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: DESIGN.spacing.sm, marginBottom: DESIGN.spacing.sm },
+  detailInfoRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: DESIGN.spacing.md, paddingVertical: 8, borderTopWidth: 1, borderTopColor: DESIGN.colors.border },
+  detailInfoLabel: { flex: 0.42, color: DESIGN.colors.textSecondary, fontSize: 12, lineHeight: 18, fontWeight: "800" },
+  detailInfoValue: { flex: 0.58, color: DESIGN.colors.textPrimary, fontSize: 14, lineHeight: 20, fontWeight: "600", textAlign: "right" },
+  detailBodyText: { color: DESIGN.colors.textPrimary, fontSize: 14, lineHeight: 21 },
+  detailBodyMuted: { color: DESIGN.colors.textSecondary, fontSize: 14, lineHeight: 21 },
+  detailPriceText: { color: DESIGN.colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: "800", marginBottom: DESIGN.spacing.sm },
+  detailProviderName: { color: DESIGN.colors.textPrimary, fontSize: 17, lineHeight: 23, fontWeight: "800", marginBottom: DESIGN.spacing.xs },
+  detailOfferCard: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: 16, padding: DESIGN.spacing.lg, marginBottom: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface },
+  detailOfferAccepted: { borderColor: DESIGN.colors.success, backgroundColor: "#F0FDF4" },
+  detailOfferRejected: { opacity: 0.72 },
+  detailOfferMessage: { color: DESIGN.colors.textPrimary, fontSize: 14, lineHeight: 21, marginTop: DESIGN.spacing.sm, paddingTop: DESIGN.spacing.sm, borderTopWidth: 1, borderTopColor: DESIGN.colors.border },
+  detailRefreshButton: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: 12, paddingHorizontal: DESIGN.spacing.md, paddingVertical: 8, backgroundColor: DESIGN.colors.surface },
+  detailRefreshText: { color: DESIGN.colors.primary, fontSize: 12, fontWeight: "800" },
+  detailEmptyCard: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: 16, padding: DESIGN.spacing.lg, marginBottom: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface },
+  detailEmptyTitle: { color: DESIGN.colors.textPrimary, fontSize: 15, fontWeight: "800" },
+  detailEmptyText: { color: DESIGN.colors.textSecondary, fontSize: 13, lineHeight: 19, marginTop: 4 },
+  detailPrimaryButton: { minHeight: 54, borderRadius: 12, alignItems: "center", justifyContent: "center", paddingHorizontal: DESIGN.spacing.lg, marginTop: DESIGN.spacing.md, backgroundColor: DESIGN.colors.actionBlue },
+  detailPrimaryButtonText: { color: DESIGN.colors.surface, fontSize: 14, fontWeight: "800", letterSpacing: 0.2 },
+  detailSecondaryButton: { minHeight: 48, borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: 12, alignItems: "center", justifyContent: "center", paddingHorizontal: DESIGN.spacing.lg, marginTop: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface },
+  detailSecondaryButtonText: { color: DESIGN.colors.textPrimary, fontSize: 14, fontWeight: "800" },
+  detailDangerZone: { borderWidth: 1, borderColor: "#F8CACA", borderRadius: 16, padding: DESIGN.spacing.lg, marginTop: DESIGN.spacing.sm, marginBottom: DESIGN.spacing.md, backgroundColor: "#FFF7F7" },
+  detailDangerTitle: { color: DESIGN.colors.danger, fontSize: 15, fontWeight: "800" },
+  detailDangerCopy: { color: DESIGN.colors.textSecondary, fontSize: 13, lineHeight: 19, marginTop: 4 },
+  detailDangerButton: { borderColor: "#F4B8B8", backgroundColor: "#FFF7F7" },
+  detailDangerButtonText: { color: DESIGN.colors.danger },
   detailTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", borderBottomWidth: 1, borderBottomColor: DESIGN.colors.border, paddingBottom: DESIGN.spacing.lg, marginBottom: DESIGN.spacing.lg },
   detailHeroTitle: { color: DESIGN.colors.textPrimary, fontSize: 24, fontWeight: "800", lineHeight: 30 },
   detailSectionFlat: { borderBottomWidth: 1, borderBottomColor: DESIGN.colors.border, paddingBottom: DESIGN.spacing.lg, marginBottom: DESIGN.spacing.lg },
