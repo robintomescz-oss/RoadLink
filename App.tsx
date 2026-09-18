@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   FlatList,
@@ -479,6 +479,7 @@ function App() {
     activeAcceptedJob ||
     null;
   const activeRoute = routes.find((route) => route.id === activeRouteId) || null;
+  const offerLoadSequenceRef = useRef(0);
 
   function mapTowRequestRow(row: any): Job {
     return {
@@ -687,19 +688,30 @@ function App() {
   }
 
   async function loadOffers() {
+    const loadSequence = offerLoadSequenceRef.current + 1;
+    offerLoadSequenceRef.current = loadSequence;
+
     if (!activeJobId) {
       setOffers([]);
       setProviderIdentities({});
+      setOffersLoading(false);
       return;
     }
 
     const requestId = activeJobId;
+    const requestOwnerId = activeJob?.id === requestId ? activeJob.customerId : null;
+    const canLoadProviderIdentities = Boolean(userId && requestOwnerId && requestOwnerId === userId);
+
     setOffersLoading(true);
+    setProviderIdentities({});
+
     const { data, error } = await supabase
       .from("tow_offers")
       .select("*")
       .eq("tow_request_id", requestId)
       .order("created_at", { ascending: true });
+
+    if (offerLoadSequenceRef.current !== loadSequence) return;
 
     if (error) {
       console.error("Load offers:", error.message);
@@ -711,9 +723,17 @@ function App() {
     const loadedOffers = (data || []) as TowOffer[];
     setOffers(loadedOffers);
 
+    if (!canLoadProviderIdentities) {
+      setProviderIdentities({});
+      setOffersLoading(false);
+      return;
+    }
+
     const { data: identityRows, error: identityError } = await supabase.rpc("get_offer_provider_identities", {
       p_tow_request_id: requestId,
     });
+
+    if (offerLoadSequenceRef.current !== loadSequence) return;
 
     if (identityError) {
       console.error("Load offer provider identities:", identityError.message);
@@ -1176,8 +1196,13 @@ function App() {
   useEffect(() => {
     if (screen === "tracking" || screen === "job") {
       loadOffers();
+      return;
     }
-  }, [screen, activeJobId]);
+
+    offerLoadSequenceRef.current += 1;
+    setProviderIdentities({});
+    setOffersLoading(false);
+  }, [screen, activeJobId, userId, activeJob?.customerId]);
 
   useEffect(() => {
     if (screen === "customerRequests" && userId) {
