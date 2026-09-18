@@ -480,6 +480,37 @@ function App() {
     null;
   const activeRoute = routes.find((route) => route.id === activeRouteId) || null;
   const offerLoadSequenceRef = useRef(0);
+  const transportStatusSubmissionRef = useRef(false);
+  const transportStatusConfirmationIdRef = useRef(0);
+  const transportStatusConfirmationRef = useRef<{
+    id: number;
+    requestId: string;
+    userId: string;
+    screen: "tracking" | "job";
+    status: JobStatus;
+    nextStatus: "in_progress" | "completed";
+    driverId: string;
+    used: boolean;
+  } | null>(null);
+  const transportStatusCurrentContextRef = useRef<{
+    requestId: string;
+    userId: string;
+    screen: "tracking" | "job";
+    status: JobStatus;
+    driverId: string;
+  } | null>(null);
+  const currentTransportStatusOffer = selectedOfferForActiveJob();
+  const currentTransportStatusScreen = screen === "tracking" || screen === "job" ? screen : null;
+  transportStatusCurrentContextRef.current =
+    activeJobId && activeJob && userId && currentTransportStatusScreen && currentTransportStatusOffer
+      ? {
+          requestId: activeJobId,
+          userId,
+          screen: currentTransportStatusScreen,
+          status: activeJob.status,
+          driverId: currentTransportStatusOffer.driver_id,
+        }
+      : null;
 
   function mapTowRequestRow(row: any): Job {
     return {
@@ -895,50 +926,119 @@ function App() {
     );
   }
 
-  async function updateTransportStatus(nextStatus: "in_progress" | "completed") {
-    if (!activeJobId || !activeJob || !userId || transportStatusLoading) return;
+  async function updateTransportStatus(confirmationContext: {
+    id: number;
+    requestId: string;
+    userId: string;
+    screen: "tracking" | "job";
+    status: JobStatus;
+    nextStatus: "in_progress" | "completed";
+    driverId: string;
+    used: boolean;
+  }) {
+    const currentContext = transportStatusCurrentContextRef.current;
+    if (
+      transportStatusSubmissionRef.current ||
+      !currentContext ||
+      confirmationContext.id !== transportStatusConfirmationIdRef.current ||
+      currentContext.requestId !== confirmationContext.requestId ||
+      currentContext.userId !== confirmationContext.userId ||
+      currentContext.screen !== confirmationContext.screen ||
+      currentContext.status !== confirmationContext.status ||
+      currentContext.driverId !== confirmationContext.driverId
+    ) return;
 
-    const selectedOffer =
-      offers.find((offer) => offer.status === "accepted") ||
-      (activeAcceptedJob?.acceptedOffer.tow_request_id === activeJobId ? activeAcceptedJob.acceptedOffer : null);
+    if (confirmationContext.nextStatus === "in_progress" && currentContext.status !== "offer_selected") return;
+    if (confirmationContext.nextStatus === "completed" && currentContext.status !== "in_progress") return;
 
-    if (!selectedOffer || selectedOffer.driver_id !== userId) {
+    transportStatusSubmissionRef.current = true;
+    setTransportStatusLoading(true);
+    try {
+      const { error } = await supabase.rpc("advance_tow_request_status", {
+        p_tow_request_id: currentContext.requestId,
+        p_expected_status: currentContext.status,
+        p_next_status: confirmationContext.nextStatus,
+      });
+
+      if (error) {
+        console.error("Update transport status:", error.message);
+        Alert.alert("Chyba", "Stav přepravy se nepodařilo změnit. Zkuste to prosím znovu.");
+        return;
+      }
+
+      setJobs((current) =>
+        current.map((job) => job.id === currentContext.requestId ? { ...job, status: confirmationContext.nextStatus } : job)
+      );
+      setCustomerRequests((current) =>
+        current.map((job) => job.id === currentContext.requestId ? { ...job, status: confirmationContext.nextStatus } : job)
+      );
+      setAcceptedJobs((current) =>
+        current.map((job) => job.id === currentContext.requestId ? { ...job, status: confirmationContext.nextStatus } : job)
+      );
+
+      await loadJobs();
+      await loadAcceptedJobs();
+      await loadCustomerRequests();
+      await loadOffers();
+    } catch (error) {
+      console.error("Update transport status:", error);
+      Alert.alert("Chyba", "Stav přepravy se nepodařilo změnit. Zkuste to prosím znovu.");
+    } finally {
+      transportStatusSubmissionRef.current = false;
+      setTransportStatusLoading(false);
+    }
+  }
+
+  function confirmTransportStatusUpdate(nextStatus: "in_progress" | "completed") {
+    const currentContext = transportStatusCurrentContextRef.current;
+    if (!currentContext || transportStatusLoading || transportStatusSubmissionRef.current || transportStatusConfirmationRef.current) return;
+    if (currentContext.driverId !== currentContext.userId) {
       Alert.alert("RoadLink", "Stav přepravy může měnit pouze vybraný přepravce.");
       return;
     }
+    if (nextStatus === "in_progress" && currentContext.status !== "offer_selected") return;
+    if (nextStatus === "completed" && currentContext.status !== "in_progress") return;
 
-    if (nextStatus === "in_progress" && activeJob.status !== "offer_selected") return;
-    if (nextStatus === "completed" && activeJob.status !== "in_progress") return;
+    const confirmationContext = {
+      id: transportStatusConfirmationIdRef.current,
+      requestId: currentContext.requestId,
+      userId: currentContext.userId,
+      screen: currentContext.screen,
+      status: currentContext.status,
+      nextStatus,
+      driverId: currentContext.driverId,
+      used: false,
+    };
+    transportStatusConfirmationRef.current = confirmationContext;
 
-    setTransportStatusLoading(true);
-    const { error } = await supabase.rpc("advance_tow_request_status", {
-      p_tow_request_id: activeJobId,
-      p_expected_status: activeJob.status,
-      p_next_status: nextStatus,
-    });
+    const clearConfirmation = () => {
+      if (!confirmationContext.used) confirmationContext.used = true;
+      if (transportStatusConfirmationRef.current === confirmationContext) {
+        transportStatusConfirmationRef.current = null;
+      }
+    };
 
-    if (error) {
-      console.error("Update transport status:", error.message);
-      Alert.alert("Chyba", "Stav přepravy se nepodařilo změnit. Zkuste to prosím znovu.");
-      setTransportStatusLoading(false);
-      return;
-    }
+    const submitConfirmation = () => {
+      if (confirmationContext.used || transportStatusConfirmationRef.current !== confirmationContext) return;
+      confirmationContext.used = true;
+      transportStatusConfirmationRef.current = null;
+      updateTransportStatus(confirmationContext);
+    };
 
-    setJobs((current) =>
-      current.map((job) => job.id === activeJobId ? { ...job, status: nextStatus } : job)
+    Alert.alert(
+      nextStatus === "in_progress" ? "Zahájit přepravu?" : "Dokončit přepravu?",
+      nextStatus === "in_progress"
+        ? "Potvrďte, že nyní zahajujete tuto přepravu."
+        : "Potvrďte, že vozidlo bylo doručeno a přeprava je dokončená.",
+      [
+        { text: "Zpět", style: "cancel", onPress: clearConfirmation },
+        {
+          text: nextStatus === "in_progress" ? "Zahájit přepravu" : "Potvrdit doručení",
+          onPress: submitConfirmation,
+        },
+      ],
+      { cancelable: true, onDismiss: clearConfirmation }
     );
-    setCustomerRequests((current) =>
-      current.map((job) => job.id === activeJobId ? { ...job, status: nextStatus } : job)
-    );
-    setAcceptedJobs((current) =>
-      current.map((job) => job.id === activeJobId ? { ...job, status: nextStatus } : job)
-    );
-
-    await loadJobs();
-    await loadAcceptedJobs();
-    await loadCustomerRequests();
-    await loadOffers();
-    setTransportStatusLoading(false);
   }
 
   function selectedOfferForActiveJob() {
@@ -1192,6 +1292,14 @@ function App() {
       loadAcceptedJobs();
     }
   }, [screen, userId]);
+
+  useEffect(() => {
+    transportStatusConfirmationIdRef.current += 1;
+    if (transportStatusConfirmationRef.current) {
+      transportStatusConfirmationRef.current.used = true;
+      transportStatusConfirmationRef.current = null;
+    }
+  }, [screen, activeJobId, userId, activeJob?.status, currentTransportStatusOffer?.driver_id]);
 
   useEffect(() => {
     if (screen === "tracking" || screen === "job") {
@@ -3633,10 +3741,10 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
           </DetailSection>
         ) : null}
         {canDriverUpdateTransport && activeJob.status === "offer_selected" ? (
-          <DetailPrimaryAction label="Zahájit přepravu" loadingLabel="Ukládám…" loading={transportStatusLoading} onPress={() => updateTransportStatus("in_progress")} />
+          <DetailPrimaryAction label="Zahájit přepravu" loadingLabel="Ukládám…" loading={transportStatusLoading} onPress={() => confirmTransportStatusUpdate("in_progress")} />
         ) : null}
         {canDriverUpdateTransport && activeJob.status === "in_progress" ? (
-          <DetailPrimaryAction label="Označit jako doručené" loadingLabel="Ukládám…" loading={transportStatusLoading} onPress={() => updateTransportStatus("completed")} />
+          <DetailPrimaryAction label="Označit jako doručené" loadingLabel="Ukládám…" loading={transportStatusLoading} onPress={() => confirmTransportStatusUpdate("completed")} />
         ) : null}
         <DetailSecondaryAction label="Zpět na přepravu" onPress={() => { setTransportTab(requestViewMode === "owner" ? "mine" : "requests"); setScreen("transport"); }} />
       </DetailShell>
