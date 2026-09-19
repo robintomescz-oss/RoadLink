@@ -177,7 +177,7 @@ type OfferProviderProfile = {
   user_id: string;
   display_name: string | null;
   company_name: string | null;
-  business_type: string;
+  business_type: string | null;
   ico: string | null;
   description: string | null;
   service_area: string | null;
@@ -790,6 +790,13 @@ function App() {
     if (displayName) return displayName;
 
     return "Přepravce";
+  }
+
+  function providerBusinessTypeLabel(businessType: string | null | undefined) {
+    const normalizedBusinessType = businessType?.trim();
+    if (normalizedBusinessType === "company") return "Firma";
+    if (normalizedBusinessType === "individual") return "OSVČ";
+    return "Neuvedeno";
   }
 
   async function openContactUrl(url: string, failureMessage: string) {
@@ -2376,7 +2383,6 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
     );
   }
 
-
   if (screen === "login" || screen === "signup") {
     return (
       <SafeAreaView style={styles.container}>
@@ -3817,98 +3823,54 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
         selectedProviderProfile.display_name?.trim() ||
         "Přepravce")
       : "Přepravce";
+    const publicPhone = selectedProviderProfile?.public_phone?.trim() || "";
+    const publicEmail = selectedProviderProfile?.public_email?.trim() || "";
+    const hasProviderContact = publicPhone || publicEmail;
+    const profileBusinessType = providerBusinessTypeLabel(selectedProviderProfile?.business_type);
     return (
-      <SafeAreaView style={styles.container}>
-        <Header title="Profil přepravce" />
-        <ScrollView style={styles.scroll} contentContainerStyle={styles.requestDetailContent} keyboardShouldPersistTaps="handled">
-          {providerProfileLoading ? (
-            <View style={styles.emptyPanel}><Text style={styles.emptyTitle}>Načítám profil přepravce…</Text></View>
-          ) : providerProfileError ? (
-            <View style={styles.emptyPanel}><Text style={styles.emptyTitle}>Profil přepravce se nepodařilo načíst.</Text></View>
-          ) : !selectedProviderProfile ? (
-            <View style={styles.emptyPanel}><Text style={styles.emptyTitle}>Profil přepravce zatím není k dispozici.</Text></View>
-          ) : (
-            <>
-              <View style={styles.detailSectionFlat}>
-                <Text style={styles.sectionLabel}>PŘEPRAVCE</Text>
-                <Text style={styles.detailValueStrong}>{profileName}</Text>
-              </View>
-              {selectedProviderProfile.business_type ? (
-                <View style={styles.detailSectionFlat}>
-                  <Text style={styles.sectionLabel}>TYP PŘEPRAVCE</Text>
-                  <Text style={styles.detailValue}>{selectedProviderProfile.business_type}</Text>
-                </View>
-              ) : null}
-              {selectedProviderProfile.ico?.trim() ? (
-                <View style={styles.detailSectionFlat}>
-                  <Text style={styles.sectionLabel}>IČO</Text>
-                  <Text style={styles.detailValue}>{selectedProviderProfile.ico}</Text>
-                </View>
-              ) : null}
+      <DetailShell title="Profil přepravce" onBack={() => setScreen("job")}>
+        {providerProfileLoading ? (
+          <View style={styles.detailEmptyCard}><Text style={styles.detailEmptyTitle}>Načítám profil přepravce…</Text></View>
+        ) : providerProfileError ? (
+          <View style={styles.detailEmptyCard}><Text style={styles.detailEmptyTitle}>Profil přepravce se nepodařilo načíst.</Text></View>
+        ) : !selectedProviderProfile ? (
+          <View style={styles.detailEmptyCard}><Text style={styles.detailEmptyTitle}>Profil přepravce zatím není k dispozici.</Text></View>
+        ) : (
+          <>
+            <View style={styles.providerProfileHeroCard}>
+              <Text style={styles.detailEyebrow}>Přepravce</Text>
+              <Text style={styles.providerProfileName}>{profileName}</Text>
+              <Text style={styles.providerProfileMeta}>{profileBusinessType}</Text>
+            </View>
+            <DetailSection title="Profil">
+              <DetailInfoRow label="Typ přepravce" value={profileBusinessType} />
+              <DetailInfoRow label="IČO" value={selectedProviderProfile.ico?.trim() || null} />
+              <DetailInfoRow label="Oblast působnosti" value={selectedProviderProfile.service_area?.trim() || null} />
+              <DetailInfoRow label="Maximální dojezd" value={selectedProviderProfile.max_radius_km === null ? null : `${selectedProviderProfile.max_radius_km} km`} />
+              <DetailInfoRow label="Zkušenosti" value={selectedProviderProfile.years_experience === null ? null : `${selectedProviderProfile.years_experience} let`} />
+              <DetailInfoRow label="Dostupnost" value={selectedProviderProfile.available_24_7 ? "24/7" : "Neuvedeno"} />
+            </DetailSection>
+            <DetailSection title="O přepravci">
               {selectedProviderProfile.description?.trim() ? (
-                <View style={styles.detailSectionFlat}>
-                  <Text style={styles.sectionLabel}>O PŘEPRAVCI</Text>
-                  <Text style={styles.detailValue}>{selectedProviderProfile.description}</Text>
-                </View>
-              ) : null}
-              {selectedProviderProfile.service_area?.trim() ? (
-                <View style={styles.detailSectionFlat}>
-                  <Text style={styles.sectionLabel}>OBLAST PŮSOBNOSTI</Text>
-                  <Text style={styles.detailValue}>{selectedProviderProfile.service_area}</Text>
-                </View>
-              ) : null}
-              {selectedProviderProfile.max_radius_km !== null ? (
-                <View style={styles.detailSectionFlat}>
-                  <Text style={styles.sectionLabel}>MAXIMÁLNÍ DOJEZD</Text>
-                  <Text style={styles.detailValue}>{selectedProviderProfile.max_radius_km} km</Text>
-                </View>
-              ) : null}
-              {selectedProviderProfile.years_experience !== null ? (
-                <View style={styles.detailSectionFlat}>
-                  <Text style={styles.sectionLabel}>ZKUŠENOSTI</Text>
-                  <Text style={styles.detailValue}>{selectedProviderProfile.years_experience} let</Text>
-                </View>
-              ) : null}
-              {selectedProviderProfile.available_24_7 ? (
-                <View style={styles.detailSectionFlat}>
-                  <Text style={styles.sectionLabel}>DOSTUPNOST</Text>
-                  <Text style={styles.detailValue}>24/7</Text>
-                </View>
-              ) : null}
-              <View style={styles.detailSectionFlat}>
-                <Text style={styles.sectionLabel}>KONTAKT</Text>
-                {selectedProviderProfile.public_phone?.trim() ? (
-                  <>
-                    <Text style={styles.detailValue}>{selectedProviderProfile.public_phone}</Text>
-                    <TouchableOpacity style={styles.primary} onPress={() => openContactUrl(`tel:${selectedProviderProfile.public_phone}`, "Telefon se nepodařilo otevřít.")}>
-                      <Text style={styles.primaryText}>ZAVOLAT</Text>
-                    </TouchableOpacity>
-                  </>
-                ) : null}
-                {selectedProviderProfile.public_email?.trim() ? (
-                  <>
-                    <Text style={styles.detailValue}>{selectedProviderProfile.public_email}</Text>
-                    <TouchableOpacity style={styles.primary} onPress={() => openContactUrl(`mailto:${selectedProviderProfile.public_email}`, "E-mailovou aplikaci se nepodařilo otevřít.")}>
-                      <Text style={styles.primaryText}>NAPSAT E-MAIL</Text>
-                    </TouchableOpacity>
-                  </>
-                ) : null}
-                {!selectedProviderProfile.public_phone?.trim() && !selectedProviderProfile.public_email?.trim() ? (
-                  <Text style={styles.detailMuted}>Kontaktní údaje nejsou zveřejněny.</Text>
-                ) : null}
-              </View>
-            </>
-          )}
-          <TouchableOpacity style={styles.secondary} onPress={() => setScreen("job")}>
-            <Text style={styles.secondaryText}>ZPĚT K NABÍDCE</Text>
-          </TouchableOpacity>
-          {profileOffer && activeJob && activeJob.status === "open" && profileOffer.status === "pending" ? (
-            <TouchableOpacity style={styles.primary} disabled={selectingOfferId !== null} onPress={() => confirmSelectOffer(profileOffer)}>
-              <Text style={styles.primaryText}>{selectingOfferId === profileOffer.id ? "Vybírám…" : "VYBRAT PŘEPRAVCE"}</Text>
-            </TouchableOpacity>
-          ) : null}
-        </ScrollView>
-      </SafeAreaView>
+                <Text style={styles.detailBodyText}>{selectedProviderProfile.description.trim()}</Text>
+              ) : (
+                <Text style={styles.detailBodyMuted}>Popis zatím není zveřejněn.</Text>
+              )}
+            </DetailSection>
+            <DetailSection title="Kontakt">
+              {publicPhone ? <DetailInfoRow label="Telefon" value={publicPhone} /> : null}
+              {publicEmail ? <DetailInfoRow label="E-mail" value={publicEmail} /> : null}
+              {!hasProviderContact ? <Text style={styles.detailBodyMuted}>Kontaktní údaje nejsou zveřejněny.</Text> : null}
+              {publicPhone ? <DetailSecondaryAction label="Zavolat" onPress={() => openContactUrl(`tel:${publicPhone}`, "Telefon se nepodařilo otevřít.")} /> : null}
+              {publicEmail ? <DetailSecondaryAction label="Napsat e-mail" onPress={() => openContactUrl(`mailto:${publicEmail}`, "E-mailovou aplikaci se nepodařilo otevřít.")} /> : null}
+            </DetailSection>
+          </>
+        )}
+        <DetailSecondaryAction label="Zpět k nabídce" onPress={() => setScreen("job")} />
+        {profileOffer && activeJob && activeJob.status === "open" && profileOffer.status === "pending" ? (
+          <DetailPrimaryAction label="Vybrat přepravce" loadingLabel="Vybírám…" loading={selectingOfferId !== null} onPress={() => confirmSelectOffer(profileOffer)} />
+        ) : null}
+      </DetailShell>
     );
   }
 
@@ -4653,6 +4615,9 @@ const styles = StyleSheet.create({
   detailOfferAccepted: { borderColor: DESIGN.colors.success, backgroundColor: "#F0FDF4" },
   detailOfferRejected: { opacity: 0.72 },
   detailOfferMessage: { color: DESIGN.colors.textPrimary, fontSize: 14, lineHeight: 21, marginTop: DESIGN.spacing.sm, paddingTop: DESIGN.spacing.sm, borderTopWidth: 1, borderTopColor: DESIGN.colors.border },
+  providerProfileHeroCard: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: 16, padding: DESIGN.spacing.lg, marginBottom: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface, shadowColor: DESIGN.colors.primaryDark, shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
+  providerProfileName: { color: DESIGN.colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: "800", marginTop: DESIGN.spacing.xs },
+  providerProfileMeta: { color: DESIGN.colors.textSecondary, fontSize: 13, lineHeight: 19, fontWeight: "700", marginTop: 4 },
   detailRefreshButton: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: 12, paddingHorizontal: DESIGN.spacing.md, paddingVertical: 8, backgroundColor: DESIGN.colors.surface },
   detailRefreshText: { color: DESIGN.colors.primary, fontSize: 12, fontWeight: "800" },
   detailEmptyCard: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: 16, padding: DESIGN.spacing.lg, marginBottom: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface },
