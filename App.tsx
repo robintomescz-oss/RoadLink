@@ -121,6 +121,7 @@ function App() {
   const {
     jobs,
     setJobs,
+    jobsLoading,
     acceptedJobs,
     setAcceptedJobs,
     acceptedJobsLoading,
@@ -299,6 +300,8 @@ function App() {
   const [transportFromFilter, setTransportFromFilter] = useState("");
   const [transportToFilter, setTransportToFilter] = useState("");
   const [transportVehicleFilter, setTransportVehicleFilter] = useState("all");
+  // Filtry jsou defaultně složené; panel se otevře, když uživatel chce měnit filtry.
+  const [transportFiltersExpanded, setTransportFiltersExpanded] = useState(false);
 
   function clearLocalUserState() {
     setUserId(null);
@@ -1014,6 +1017,7 @@ function App() {
   ])), [jobs, routes]);
 
   const transportFiltersActive = Boolean(transportFromFilter.trim() || transportToFilter.trim() || transportVehicleFilter !== "all");
+  const transportActiveFilterCount = (transportFromFilter.trim() ? 1 : 0) + (transportToFilter.trim() ? 1 : 0) + (transportVehicleFilter !== "all" ? 1 : 0);
   const clearTransportFilters = () => {
     setTransportFromFilter("");
     setTransportToFilter("");
@@ -1110,8 +1114,18 @@ function App() {
   }
 
   function handleBottomNavItemPress(key: string) {
-    if (key === "transport") {
-      setTransportTab("requests");
+    if (key === "overview") {
+      setScreen("home");
+      return;
+    }
+    if (key === "mine") {
+      if (!userId) {
+        setScreen("login");
+        return;
+      }
+      setTransportTab("mine");
+      setScreen("transport");
+      return;
     }
     if (key === "profile" && !userId) {
       setScreen("login");
@@ -1121,7 +1135,16 @@ function App() {
   }
 
   function BottomNavigation() {
-    return <BottomNav screen={screen} onItemPress={handleBottomNavItemPress} />;
+    const activeKey = screen === "home" || screen === "welcome" || screen === "overview"
+      ? "overview"
+      : screen === "transport" && transportTab === "mine"
+      ? "mine"
+      : screen === "create"
+      ? "create"
+      : screen === "profile"
+      ? "profile"
+      : undefined;
+    return <BottomNav screen={screen} activeKey={activeKey} onItemPress={handleBottomNavItemPress} />;
   }
 
   if (screen === "login" || screen === "signup") {
@@ -1183,7 +1206,7 @@ function App() {
   }
 
   if (screen === "home" || screen === "welcome") {
-    return <GlobalHome onAccount={() => setScreen(userId ? "profile" : "login")} onTransport={() => { setTransportTab("requests"); setScreen("transport"); }} />;
+    return <GlobalHome onTransport={() => { setTransportTab("all"); setScreen("transport"); }} bottomNav={<BottomNavigation />} />;
   }
 
   if (screen === "overview") {
@@ -1192,21 +1215,26 @@ function App() {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar style="dark" />
-        <Header title="Přehled" />
+        <Header />
         <ScrollView style={styles.scroll} contentContainerStyle={styles.appContent} keyboardShouldPersistTaps="handled">
-          <TouchableOpacity onPress={() => setScreen("home")}>
-            <Text style={styles.link}>‹ Domů</Text>
-          </TouchableOpacity>
+          <View style={styles.dashboardHeaderRow}>
+            <View style={styles.dashboardHeader}>
+              <Text style={styles.dashboardTitle}>Přehled</Text>
+              <Text style={styles.dashboardSubtitle}>Aktivní přepravy, nabídky i rychlé akce na jednom místě.</Text>
+            </View>
+            {userId ? <Text style={styles.roleChip}>{role === "driver" ? "Režim přepravce" : "Režim zákazník"}</Text> : null}
+          </View>
+
           <View style={styles.dashboardPanel}>
-            <TouchableOpacity style={styles.actionRow} onPress={openRequestFlow}>
-              <Text style={styles.actionIcon}>↗</Text>
+            <TouchableOpacity style={styles.actionRowPrimary} onPress={openRequestFlow} accessibilityRole="button" accessibilityLabel="Poptat přepravu">
+              <Text style={styles.actionIconPrimary}>↗</Text>
               <View style={styles.actionBody}>
-                <Text style={styles.actionTitle}>Poptat přepravu</Text>
-                <Text style={styles.actionSubtitle}>Potřebuji přepravit vozidlo</Text>
+                <Text style={styles.actionTitlePrimary}>Poptat přepravu</Text>
+                <Text style={styles.actionSubtitlePrimary}>Potřebuji přepravit vozidlo</Text>
               </View>
-              <Text style={styles.actionChevron}>›</Text>
+              <Text style={styles.actionChevronPrimary}>›</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.actionRow} onPress={openCapacityFlow}>
+            <TouchableOpacity style={styles.actionRow} onPress={openCapacityFlow} accessibilityRole="button" accessibilityLabel="Nabídnout volnou kapacitu">
               <Text style={styles.actionIcon}>⇄</Text>
               <View style={styles.actionBody}>
                 <Text style={styles.actionTitle}>Nabídnout volnou kapacitu</Text>
@@ -1215,10 +1243,17 @@ function App() {
               <Text style={styles.actionChevron}>›</Text>
             </TouchableOpacity>
           </View>
-          <TouchableOpacity onPress={() => { setTransportTab("requests"); setScreen("transport"); }}>
-            <Text style={styles.link}>Zobrazit poptávky →</Text>
-          </TouchableOpacity>
 
+          {!userId ? (
+            <View style={styles.emptyPanel}>
+              <Text style={styles.emptyTitle}>Přihlaste se pro svůj přehled</Text>
+              <Text style={styles.emptyCopy}>Po přihlášení zde uvidíte své aktivní přepravy, vlastní poptávky a nabídky čekající na vyřízení.</Text>
+              <TouchableOpacity style={styles.secondary} onPress={() => setScreen("login")} accessibilityRole="button" accessibilityLabel="Přihlásit se">
+                <Text style={styles.secondaryText}>Přihlásit se</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+          <>
           <View style={styles.dashboardSection}>
             <Text style={styles.sectionLabel}>AKTIVNÍ PŘEPRAVY</Text>
             {activeTransports.length === 0 ? (
@@ -1229,7 +1264,7 @@ function App() {
             ) : activeTransports.map((item) => (
               <TouchableOpacity key={item.id} style={styles.dispatchRow} onPress={() => { setActiveJobId(item.id); setRequestViewMode("owner"); setJobs((current) => current.some((job) => job.id === item.id) ? current : [...current, item]); setScreen("tracking"); }}>
                 <View style={styles.dispatchMain}>
-                  <Text style={styles.dispatchRoute}>{item.destination}</Text>
+                  <Text style={styles.dispatchRoute}>{routeDisplayLabel(item)}</Text>
                   <Text style={styles.dispatchMeta}>{requestTimingLabel(item)}</Text>
                 </View>
                 <Text style={styles.statusPill}>{transportLifecycleStatusLabel(item.status)}</Text>
@@ -1242,7 +1277,7 @@ function App() {
             {pendingOfferRequests.length === 0 ? (
               <View style={styles.emptyPanelCompact}>
                 <Text style={styles.emptyTitle}>Bez aktuální akce</Text>
-                <Text style={styles.emptyCopy}>Akce k poptávkám a nabídkám se zobrazí v této sekci.</Text>
+                <Text style={styles.emptyCopy}>Poptávky s novými nabídkami přepravců se zobrazí zde.</Text>
               </View>
             ) : pendingOfferRequests.map((item) => {
               const count = offerCounts[item.id] || 0;
@@ -1258,9 +1293,9 @@ function App() {
                   }}
                 >
                   <View style={styles.dispatchMain}>
-                    <Text style={styles.dispatchRoute}>{item.vehicle}</Text>
+                    <Text style={styles.dispatchRoute}>{routeDisplayLabel(item)}</Text>
                     <Text style={styles.dispatchMeta}>{offerCountLabel(count)} čeká na rozhodnutí</Text>
-                    <Text style={styles.dispatchMeta}>{routeDisplayLabel(item)}</Text>
+                    <Text style={styles.dispatchMeta}>{item.vehicle}</Text>
                   </View>
                   <Text style={styles.dispatchArrow}>→</Text>
                 </TouchableOpacity>
@@ -1268,18 +1303,35 @@ function App() {
             })}
           </View>
 
-          <View style={styles.dashboardGrid}>
-            <View style={styles.infoTile}>
-              <Text style={styles.sectionLabel}>SERVIS</Text>
-              <Text style={styles.infoTileTitle}>Podpora a servisní partneři</Text>
-              <Text style={styles.emptyCopy}>Sekce bude rozšířena v další verzi.</Text>
+          {acceptedJobs.length > 0 ? (
+            <View style={styles.dashboardSection}>
+              <Text style={styles.sectionLabel}>PŘIJATÉ ZAKÁZKY</Text>
+              {acceptedJobs.map((item) => (
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.dispatchRow}
+                  onPress={() => {
+                    setActiveJobId(item.id);
+                    setRequestViewMode("provider");
+                    setJobs((current) =>
+                      current.some((job) => job.id === item.id)
+                        ? current.map((job) => job.id === item.id ? item : job)
+                        : [...current, item]
+                    );
+                    setScreen("tracking");
+                  }}
+                >
+                  <View style={styles.dispatchMain}>
+                    <Text style={styles.dispatchRoute}>{routeDisplayLabel(item)}</Text>
+                    <Text style={styles.dispatchMeta}>{requestTimingLabel(item)}</Text>
+                  </View>
+                  <Text style={styles.statusPill}>{transportStatusLabel(item.status)}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
-            <View style={styles.infoTile}>
-              <Text style={styles.sectionLabel}>ECO IMPACT</Text>
-              <Text style={styles.infoTileTitle}>Efektivnější vytížení tras</Text>
-              <Text style={styles.emptyCopy}>Bez výpočtů v této verzi.</Text>
-            </View>
-          </View>
+          ) : null}
+          </>
+          )}
         </ScrollView>
         <BottomNavigation />
       </SafeAreaView>
@@ -1294,8 +1346,12 @@ function App() {
 
     return (
       <View style={styles.container}>
-        <Header title="Přeprava" />
+        <Header />
         <ScrollView style={styles.scroll} contentContainerStyle={styles.appContent} keyboardShouldPersistTaps="handled">
+          <View style={styles.transportPageHeader}>
+            <Text style={styles.transportPageTitle}>Přeprava</Text>
+            <Text style={styles.transportPageSubtitle}>Trh přepravy — poptávky, volné kapacity i vaše přepravy.</Text>
+          </View>
           <View style={styles.segmentedBar}>
             {[
               ["Vše", "all"],
@@ -1312,35 +1368,61 @@ function App() {
           {transportTab !== "mine" ? (
             <View style={styles.filterPanel}>
               <View style={styles.transportFilterHeader}>
-                <Text style={styles.sectionLabel}>FILTROVAT PŘEPRAVY</Text>
+                <TouchableOpacity
+                  style={styles.filterToggleButton}
+                  onPress={() => setTransportFiltersExpanded(!transportFiltersExpanded)}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: transportFiltersExpanded }}
+                  accessibilityLabel={transportFiltersActive ? `Filtry, ${transportActiveFilterCount} aktivních` : "Filtry"}
+                >
+                  <Text style={styles.sectionLabel}>FILTRY{transportFiltersActive ? ` (${transportActiveFilterCount})` : ""}</Text>
+                  <Text style={styles.filterToggleChevron}>{transportFiltersExpanded ? "▲" : "▼"}</Text>
+                </TouchableOpacity>
                 {transportFiltersActive ? (
-                  <TouchableOpacity onPress={clearTransportFilters}>
+                  <TouchableOpacity onPress={clearTransportFilters} accessibilityLabel="Vymazat filtry">
                     <Text style={styles.detailLink}>Vymazat</Text>
                   </TouchableOpacity>
                 ) : null}
               </View>
-              <TextInput
-                style={styles.input}
-                value={transportFromFilter}
-                onChangeText={setTransportFromFilter}
-                placeholder="Odkud"
-                autoCapitalize="none"
-              />
-              <TextInput
-                style={styles.input}
-                value={transportToFilter}
-                onChangeText={setTransportToFilter}
-                placeholder="Kam"
-                autoCapitalize="none"
-              />
-              <Text style={styles.label}>Typ vozidla</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-                {["all", ...transportVehicleOptions].map((value) => (
-                  <TouchableOpacity key={value} style={[styles.chip, transportVehicleFilter === value && styles.chipActive]} onPress={() => setTransportVehicleFilter(value)}>
-                    <Text>{value === "all" ? "Vše" : value}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+              {transportFiltersActive ? (
+                <View style={styles.activeFiltersRow}>
+                  {transportFromFilter.trim() ? (
+                    <View style={styles.activeFilterChip}><Text style={styles.activeFilterChipText}>Odkud: {transportFromFilter.trim()}</Text></View>
+                  ) : null}
+                  {transportToFilter.trim() ? (
+                    <View style={styles.activeFilterChip}><Text style={styles.activeFilterChipText}>Kam: {transportToFilter.trim()}</Text></View>
+                  ) : null}
+                  {transportVehicleFilter !== "all" ? (
+                    <View style={styles.activeFilterChip}><Text style={styles.activeFilterChipText}>Vozidlo: {transportVehicleFilter}</Text></View>
+                  ) : null}
+                </View>
+              ) : null}
+              {transportFiltersExpanded ? (
+                <View style={styles.filterFields}>
+                  <TextInput
+                    style={styles.input}
+                    value={transportFromFilter}
+                    onChangeText={setTransportFromFilter}
+                    placeholder="Odkud"
+                    autoCapitalize="none"
+                  />
+                  <TextInput
+                    style={styles.input}
+                    value={transportToFilter}
+                    onChangeText={setTransportToFilter}
+                    placeholder="Kam"
+                    autoCapitalize="none"
+                  />
+                  <Text style={styles.label}>Typ vozidla</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+                    {["all", ...transportVehicleOptions].map((value) => (
+                      <TouchableOpacity key={value} style={[styles.chip, transportVehicleFilter === value && styles.chipActive]} onPress={() => setTransportVehicleFilter(value)}>
+                        <Text>{value === "all" ? "Vše" : value}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : null}
             </View>
           ) : null}
 
@@ -1350,8 +1432,13 @@ function App() {
                 <Text style={styles.sectionLabel}>POPTÁVKY</Text>
                 <Text style={styles.transportCount}>{openRequestCards.length}</Text>
               </View>
-              {openRequestCards.length === 0 ? (
-                <View style={styles.emptyPanel}><Text style={styles.emptyTitle}>{transportFiltersActive ? "Žádné poptávky neodpovídají filtrům" : "Žádné otevřené poptávky"}</Text></View>
+              {jobsLoading ? (
+                <View style={styles.emptyPanel}><Text style={styles.emptyTitle}>Načítám poptávky…</Text></View>
+              ) : openRequestCards.length === 0 ? (
+                <View style={styles.emptyPanel}>
+                  <Text style={styles.emptyTitle}>{transportFiltersActive ? "Žádné poptávky neodpovídají filtrům" : "Žádné otevřené poptávky"}</Text>
+                  <Text style={styles.emptyCopy}>{transportFiltersActive ? "Upravte nebo vymažte filtry a zkuste to znovu." : "Nové poptávky zákazníků se zobrazí zde."}</Text>
+                </View>
               ) : openRequestCards.map((item) => (
                 <TransportCard
                   key={item.id}
@@ -1934,7 +2021,7 @@ function App() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.profileHeader}>
-          <TouchableOpacity onPress={() => setScreen("overview")}>
+          <TouchableOpacity onPress={() => setScreen("home")}>
             <Text style={styles.profileBack}>← Přehled</Text>
           </TouchableOpacity>
           <Text style={styles.profileHeaderIcon}>♙</Text>
@@ -2115,9 +2202,9 @@ function App() {
             <Text style={styles.profileLinkTitle}>Moje poptávky</Text>
             <Text style={styles.profileLinkText}>Otevřít moje přepravní poptávky</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.profileLinkCard} onPress={() => setScreen("home")}>
-            <Text style={styles.profileLinkTitle}>RoadLink domů</Text>
-            <Text style={styles.profileLinkText}>Otevřít hlavní nabídku služeb</Text>
+          <TouchableOpacity style={styles.profileLinkCard} onPress={() => setScreen("overview")}>
+            <Text style={styles.profileLinkTitle}>Moje aktivita</Text>
+            <Text style={styles.profileLinkText}>Otevřít osobní přehled přeprav a nabídek</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.profileLogoutRow} onPress={signOutUser} disabled={signOutLoading}>
             <Text style={styles.profileLogoutText}>{signOutLoading ? "Odhlašuji…" : "Odhlásit se"}</Text>

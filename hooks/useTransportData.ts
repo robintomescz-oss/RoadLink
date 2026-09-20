@@ -25,6 +25,7 @@ export function useTransportData({
   activeJobId: string | null;
 }) {
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobsLoading, setJobsLoading] = useState(false);
   const [acceptedJobs, setAcceptedJobs] = useState<AcceptedJob[]>([]);
   const [acceptedJobsLoading, setAcceptedJobsLoading] = useState(false);
   const [customerRequests, setCustomerRequests] = useState<Job[]>([]);
@@ -73,6 +74,7 @@ export function useTransportData({
   }
 
   async function loadJobs() {
+    setJobsLoading(true);
     const { data, error } = await supabase
       .from("tow_requests")
       .select("*")
@@ -81,12 +83,14 @@ export function useTransportData({
 
     if (error) {
       console.error("Load jobs:", error.message);
+      setJobsLoading(false);
       return;
     }
 
     const mapped: Job[] = (data || []).map(mapTowRequestRow);
 
     setJobs(mapped);
+    setJobsLoading(false);
   }
 
   async function loadAcceptedJobs() {
@@ -373,6 +377,7 @@ export function useTransportData({
   return {
     jobs,
     setJobs,
+    jobsLoading,
     acceptedJobs,
     setAcceptedJobs,
     acceptedJobsLoading,
