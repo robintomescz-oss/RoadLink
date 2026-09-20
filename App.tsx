@@ -18,6 +18,7 @@ import { supabase } from "./lib/supabase";
 import GlobalHome from "./lib/GlobalHome";
 import TransportCard from "./lib/TransportCard";
 import TransportPreviewScreen from "./lib/TransportPreviewScreen";
+import OfferProviderDetailsScreen from "./screens/OfferProviderDetailsScreen";
 import {
   DetailInfoRow,
   DetailPrimaryAction,
@@ -798,13 +799,6 @@ function App() {
     if (displayName) return displayName;
 
     return "Přepravce";
-  }
-
-  function providerBusinessTypeLabel(businessType: string | null | undefined) {
-    const normalizedBusinessType = businessType?.trim();
-    if (normalizedBusinessType === "company") return "Firma";
-    if (normalizedBusinessType === "individual") return "OSVČ";
-    return "Neuvedeno";
   }
 
   async function openContactUrl(url: string, failureMessage: string) {
@@ -3750,59 +3744,21 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
 
   if (screen === "providerProfile") {
     const profileOffer = offers.find((offer) => offer.id === selectedOfferId) || null;
-    const profileName = selectedProviderProfile
-      ? (selectedProviderProfile.company_name?.trim() ||
-        selectedProviderProfile.display_name?.trim() ||
-        "Přepravce")
-      : "Přepravce";
-    const publicPhone = selectedProviderProfile?.public_phone?.trim() || "";
-    const publicEmail = selectedProviderProfile?.public_email?.trim() || "";
-    const hasProviderContact = publicPhone || publicEmail;
-    const profileBusinessType = providerBusinessTypeLabel(selectedProviderProfile?.business_type);
     return (
-      <DetailShell title="Profil přepravce" onBack={() => setScreen("job")}>
-        {providerProfileLoading ? (
-          <View style={styles.detailEmptyCard}><Text style={styles.detailEmptyTitle}>Načítám profil přepravce…</Text></View>
-        ) : providerProfileError ? (
-          <View style={styles.detailEmptyCard}><Text style={styles.detailEmptyTitle}>Profil přepravce se nepodařilo načíst.</Text></View>
-        ) : !selectedProviderProfile ? (
-          <View style={styles.detailEmptyCard}><Text style={styles.detailEmptyTitle}>Profil přepravce zatím není k dispozici.</Text></View>
-        ) : (
-          <>
-            <View style={styles.providerProfileHeroCard}>
-              <Text style={styles.detailEyebrow}>Přepravce</Text>
-              <Text style={styles.providerProfileName}>{profileName}</Text>
-              <Text style={styles.providerProfileMeta}>{profileBusinessType}</Text>
-            </View>
-            <DetailSection title="Profil">
-              <DetailInfoRow label="Typ přepravce" value={profileBusinessType} />
-              <DetailInfoRow label="IČO" value={selectedProviderProfile.ico?.trim() || null} />
-              <DetailInfoRow label="Oblast působnosti" value={selectedProviderProfile.service_area?.trim() || null} />
-              <DetailInfoRow label="Maximální dojezd" value={selectedProviderProfile.max_radius_km === null ? null : `${selectedProviderProfile.max_radius_km} km`} />
-              <DetailInfoRow label="Zkušenosti" value={selectedProviderProfile.years_experience === null ? null : `${selectedProviderProfile.years_experience} let`} />
-              <DetailInfoRow label="Dostupnost" value={selectedProviderProfile.available_24_7 ? "24/7" : "Neuvedeno"} />
-            </DetailSection>
-            <DetailSection title="O přepravci">
-              {selectedProviderProfile.description?.trim() ? (
-                <Text style={styles.detailBodyText}>{selectedProviderProfile.description.trim()}</Text>
-              ) : (
-                <Text style={styles.detailBodyMuted}>Popis zatím není zveřejněn.</Text>
-              )}
-            </DetailSection>
-            <DetailSection title="Kontakt">
-              {publicPhone ? <DetailInfoRow label="Telefon" value={publicPhone} /> : null}
-              {publicEmail ? <DetailInfoRow label="E-mail" value={publicEmail} /> : null}
-              {!hasProviderContact ? <Text style={styles.detailBodyMuted}>Kontaktní údaje nejsou zveřejněny.</Text> : null}
-              {publicPhone ? <DetailSecondaryAction label="Zavolat" onPress={() => openContactUrl(`tel:${publicPhone}`, "Telefon se nepodařilo otevřít.")} /> : null}
-              {publicEmail ? <DetailSecondaryAction label="Napsat e-mail" onPress={() => openContactUrl(`mailto:${publicEmail}`, "E-mailovou aplikaci se nepodařilo otevřít.")} /> : null}
-            </DetailSection>
-          </>
-        )}
-        <DetailSecondaryAction label="Zpět k nabídce" onPress={() => setScreen("job")} />
-        {profileOffer && activeJob && activeJob.status === "open" && profileOffer.status === "pending" ? (
-          <DetailPrimaryAction label="Vybrat přepravce" loadingLabel="Vybírám…" loading={selectingOfferId !== null} onPress={() => confirmSelectOffer(profileOffer)} />
-        ) : null}
-      </DetailShell>
+      <OfferProviderDetailsScreen
+        profile={selectedProviderProfile}
+        offer={profileOffer}
+        loading={providerProfileLoading}
+        error={providerProfileError}
+        canSelectProvider={Boolean(activeJob && activeJob.status === "open")}
+        selectingProvider={selectingOfferId !== null}
+        onBack={() => setScreen("job")}
+        onCallProvider={(phone) => openContactUrl(`tel:${phone}`, "Telefon se nepodařilo otevřít.")}
+        onEmailProvider={(email) => openContactUrl(`mailto:${email}`, "E-mailovou aplikaci se nepodařilo otevřít.")}
+        onSelectProvider={() => {
+          if (profileOffer) confirmSelectOffer(profileOffer);
+        }}
+      />
     );
   }
 
@@ -4531,9 +4487,6 @@ const styles = StyleSheet.create({
   detailOfferAccepted: { borderColor: DESIGN.colors.success, backgroundColor: "#F0FDF4" },
   detailOfferRejected: { opacity: 0.72 },
   detailOfferMessage: { color: DESIGN.colors.textPrimary, fontSize: 14, lineHeight: 21, marginTop: DESIGN.spacing.sm, paddingTop: DESIGN.spacing.sm, borderTopWidth: 1, borderTopColor: DESIGN.colors.border },
-  providerProfileHeroCard: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: 16, padding: DESIGN.spacing.lg, marginBottom: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface, shadowColor: DESIGN.colors.primaryDark, shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
-  providerProfileName: { color: DESIGN.colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: "800", marginTop: DESIGN.spacing.xs },
-  providerProfileMeta: { color: DESIGN.colors.textSecondary, fontSize: 13, lineHeight: 19, fontWeight: "700", marginTop: 4 },
   detailRefreshButton: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: 12, paddingHorizontal: DESIGN.spacing.md, paddingVertical: 8, backgroundColor: DESIGN.colors.surface },
   detailRefreshText: { color: DESIGN.colors.primary, fontSize: 12, fontWeight: "800" },
   detailEmptyCard: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: 16, padding: DESIGN.spacing.lg, marginBottom: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface },
