@@ -2,13 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   FlatList,
-  Image,
   Linking,
-  Platform,
-  SafeAreaView,
   ScrollView,
-  StyleSheet,
-  StatusBar as NativeStatusBar,
   Text,
   TextInput,
   TouchableOpacity,
@@ -17,7 +12,6 @@ import {
 import { supabase } from "./lib/supabase";
 import GlobalHome from "./lib/GlobalHome";
 import TransportCard from "./lib/TransportCard";
-import TransportPreviewScreen from "./lib/TransportPreviewScreen";
 import OfferProviderDetailsScreen from "./screens/OfferProviderDetailsScreen";
 import {
   DetailInfoRow,
@@ -27,263 +21,91 @@ import {
   DetailShell,
   DetailStatusHeader,
 } from "./components/transport/DetailComponents";
-import * as Location from "expo-location";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import MapView, { Marker, Polyline, Region } from "react-native-maps";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  type CarrierProfile,
+  type CarrierVehicle,
+  type Job,
+  type JobStatus,
+  type OfferProviderProfile,
+  type RequestViewMode,
+  type Role,
+  type TimeFilter,
+  type TimePreference,
+  type TowOffer,
+  type UserProfile,
+  type VehicleMobility,
+} from "./lib/types";
+import {
+  canonicalVehicleType,
+  carrierRouteDepartureLabel,
+  carrierRoutePriceLabel,
+  formatOfferArrivalDateTime,
+  formatPostgresDate,
+  formatPostgresTime,
+  offerCountLabel,
+  offerStatusLabel,
+  pickupDisplayLabel,
+  requestTimingLabel,
+  routeDisplayLabel,
+  statusLabel,
+  timePreferenceLabel,
+  transportLifecycleStatusLabel,
+  transportStatusLabel,
+  triStateLabel,
+  vehicleMobilityLabel,
+} from "./lib/labels";
+import { coordinatesFromValues, geocodeAddress } from "./lib/geocode";
+import { DEFAULT_REGION } from "./lib/design";
+import { styles } from "./lib/appStyles";
+import { useLocation } from "./hooks/useLocation";
+import { useJobFilters } from "./hooks/useJobFilters";
+import { useTransportData } from "./hooks/useTransportData";
+import { useAuth } from "./hooks/useAuth";
+import { AppHeader as Header } from "./components/AppHeader";
+import { BottomNav } from "./components/BottomNav";
+import { SafeAreaView } from "./components/SafeAreaViewCompat";
+import { CreateScreen, RequestSuccessScreen, RoleScreen, SosScreen } from "./screens/LeafScreens";
 
 
-type Role = "customer" | "driver";
-type RequestViewMode = "owner" | "provider";
-type TimePreference =
-  | "asap"
-  | "within_24h"
-  | "within_3_days"
-  | "within_week"
-  | "specific";
-type VehicleMobility =
-  | "drivable"
-  | "partially_drivable"
-  | "not_drivable"
-  | "unknown";
-type TimeFilter = "all" | TimePreference;
-type SortOption = "urgent" | "newest";
-type JobStatus =
-  | "open"
-  | "offer_selected"
-  | "in_progress"
-  | "completed"
-  | "cancelled";
 
-type PickupCoordinates = { latitude: number; longitude: number };
 
-function coordinatesFromValues(latitude: unknown, longitude: unknown): PickupCoordinates | null {
-  const parsedLatitude = Number(latitude);
-  const parsedLongitude = Number(longitude);
 
-  if (!Number.isFinite(parsedLatitude) || !Number.isFinite(parsedLongitude)) {
-    return null;
-  }
-
-  return { latitude: parsedLatitude, longitude: parsedLongitude };
-}
-
-const GEOCODING_TIMEOUT_MS = 6000;
-
-async function geocodeAddress(address: string): Promise<PickupCoordinates | null> {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-  const geocodingAttempt = Location.geocodeAsync(address)
-    .then((results) => {
-      const usableResult = results.find((result) =>
-        Number.isFinite(result.latitude) && Number.isFinite(result.longitude)
-      );
-
-      return usableResult
-        ? { latitude: usableResult.latitude, longitude: usableResult.longitude }
-        : null;
-    })
-    .catch((error) => {
-      console.warn("Forward geocoding failed:", error);
-      return null;
-    });
-
-  const timeoutFallback = new Promise<null>((resolve) => {
-    timeoutId = setTimeout(() => resolve(null), GEOCODING_TIMEOUT_MS);
-  });
-
-  const result = await Promise.race([geocodingAttempt, timeoutFallback]);
-
-  if (timeoutId) {
-    clearTimeout(timeoutId);
-  }
-
-  return result;
-}
-
-function carrierRouteDepartureLabel(value: string): string {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleString("cs-CZ", {
-    day: "numeric",
-    month: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function carrierRoutePriceLabel(price: number): string {
-  return `${price.toLocaleString("cs-CZ")} Kč`;
-}
-
-function canonicalVehicleType(value: string | null | undefined): string {
-  const normalized = (value || "").trim();
-  if (normalized === "Osobní auto") return "Osobní automobil";
-  if (normalized === "Motorka") return "Motocykl";
-  return normalized;
-}
-
-type Job = {
-  id: string;
-  customerName: string;
-  customerId?: string;
-  vehicle: string;
-  problem: string;
-  pickup: PickupCoordinates | null;
-  pickupAddress?: string | null;
-  destination: string;
-  destinationCoordinates?: PickupCoordinates | null;
-  status: JobStatus;
-  driverName?: string;
-  timePreference?: TimePreference;
-  requestedDate?: string | null;
-  requestedEndDate?: string | null;
-  requestedTime?: string | null;
-  vehicleMobility?: VehicleMobility;
-  vehicleModel?: string | null;
-  canTrailer?: boolean | null;
-  createdAt?: string;
-};
-
-type CarrierRoute = {
-  id: string;
-  driverId?: string;
-  fromAddress: string;
-  toAddress: string;
-  departureAt: string;
-  availableSpaces: number;
-  maxDeviationKm: number | null;
-  vehicleTypes: string;
-  price: number | null;
-  description: string;
-  status: string;
-};
-
-type TowOffer = {
-  id: string;
-  tow_request_id: string;
-  driver_id: string;
-  price: number | null;
-  estimated_arrival_minutes: number;
-  estimated_arrival_at: string | null;
-  message: string | null;
-  status: "pending" | "accepted" | "rejected" | "withdrawn";
-};
-
-type ProviderIdentity = {
-  user_id: string;
-  display_name: string | null;
-  company_name: string | null;
-};
-
-type OfferProviderProfile = {
-  user_id: string;
-  display_name: string | null;
-  company_name: string | null;
-  business_type: string | null;
-  ico: string | null;
-  description: string | null;
-  service_area: string | null;
-  max_radius_km: number | null;
-  years_experience: number | null;
-  available_24_7: boolean;
-  public_phone: string | null;
-  public_email: string | null;
-};
-
-type AcceptedJob = Job & {
-  acceptedOffer: TowOffer;
-};
-
-type UserProfile = {
-  id: string;
-  first_name: string | null;
-  last_name: string | null;
-  phone: string | null;
-  role: Role;
-  email: string;
-};
-
-type CarrierProfile = {
-  id: string;
-  user_id: string;
-  display_name: string | null;
-  business_type: "individual" | "company" | null;
-  company_name: string | null;
-  ico: string | null;
-  description: string | null;
-  service_area: string | null;
-  max_radius_km: number | null;
-  years_experience: number | null;
-  available_24_7: boolean | null;
-  phone_public: boolean | null;
-  email_public: boolean | null;
-  public_phone: string | null;
-  public_email: string | null;
-  status: string | null;
-};
-
-type CarrierVehicle = {
-  id: string;
-  carrier_id: string;
-  name: string | null;
-  vehicle_type: string | null;
-  make: string | null;
-  model: string | null;
-  year: number | null;
-  registration_number: string | null;
-  max_weight_kg: number | null;
-  max_vehicle_length_cm: number | null;
-  max_vehicle_width_cm: number | null;
-  max_vehicle_height_cm: number | null;
-  capacity: number | null;
-  description: string | null;
-  has_winch: boolean;
-  has_hydraulic_platform: boolean;
-  has_ramps: boolean;
-  has_straps: boolean;
-  has_jump_starter: boolean;
-  has_compressor: boolean;
-  is_active: boolean;
-};
-
-const DESIGN = {
-  colors: {
-    background: "#F6F8FB",
-    surface: "#FFFFFF",
-    primary: "#102A43",
-    primaryDark: "#061525",
-    actionBlue: "#2563EB",
-    textPrimary: "#17212B",
-    textSecondary: "#66788A",
-    border: "#E2E8F0",
-    success: "#15803D",
-    danger: "#DC2626",
-    warning: "#D97706",
-    primarySoft: "#EAF3FF",
-  },
-  spacing: { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24 },
-  radius: { small: 10, medium: 12, large: 14 },
-} as const;
-
-const DEFAULT_REGION: Region = {
-  latitude: 49.8209,
-  longitude: 18.2625,
-  latitudeDelta: 0.08,
-  longitudeDelta: 0.08,
-};
 
 function App() {
   const [screen, setScreen] = useState("home");
   const [role, setRole] = useState<Role>("customer");
-  const [location, setLocation] = useState<Location.LocationObject | null>(null);
-  const [locationError, setLocationError] = useState("");
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const {
+    userId,
+    setUserId,
+    loginEmail,
+    setLoginEmail,
+    loginPassword,
+    setLoginPassword,
+    loginLoading,
+    signOutLoading,
+    registrationFirstName,
+    setRegistrationFirstName,
+    registrationLastName,
+    setRegistrationLastName,
+    registrationPhone,
+    setRegistrationPhone,
+    registrationEmail,
+    setRegistrationEmail,
+    registrationPassword,
+    setRegistrationPassword,
+    registrationPasswordConfirmation,
+    setRegistrationPasswordConfirmation,
+    registrationLoading,
+    loginUser,
+    registerUser,
+    signOutUser,
+  } = useAuth({ setScreen, onUnauthenticated: () => clearLocalUserState() });
+  const { location, locationError, requestLocation } = useLocation();
   const [pickupText, setPickupText] = useState("");
   const [destination, setDestination] = useState("");
   const [vehicle, setVehicle] = useState("Osobní automobil");
@@ -298,26 +120,53 @@ function App() {
   const [creatingRequest, setCreatingRequest] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
-  const [timeFilter, setTimeFilter] = useState<TimeFilter>("all");
-  const [vehicleFilter, setVehicleFilter] = useState("all");
-  const [mobilityFilter, setMobilityFilter] = useState<VehicleMobility | "all">("all");
-  const [sortOption, setSortOption] = useState<SortOption>("urgent");
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [acceptedJobs, setAcceptedJobs] = useState<AcceptedJob[]>([]);
-  const [acceptedJobsLoading, setAcceptedJobsLoading] = useState(false);
-  const [customerRequests, setCustomerRequests] = useState<Job[]>([]);
-  const [offerCounts, setOfferCounts] = useState<Record<string, number>>({});
-  const [routes, setRoutes] = useState<CarrierRoute[]>([]);
-  const [routesLoading, setRoutesLoading] = useState(false);
-  const [routesError, setRoutesError] = useState(false);
-  const [activeRouteId, setActiveRouteId] = useState<string | null>(null);
-  const [routeInterestedRequests, setRouteInterestedRequests] = useState<Job[]>([]);
-  const [routeInterestsLoading, setRouteInterestsLoading] = useState(false);
-  const [routeInterestsError, setRouteInterestsError] = useState(false);
-  const [offers, setOffers] = useState<TowOffer[]>([]);
-  const [providerIdentities, setProviderIdentities] = useState<Record<string, ProviderIdentity>>({});
-  const [offersLoading, setOffersLoading] = useState(false);
+  const {
+    jobs,
+    setJobs,
+    acceptedJobs,
+    setAcceptedJobs,
+    acceptedJobsLoading,
+    customerRequests,
+    setCustomerRequests,
+    offerCounts,
+    routes,
+    routesLoading,
+    routesError,
+    activeRouteId,
+    setActiveRouteId,
+    routeInterestedRequests,
+    routeInterestsLoading,
+    routeInterestsError,
+    offers,
+    providerIdentities,
+    offersLoading,
+    activeJob,
+    activeAcceptedJob,
+    activeRoute,
+    loadJobs,
+    loadAcceptedJobs,
+    loadCustomerRequests,
+    loadRoutes,
+    loadRouteInterestedRequests,
+    loadOffers,
+    providerNameForOffer,
+    selectedOfferForActiveJob,
+    resetTransportData,
+  } = useTransportData({ userId, screen, activeJobId });
+
+  const {
+    timeFilter,
+    setTimeFilter,
+    vehicleFilter,
+    setVehicleFilter,
+    mobilityFilter,
+    setMobilityFilter,
+    sortOption,
+    setSortOption,
+    showAdvancedFilters,
+    setShowAdvancedFilters,
+    filteredJobs,
+  } = useJobFilters(jobs);
   const [submittingOffer, setSubmittingOffer] = useState(false);
   const [selectingOfferId, setSelectingOfferId] = useState<string | null>(null);
   const [selectedOfferId, setSelectedOfferId] = useState<string | null>(null);
@@ -326,11 +175,9 @@ function App() {
   const [providerProfileError, setProviderProfileError] = useState(false);
   const [transportStatusLoading, setTransportStatusLoading] = useState(false);
   const [cancellingRequest, setCancellingRequest] = useState(false);
- const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [interestSelectionVisible, setInterestSelectionVisible] = useState(false);
   const [interestSubmitting, setInterestSubmitting] = useState(false);
  const [requestViewMode, setRequestViewMode] = useState<RequestViewMode>("owner");
- const [userId, setUserId] = useState<string | null>(null);
   const [offerPrice, setOfferPrice] = useState("");
   const [offerArrivalDate, setOfferArrivalDate] = useState<Date | null>(null);
   const [offerArrivalTime, setOfferArrivalTime] = useState<Date | null>(null);
@@ -350,19 +197,6 @@ function App() {
   const [routePrice, setRoutePrice] = useState("");
   const [routePriceMode, setRoutePriceMode] = useState<"fixed" | "negotiable">("fixed");
   const [routeDescription, setRouteDescription] = useState("");
-  const [registrationFirstName, setRegistrationFirstName] = useState("");
-  const [registrationLastName, setRegistrationLastName] = useState("");
-  const [registrationPhone, setRegistrationPhone] = useState("");
-  const [registrationEmail, setRegistrationEmail] = useState("");
-  const [registrationPassword, setRegistrationPassword] = useState("");
-  const [registrationPasswordConfirmation, setRegistrationPasswordConfirmation] = useState("");
-  const [registrationLoading, setRegistrationLoading] = useState(false);
-  // Phase 1 Auth: login state + indikátor, že jsme již inicializovali session
-  const [loginEmail, setLoginEmail] = useState("");
-  const [loginPassword, setLoginPassword] = useState("");
-  const [loginLoading, setLoginLoading] = useState(false);
-  const [authInitialized, setAuthInitialized] = useState(false);
-  const [signOutLoading, setSignOutLoading] = useState(false);
   const [transportTab, setTransportTab] = useState<"all" | "requests" | "capacity" | "mine">("all");
   const [transportFromFilter, setTransportFromFilter] = useState("");
   const [transportToFilter, setTransportToFilter] = useState("");
@@ -414,25 +248,12 @@ function App() {
   const [vehicleHasJumpStarter, setVehicleHasJumpStarter] = useState(false);
   const [vehicleHasCompressor, setVehicleHasCompressor] = useState(false);
   const [vehicleIsActive, setVehicleIsActive] = useState(true);
- console.log(
-  "Supabase URL:",
-  process.env.EXPO_PUBLIC_SUPABASE_URL
-);
 
   function clearLocalUserState() {
     setUserId(null);
     setProfile(null);
     setCarrierProfile(null);
-    setJobs([]);
-    setAcceptedJobs([]);
-    setCustomerRequests([]);
-    setOfferCounts({});
-    setRoutes([]);
-    setActiveRouteId(null);
-    setRouteInterestedRequests([]);
-    setRouteInterestsError(false);
-    setOffers([]);
-    setProviderIdentities({});
+    resetTransportData();
     setVehicles([]);
     setActiveJobId(null);
     setProfileEditing(false);
@@ -443,52 +264,6 @@ function App() {
     setInterestSubmitting(false);
   }
 
-  useEffect(() => {
-    let isMounted = true;
-
-    supabase.auth.getSession().then(({ data, error }) => {
-      if (!isMounted) return;
-      if (error) {
-        console.error("Auth session init:", error.message);
-      }
-      const sessionUserId = data.session?.user?.id ?? null;
-      if (sessionUserId) {
-        setUserId(sessionUserId);
-        setScreen((currentScreen) =>
-          currentScreen === "welcome" || currentScreen === "login" || currentScreen === "signup"
-            ? "home"
-            : currentScreen
-        );
-      } else {
-        clearLocalUserState();
-      }
-      setAuthInitialized(true);
-    });
-
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      const sessionUserId = session?.user?.id ?? null;
-      if (sessionUserId) {
-        setUserId(sessionUserId);
-      } else {
-        clearLocalUserState();
-        setScreen("home");
-      }
-      setAuthInitialized(true);
-    });
-
-    return () => {
-      isMounted = false;
-      authListener.subscription.unsubscribe();
-    };
-  }, []);
-  const activeAcceptedJob = acceptedJobs.find((job) => job.id === activeJobId) || null;
-  const activeJob =
-    jobs.find((job) => job.id === activeJobId) ||
-    customerRequests.find((job) => job.id === activeJobId) ||
-    activeAcceptedJob ||
-    null;
-  const activeRoute = routes.find((route) => route.id === activeRouteId) || null;
-  const offerLoadSequenceRef = useRef(0);
   const transportStatusSubmissionRef = useRef(false);
   const transportStatusConfirmationIdRef = useRef(0);
   const transportStatusConfirmationRef = useRef<{
@@ -520,286 +295,6 @@ function App() {
           driverId: currentTransportStatusOffer.driver_id,
         }
       : null;
-
-  function mapTowRequestRow(row: any): Job {
-    return {
-      id: row.id,
-      customerName: "Uživatel RoadLink",
-      customerId: row.customer_id || undefined,
-      vehicle: canonicalVehicleType(row.vehicle_type || "Vozidlo"),
-      problem: row.problem_description || "Porucha",
-      pickup: coordinatesFromValues(row.pickup_lat, row.pickup_lng),
-      pickupAddress: row.pickup_address || null,
-      destination: row.destination_address || "Servis dle domluvy",
-      destinationCoordinates: coordinatesFromValues(row.destination_lat, row.destination_lng),
-      status: row.status,
-      timePreference: row.time_preference || "asap",
-      requestedDate: row.requested_date || null,
-      requestedEndDate: row.date_to || null,
-      requestedTime: row.requested_time || null,
-      vehicleMobility: row.vehicle_mobility || "unknown",
-      vehicleModel: row.vehicle_model || null,
-      canTrailer: row.can_drive_onto_trailer ?? null,
-      createdAt: row.created_at || "",
-    };
-  }
-
-  async function loadJobs() {
-    const { data, error } = await supabase
-      .from("tow_requests")
-      .select("*")
-      .eq("status", "open")
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.error("Load jobs:", error.message);
-      return;
-    }
-
-    const mapped: Job[] = (data || []).map(mapTowRequestRow);
-
-    setJobs(mapped);
-  }
-
-  async function loadAcceptedJobs() {
-    if (!userId) return;
-
-    setAcceptedJobsLoading(true);
-    const { data: acceptedOffers, error: offersError } = await supabase
-      .from("tow_offers")
-      .select("*")
-      .eq("driver_id", userId)
-      .eq("status", "accepted");
-
-    if (offersError) {
-      console.error("Load accepted offers:", offersError.message);
-      setAcceptedJobsLoading(false);
-      return;
-    }
-
-    const offerRows = (acceptedOffers || []) as TowOffer[];
-    if (offerRows.length === 0) {
-      setAcceptedJobs([]);
-      setAcceptedJobsLoading(false);
-      return;
-    }
-
-    const { data: requestRows, error: requestsError } = await supabase
-      .from("tow_requests")
-      .select("*")
-      .in("id", offerRows.map((offer) => offer.tow_request_id));
-
-    if (requestsError) {
-      console.error("Load accepted requests:", requestsError.message);
-      setAcceptedJobsLoading(false);
-      return;
-    }
-
-    const accepted = (requestRows || []).flatMap((row) => {
-      const acceptedOffer = offerRows.find((offer) => offer.tow_request_id === row.id);
-      if (!acceptedOffer) return [];
-
-      return [{ ...mapTowRequestRow(row), acceptedOffer }];
-    });
-
-    setAcceptedJobs(accepted);
-    setAcceptedJobsLoading(false);
-  }
-
-  async function loadCustomerRequests() {
-    if (!userId) return;
-
-    const { data, error } = await supabase
-      .from("tow_requests")
-      .select("*")
-      .eq("customer_id", userId)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.error("Load customer requests:", error.message);
-      return;
-    }
-
-    const mapped: Job[] = (data || []).map(mapTowRequestRow);
-
-    setCustomerRequests(mapped);
-
-    if (mapped.length === 0) {
-      setOfferCounts({});
-      return mapped;
-    }
-
-    const { data: offerRows, error: offersError } = await supabase
-      .from("tow_offers")
-      .select("tow_request_id")
-      .in("tow_request_id", mapped.map((job) => job.id));
-
-    if (offersError) {
-      console.error("Load offer counts:", offersError.message);
-      setOfferCounts({});
-      return;
-    }
-
-    const counts = (offerRows || []).reduce<Record<string, number>>((current, row) => {
-      current[row.tow_request_id] = (current[row.tow_request_id] || 0) + 1;
-      return current;
-    }, {});
-    setOfferCounts(counts);
-    return mapped;
-  }
-
-  async function loadRoutes() {
-    if (!userId) return;
-
-    setRoutesLoading(true);
-    setRoutesError(false);
-    let query = supabase.from("carrier_routes").select("*");
-    query = screen === "driverHome"
-      ? query.eq("driver_id", userId).in("status", ["open", "full", "in_progress"])
-      : query.eq("status", "open");
-    const { data, error } = await query.order("departure_at", { ascending: true });
-    setRoutesLoading(false);
-
-    if (error) {
-      console.error("Load routes:", error.message);
-      setRoutesError(true);
-      setRoutes([]);
-      return;
-    }
-
-    setRoutes(
-      (data || []).map((row) => ({
-        id: row.id,
-        driverId: row.driver_id,
-        fromAddress: row.from_address || "Neuvedeno",
-        toAddress: row.to_address || "Neuvedeno",
-        departureAt: row.departure_at || "Neuvedeno",
-        availableSpaces: row.available_spaces ?? 0,
-        maxDeviationKm: row.max_deviation_km ?? null,
-        vehicleTypes: Array.isArray(row.vehicle_types)
-          ? row.vehicle_types.map((value: string) => canonicalVehicleType(value)).join(", ")
-          : canonicalVehicleType(row.vehicle_types || "Neuvedeno"),
-        price: row.price ?? null,
-        description: row.description || "",
-        status: row.status || "open",
-      }))
-    );
-  }
-
-  async function loadRouteInterestedRequests(routeId: string) {
-    setRouteInterestsLoading(true);
-    setRouteInterestsError(false);
-
-    const { data: interestRows, error: interestsError } = await supabase
-      .from("carrier_route_interests")
-      .select("tow_request_id")
-      .eq("carrier_route_id", routeId);
-
-    if (interestsError) {
-      console.error("Load route interests:", interestsError.message);
-      setRouteInterestedRequests([]);
-      setRouteInterestsError(true);
-      setRouteInterestsLoading(false);
-      return;
-    }
-
-    const requestIds = Array.from(new Set((interestRows || []).map((row) => row.tow_request_id).filter(Boolean)));
-    if (requestIds.length === 0) {
-      setRouteInterestedRequests([]);
-      setRouteInterestsLoading(false);
-      return;
-    }
-
-    const { data: requestRows, error: requestsError } = await supabase
-      .from("tow_requests")
-      .select("*")
-      .in("id", requestIds);
-
-    if (requestsError) {
-      console.error("Load interested requests:", requestsError.message);
-      setRouteInterestedRequests([]);
-      setRouteInterestsError(true);
-      setRouteInterestsLoading(false);
-      return;
-    }
-
-    setRouteInterestedRequests((requestRows || []).filter((row) => row.status === "open").map(mapTowRequestRow));
-    setRouteInterestsLoading(false);
-  }
-
-  async function loadOffers() {
-    const loadSequence = offerLoadSequenceRef.current + 1;
-    offerLoadSequenceRef.current = loadSequence;
-
-    if (!activeJobId) {
-      setOffers([]);
-      setProviderIdentities({});
-      setOffersLoading(false);
-      return;
-    }
-
-    const requestId = activeJobId;
-    const requestOwnerId = activeJob?.id === requestId ? activeJob.customerId : null;
-    const canLoadProviderIdentities = Boolean(userId && requestOwnerId && requestOwnerId === userId);
-
-    setOffersLoading(true);
-    setProviderIdentities({});
-
-    const { data, error } = await supabase
-      .from("tow_offers")
-      .select("*")
-      .eq("tow_request_id", requestId)
-      .order("created_at", { ascending: true });
-
-    if (offerLoadSequenceRef.current !== loadSequence) return;
-
-    if (error) {
-      console.error("Load offers:", error.message);
-      setProviderIdentities({});
-      setOffersLoading(false);
-      return;
-    }
-
-    const loadedOffers = (data || []) as TowOffer[];
-    setOffers(loadedOffers);
-
-    if (!canLoadProviderIdentities) {
-      setProviderIdentities({});
-      setOffersLoading(false);
-      return;
-    }
-
-    const { data: identityRows, error: identityError } = await supabase.rpc("get_offer_provider_identities", {
-      p_tow_request_id: requestId,
-    });
-
-    if (offerLoadSequenceRef.current !== loadSequence) return;
-
-    if (identityError) {
-      console.error("Load offer provider identities:", identityError.message);
-      setProviderIdentities({});
-      setOffersLoading(false);
-      return;
-    }
-
-    const identities = ((identityRows || []) as ProviderIdentity[]).reduce<Record<string, ProviderIdentity>>((current, identity) => {
-      current[identity.user_id] = identity;
-      return current;
-    }, {});
-    setProviderIdentities(identities);
-    setOffersLoading(false);
-  }
-
-  function providerNameForOffer(offer: TowOffer) {
-    const identity = providerIdentities[offer.driver_id];
-    const companyName = identity?.company_name?.trim();
-    if (companyName) return companyName;
-
-    const displayName = identity?.display_name?.trim();
-    if (displayName) return displayName;
-
-    return "Přepravce";
-  }
 
   async function openContactUrl(url: string, failureMessage: string) {
     try {
@@ -1050,13 +545,6 @@ function App() {
     );
   }
 
-  function selectedOfferForActiveJob() {
-    return (
-      offers.find((offer) => offer.status === "accepted") ||
-      (activeAcceptedJob?.acceptedOffer.tow_request_id === activeJobId ? activeAcceptedJob.acceptedOffer : null)
-    );
-  }
-
   function transportLifecycleMessage(status?: JobStatus) {
     switch (status) {
       case "offer_selected": return "Přepravce byl vybrán. Čeká se na zahájení přepravy.";
@@ -1273,16 +761,6 @@ function App() {
   }
 
   useEffect(() => {
-    if (screen === "routeDetail" && activeRouteId && activeRoute?.driverId === userId) {
-      loadRouteInterestedRequests(activeRouteId);
-    } else {
-      setRouteInterestedRequests([]);
-      setRouteInterestsError(false);
-      setRouteInterestsLoading(false);
-    }
-  }, [screen, activeRouteId, activeRoute?.driverId, userId]);
-
-  useEffect(() => {
     if (role === "driver" && screen === "driverHome" && userId) {
       loadJobs();
       loadRoutes();
@@ -1311,17 +789,6 @@ function App() {
   }, [screen, activeJobId, userId, activeJob?.status, currentTransportStatusOffer?.driver_id]);
 
   useEffect(() => {
-    if (screen === "tracking" || screen === "job") {
-      loadOffers();
-      return;
-    }
-
-    offerLoadSequenceRef.current += 1;
-    setProviderIdentities({});
-    setOffersLoading(false);
-  }, [screen, activeJobId, userId, activeJob?.customerId]);
-
-  useEffect(() => {
     if (screen === "customerRequests" && userId) {
       loadCustomerRequests();
     }
@@ -1345,23 +812,6 @@ function App() {
     }
   }, [screen, userId]);
 
-  async function requestLocation() {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        setLocationError("Povolte RoadLink přístup k poloze.");
-        return;
-      }
-      const current = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      setLocation(current);
-      setLocationError("");
-    } catch {
-      setLocationError("Nepodařilo se získat aktuální polohu.");
-    }
-  }
-
   function goHome(nextRole = role) {
     setRole(nextRole);
     if (nextRole === "driver") {
@@ -1372,53 +822,6 @@ function App() {
       void ensureCarrierProfile();
     }
     setScreen(nextRole === "customer" ? "customerHome" : "driverHome");
-  }
-
-  async function loginUser() {
-    const email = loginEmail.trim();
-    const password = loginPassword;
-
-    if (!email || !password) {
-      Alert.alert("Chybí údaje", "Zadejte prosím e-mail a heslo.");
-      return;
-    }
-
-    setLoginLoading(true);
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (error) {
-      console.error("Supabase signIn error:", error);
-      Alert.alert("Přihlášení se nepodařilo", formatSupabaseError(error));
-      setLoginLoading(false);
-      return;
-    }
-
-    if (data.user) {
-      setUserId(data.user.id);
-    }
-
-    setLoginLoading(false);
-    setScreen("home");
-  }
-
-  async function signOutUser() {
-    setSignOutLoading(true);
-    const { error } = await supabase.auth.signOut();
-
-    if (error) {
-      console.error("Supabase signOut error:", error);
-      Alert.alert("Odhlášení se nepodařilo", formatSupabaseError(error));
-      setSignOutLoading(false);
-      return;
-    }
-
-    clearLocalUserState();
-    setLoginPassword("");
-    setScreen("home");
-    setSignOutLoading(false);
   }
 
   // Zajistí, že existuje carrier_profiles řádek pro aktuálního uživatele.
@@ -1862,85 +1265,6 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
     Alert.alert("Profil uložen", "Vaše údaje byly aktualizovány.");
   }
 
-  async function registerUser() {
-    const firstName = registrationFirstName.trim();
-    const lastName = registrationLastName.trim();
-    const phone = registrationPhone.trim();
-    const email = registrationEmail.trim();
-    const password = registrationPassword;
-    const passwordConfirmation = registrationPasswordConfirmation;
-
-    if (!firstName || !lastName || !phone || !email || !password) {
-      Alert.alert("Chybí údaje", "Vyplňte prosím všechna povinná pole.");
-      return;
-    }
-
-    if (password.length < 8) {
-      Alert.alert("Neplatné heslo", "Heslo musí mít alespoň 8 znaků.");
-      return;
-    }
-
-    if (password !== passwordConfirmation) {
-      Alert.alert("Neplatné heslo", "Potvrzení hesla se neshoduje.");
-      return;
-    }
-
-    setRegistrationLoading(true);
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-
-    if (error) {
-      console.error("Supabase signUp error:", error);
-      Alert.alert("Registrace se nepodařila", formatSupabaseError(error));
-      setRegistrationLoading(false);
-      return;
-    }
-
-    const user = data.user;
-    if (!user) {
-      console.error("Supabase signUp error: user was not created", { session: data.session });
-      Alert.alert("Registrace se nepodařila", "Supabase nevytvořil uživatele.");
-      setRegistrationLoading(false);
-      return;
-    }
-
-    console.log("Supabase signUp result:", {
-      userId: user.id,
-      hasSession: Boolean(data.session),
-      emailConfirmationRequired: !data.session,
-    });
-
-    const { error: profileError } = await supabase.from("profiles").insert({
-      id: user.id,
-      first_name: firstName,
-      last_name: lastName,
-      phone,
-      role: "customer",
-    });
-
-    if (profileError) {
-      console.error("Supabase profile insert error:", profileError);
-      Alert.alert(
-        "Registrace se nedokončila",
-        `Profil se nepodařilo uložit.\n\n${formatSupabaseError(profileError)}`
-      );
-      setRegistrationLoading(false);
-      return;
-    }
-
-    setRegistrationLoading(false);
-    if (data.session) {
-      setUserId(user.id);
-      setScreen("home");
-      Alert.alert("Registrace dokončena", "Váš účet byl vytvořen.");
-    } else {
-      Alert.alert("Registrace dokončena", "Účet byl vytvořen. Pro pokračování potvrďte e-mail.");
-      setScreen("login");
-    }
-  }
-
  async function createJob() {
    if (!userId) {
      Alert.alert(
@@ -2068,40 +1392,6 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
    }
  }
 
-  const filteredJobs = useMemo(() => {
-    const timePriority: Record<TimePreference, number> = {
-      asap: 0,
-      within_24h: 1,
-      within_3_days: 2,
-      within_week: 3,
-      specific: 4,
-    };
-
-    return jobs
-      .filter((job) => job.status === "open")
-      .filter((job) => timeFilter === "all" || job.timePreference === timeFilter)
-      .filter((job) => vehicleFilter === "all" || job.vehicle === vehicleFilter)
-      .filter((job) => mobilityFilter === "all" || job.vehicleMobility === mobilityFilter)
-      .sort((firstJob, secondJob) => {
-        if (sortOption === "newest") {
-          return (Date.parse(secondJob.createdAt || "") || 0) - (Date.parse(firstJob.createdAt || "") || 0);
-        }
-
-        const priorityDifference =
-          timePriority[firstJob.timePreference || "asap"] -
-          timePriority[secondJob.timePreference || "asap"];
-        if (priorityDifference !== 0) return priorityDifference;
-
-        if (firstJob.timePreference === "specific" && secondJob.timePreference === "specific") {
-          const firstDate = `${firstJob.requestedDate || "9999-12-31"}T${firstJob.requestedTime || "23:59:59"}`;
-          const secondDate = `${secondJob.requestedDate || "9999-12-31"}T${secondJob.requestedTime || "23:59:59"}`;
-          return Date.parse(firstDate) - Date.parse(secondDate);
-        }
-
-        return (Date.parse(secondJob.createdAt || "") || 0) - (Date.parse(firstJob.createdAt || "") || 0);
-      });
-  }, [jobs, mobilityFilter, sortOption, timeFilter, vehicleFilter]);
-
   const transportFilterText = (value: string | null | undefined) => (value || "").trim().toLocaleLowerCase("cs-CZ");
   const filteredTransportRequests = useMemo(() => {
     const from = transportFilterText(transportFromFilter);
@@ -2184,23 +1474,6 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
     setScreen("transport");
   }
 
-  function Header({ title }: { title: string }) {
-    const insets = useSafeAreaInsets();
-    return (
-      <View style={[styles.headerSafeArea, { paddingTop: (styles.headerSafeArea.paddingTop as number) + insets.top }]}>
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.logo}>ROADLINK</Text>
-          <Text style={styles.headerTitle}>{title}</Text>
-        </View>
-        <TouchableOpacity style={styles.headerIconButton} onPress={() => Alert.alert("Notifikace", "Notifikace budou dostupné v další verzi RoadLinku.")}>
-          <Text style={styles.headerSignOut}>⌁</Text>
-        </TouchableOpacity>
-      </View>
-      </View>
-    );
-  }
-
   function MapCard({ showRoute = false, compact = false }: { showRoute?: boolean; compact?: boolean }) {
     const pickup = activeJob?.pickup ?? null;
     const user = location?.coords;
@@ -2238,57 +1511,19 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
     );
   }
 
-  function BottomNavigation() {
-    const insets = useSafeAreaInsets();
-    const navItems = [
-      { key: "home", label: "Domů", icon: "⌂" },
-      { key: "overview", label: "Přehled", icon: "▦" },
-      { key: "transport", label: "Přeprava", icon: "⇄" },
-      { key: "create", label: "+", icon: "+" },
-      { key: "sos", label: "SOS", icon: "!" },
-      { key: "profile", label: "Profil", icon: "◯" },
-    ];
+  function handleBottomNavItemPress(key: string) {
+    if (key === "transport") {
+      setTransportTab("requests");
+    }
+    if (key === "profile" && !userId) {
+      setScreen("login");
+      return;
+    }
+    setScreen(key);
+  }
 
-    return (
-      <View style={[styles.bottomNavSafeArea, { paddingBottom: (styles.bottomNavSafeArea.paddingBottom as number) + insets.bottom }]}>
-      <View style={styles.bottomNav}>
-        {navItems.map((item) => {
-          const isActive = screen === item.key;
-          const isCreate = item.key === "create";
-          return (
-            <TouchableOpacity
-              key={item.key}
-              style={styles.bottomNavItem}
-              onPress={() => {
-                if (item.key === "transport") {
-                  setTransportTab("requests");
-                }
-                if (item.key === "profile" && !userId) {
-                  setScreen("login");
-                  return;
-                }
-                setScreen(item.key);
-              }}
-            >
-              <Text style={[
-                styles.bottomNavIcon,
-                isActive && styles.bottomNavTextActive,
-                item.key === "sos" && styles.bottomNavSos,
-                isCreate && styles.bottomNavPlus,
-              ]}>
-                {item.icon}
-              </Text>
-              {!isCreate ? (
-                <Text style={[styles.bottomNavText, isActive && styles.bottomNavTextActive, item.key === "sos" && styles.bottomNavSos]}>
-                  {item.label}
-                </Text>
-              ) : null}
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-      </View>
-    );
+  function BottomNavigation() {
+    return <BottomNav screen={screen} onItemPress={handleBottomNavItemPress} />;
   }
 
   if (screen === "login" || screen === "signup") {
@@ -2337,10 +1572,10 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
           <TouchableOpacity style={styles.primary} onPress={loginUser} disabled={loginLoading}>
             <Text style={styles.primaryText}>{loginLoading ? "Přihlašuji…" : "Přihlásit"}</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => setScreen("signup")} disabled={loginLoading}>
+          <TouchableOpacity onPress={() => { setLoginPassword(""); setScreen("signup"); }} disabled={loginLoading}>
             <Text style={styles.link}>Nemám účet</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => setScreen("home")} disabled={loginLoading}>
+          <TouchableOpacity onPress={() => { setLoginPassword(""); setScreen("home"); }} disabled={loginLoading}>
             <Text style={styles.link}>Zpět na úvod</Text>
           </TouchableOpacity>
         </View>
@@ -2453,10 +1688,6 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
     );
   }
 
-  if (__DEV__ && screen === "transportPreview") {
-    return <TransportPreviewScreen onBack={() => setScreen("transport")} />;
-  }
-
   if (screen === "transport") {
     const openRequestCards = filteredTransportRequests;
     const openCapacityCards = filteredTransportRoutes;
@@ -2480,12 +1711,6 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
               </TouchableOpacity>
             ))}
           </View>
-          {__DEV__ ? (
-            <TouchableOpacity style={styles.devPreviewButton} onPress={() => setScreen("transportPreview")} accessibilityRole="button" accessibilityLabel="Náhled karet, pouze vývoj">
-              <Text style={styles.devPreviewLink}>Náhled karet (DEV)</Text>
-            </TouchableOpacity>
-          ) : null}
-
           {transportTab !== "mine" ? (
             <View style={styles.filterPanel}>
               <View style={styles.transportFilterHeader}>
@@ -2813,54 +2038,21 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
 
   if (screen === "create") {
     return (
-      <SafeAreaView style={styles.container}>
-        <Header title="Nový požadavek" />
-        <ScrollView style={styles.scroll} contentContainerStyle={styles.appContent} keyboardShouldPersistTaps="handled">
-          <Text style={styles.bigTitle}>Co chcete vytvořit?</Text>
-          <TouchableOpacity style={styles.actionCard} onPress={openRequestFlow}>
-            <Text style={styles.actionTitle}>Poptávka</Text>
-            <Text style={styles.muted}>Potřebuji přepravit vozidlo</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionCard} onPress={openCapacityFlow}>
-            <Text style={styles.actionTitle}>Volná kapacita</Text>
-            <Text style={styles.muted}>Mám volné místo na trase</Text>
-          </TouchableOpacity>
-        </ScrollView>
-        <BottomNavigation />
-      </SafeAreaView>
+      <CreateScreen
+        screen={screen}
+        onItemPress={handleBottomNavItemPress}
+        onRequestFlow={openRequestFlow}
+        onCapacityFlow={openCapacityFlow}
+      />
     );
   }
 
   if (screen === "sos") {
-    return (
-      <SafeAreaView style={styles.container}>
-        <Header title="SOS" />
-        <View style={styles.appContent}>
-          <Text style={styles.bigTitle}>SOS</Text>
-          <Text style={styles.muted}>SOS pomoc bude dostupná v další verzi RoadLinku.</Text>
-        </View>
-        <BottomNavigation />
-      </SafeAreaView>
-    );
+    return <SosScreen screen={screen} onItemPress={handleBottomNavItemPress} />;
   }
 
   if (screen === "role") {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.form}>
-          <Text style={styles.logo}>RoadLink</Text>
-          <Text style={styles.bigTitle}>Jak chcete RoadLink používat?</Text>
-          <TouchableOpacity style={styles.roleCard} onPress={() => goHome("customer")}>
-            <Text style={styles.roleIcon}>🚗</Text>
-            <View><Text style={styles.roleTitle}>Potřebuji odtah</Text><Text style={styles.muted}>Objednat pomoc na místě</Text></View>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.roleCard} onPress={() => goHome("driver")}>
-            <Text style={styles.roleIcon}>🚛</Text>
-            <View><Text style={styles.roleTitle}>Jsem odtahovka</Text><Text style={styles.muted}>Přijímat a vozit zakázky</Text></View>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
+    return <RoleScreen onSelectRole={goHome} />;
   }
 
   if (screen === "customerHome") {
@@ -3472,19 +2664,7 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
   }
 
   if (screen === "requestSuccess") {
-    return (
-      <SafeAreaView style={styles.container}>
-        <Header title="Poptávka odeslána" />
-        <View style={styles.requestSuccessContent}>
-          <Text style={styles.successMark}>✓</Text>
-          <Text style={styles.bigTitle}>POPTÁVKA ODESLÁNA</Text>
-          <Text style={styles.muted}>Poptávka byla zveřejněna.{"\n"}Nyní můžete dostávat cenové nabídky přepravců.</Text>
-          <TouchableOpacity style={styles.primary} onPress={openMyRequestsAfterSuccess}>
-            <Text style={styles.primaryText}>ZOBRAZIT MOJE POPTÁVKY</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
+    return <RequestSuccessScreen onShowRequests={openMyRequestsAfterSuccess} />;
   }
 
   if (screen === "offerForm") {
@@ -4023,811 +3203,13 @@ const [{ data: verification }, { data: insurance }] = await Promise.all([
     );
   }
 
-  if (screen === "vehicleForm") {
-    return (
-      <SafeAreaView style={styles.container}>
-        <Header title={editingVehicleId ? "Upravit vozidlo" : "Přidat vozidlo"} />
-        <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <Text style={styles.sectionTitle}>Základní informace</Text>
-          <Text style={styles.label}>Název vozidla</Text>
-          <TextInput style={styles.input} value={vehicleName} onChangeText={setVehicleName} placeholder="Např. Osobní auto 1" />
-
-          <Text style={styles.label}>Typ vozidla</Text>
-          <TextInput style={styles.input} value={vehicleType} onChangeText={setVehicleType} placeholder="Např. Osobní auto, SUV, Dodávka" />
-
-          <Text style={styles.label}>Značka (volitelné)</Text>
-          <TextInput style={styles.input} value={vehicleMake} onChangeText={setVehicleMake} placeholder="Např. Škoda, Mercedes" />
-
-          <Text style={styles.label}>Model (volitelné)</Text>
-          <TextInput style={styles.input} value={vehicleModel} onChangeText={setVehicleModel} placeholder="Např. Octavia, Vito" />
-
-          <Text style={styles.label}>Rok výroby (volitelné)</Text>
-          <TextInput style={styles.input} value={vehicleYear} onChangeText={setVehicleYear} placeholder="Např. 2020" keyboardType="numeric" />
-
-          <Text style={styles.label}>Registrace (volitelné)</Text>
-          <TextInput style={styles.input} value={vehicleRegistrationNumber} onChangeText={setVehicleRegistrationNumber} placeholder="Např. 1A2 3456" />
-
-          <Text style={styles.sectionTitle}>Rozměry a nosnost</Text>
-          <Text style={styles.label}>Max. nosnost (kg)</Text>
-          <TextInput style={styles.input} value={vehicleMaxWeight} onChangeText={setVehicleMaxWeight} placeholder="Např. 3500" keyboardType="numeric" />
-
-          <Text style={styles.label}>Max. délka (cm)</Text>
-          <TextInput style={styles.input} value={vehicleMaxLength} onChangeText={setVehicleMaxLength} placeholder="Např. 500" keyboardType="numeric" />
-
-          <Text style={styles.label}>Max. šířka (cm)</Text>
-          <TextInput style={styles.input} value={vehicleMaxWidth} onChangeText={setVehicleMaxWidth} placeholder="Např. 200" keyboardType="numeric" />
-
-          <Text style={styles.label}>Max. výška (cm)</Text>
-          <TextInput style={styles.input} value={vehicleMaxHeight} onChangeText={setVehicleMaxHeight} placeholder="Např. 250" keyboardType="numeric" />
-
-          <Text style={styles.label}>Kapacita (volitelné)</Text>
-          <TextInput style={styles.input} value={vehicleCapacity} onChangeText={setVehicleCapacity} placeholder="Např. 4" keyboardType="numeric" />
-
-          <Text style={styles.label}>Popis (volitelné)</Text>
-          <TextInput style={[styles.input, styles.multilineInput]} value={vehicleDescription} onChangeText={setVehicleDescription} placeholder="Doplňující informace o vozidle" multiline />
-
-          <Text style={styles.sectionTitle}>Stav a vybavení</Text>
-          <Text style={styles.label}>Je vozidlo aktivní?</Text>
-          <View style={styles.chips}>
-            <TouchableOpacity style={[styles.chip, vehicleIsActive && styles.chipActive]} onPress={() => setVehicleIsActive(true)}>
-              <Text>Aktivní</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.chip, !vehicleIsActive && styles.chipActive]} onPress={() => setVehicleIsActive(false)}>
-              <Text>Neaktivní</Text>
-            </TouchableOpacity>
-          </View>
-
-          <Text style={styles.label}>Vybavení (stačí označit)</Text>
-          <View style={styles.chips}>
-            <TouchableOpacity style={[styles.chip, vehicleHasWinch && styles.chipActive]} onPress={() => setVehicleHasWinch(!vehicleHasWinch)}>
-              <Text>Naviják</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.chip, vehicleHasHydraulicPlatform && styles.chipActive]} onPress={() => setVehicleHasHydraulicPlatform(!vehicleHasHydraulicPlatform)}>
-              <Text>Hydraulická nástavba</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.chip, vehicleHasRamps && styles.chipActive]} onPress={() => setVehicleHasRamps(!vehicleHasRamps)}>
-              <Text>Rampy</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.chip, vehicleHasStraps && styles.chipActive]} onPress={() => setVehicleHasStraps(!vehicleHasStraps)}>
-              <Text>Pásy</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.chip, vehicleHasJumpStarter && styles.chipActive]} onPress={() => setVehicleHasJumpStarter(!vehicleHasJumpStarter)}>
-              <Text>Startér</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.chip, vehicleHasCompressor && styles.chipActive]} onPress={() => setVehicleHasCompressor(!vehicleHasCompressor)}>
-              <Text>Kompresor</Text>
-            </TouchableOpacity>
-          </View>
-
-          <TouchableOpacity style={styles.primary} onPress={saveVehicle}>
-            <Text style={styles.primaryText}>Uložit vozidlo</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.secondary} onPress={() => goToVehicles()}>
-            <Text style={styles.secondaryText}>Zpět na vozidla</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
-  if (screen === "vehicles") {
-    return (
-      <SafeAreaView style={styles.container}>
-        <Header title="Moje vozidla" />
-        {vehiclesLoading ? (
-          <View style={styles.scroll}>
-            <Text style={styles.empty}>Načítám vozidla...</Text>
-          </View>
-        ) : vehicles.length === 0 ? (
-          <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-            <Text style={styles.empty}>Žádná vozidla.</Text>
-            <TouchableOpacity style={styles.primary} onPress={() => setScreen("vehicleForm")}>
-              <Text style={styles.primaryText}>Přidat vozidlo</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.secondary} onPress={() => setScreen("profile")}>
-              <Text style={styles.secondaryText}>Zpět na profil</Text>
-            </TouchableOpacity>
-          </ScrollView>
-        ) : (
-          <FlatList
-            data={vehicles}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={styles.list}
-            ListHeaderComponent={
-              <TouchableOpacity style={styles.primary} onPress={() => setScreen("vehicleForm")}>
-                <Text style={styles.primaryText}>Přidat vozidlo</Text>
-              </TouchableOpacity>
-            }
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={styles.vehicleCard}
-                onPress={() => {
-                  editVehicle(item);
-                  setScreen("vehicleForm");
-                }}
-              >
-                <View style={styles.vehicleHeader}>
-                  <View>
-                    <Text style={styles.vehicleName}>{item.name || "Bez názvu"}</Text>
-                    <Text style={styles.vehicleInfo}>
-                      {item.vehicle_type || "Typ nebyl uveden"}
-                      {item.make ? ` • ${item.make}` : ""}
-                      {item.model ? ` ${item.model}` : ""}
-                      {item.year ? ` (${item.year})` : ""}
-                    </Text>
-                  </View>
-                  <View style={[styles.statusBadge, item.is_active ? styles.activeBadge : styles.inactiveBadge]}>
-                    <Text style={styles.statusBadgeText}>{item.is_active ? "Aktivní" : "Neaktivní"}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.vehicleDetails}>
-                  <View style={styles.vehicleDetailRow}>
-                    <Text style={styles.vehicleDetailLabel}>Registrace</Text>
-                    <Text style={styles.vehicleDetailValue}>{item.registration_number || "—"}</Text>
-                  </View>
-                  <View style={styles.vehicleDetailRow}>
-                    <Text style={styles.vehicleDetailLabel}>Nosnost</Text>
-                    <Text style={styles.vehicleDetailValue}>{item.max_weight_kg ? `${item.max_weight_kg} kg` : "—"}</Text>
-                  </View>
-                  <View style={styles.vehicleDetailRow}>
-                    <Text style={styles.vehicleDetailLabel}>Délka</Text>
-                    <Text style={styles.vehicleDetailValue}>{item.max_vehicle_length_cm ? `${item.max_vehicle_length_cm} cm` : "—"}</Text>
-                  </View>
-                  <View style={styles.vehicleDetailRow}>
-                    <Text style={styles.vehicleDetailLabel}>Šířka</Text>
-                    <Text style={styles.vehicleDetailValue}>{item.max_vehicle_width_cm ? `${item.max_vehicle_width_cm} cm` : "—"}</Text>
-                  </View>
-                  <View style={styles.vehicleDetailRow}>
-                    <Text style={styles.vehicleDetailLabel}>Výška</Text>
-                    <Text style={styles.vehicleDetailValue}>{item.max_vehicle_height_cm ? `${item.max_vehicle_height_cm} cm` : "—"}</Text>
-                  </View>
-                  <View style={styles.vehicleDetailRow}>
-                    <Text style={styles.vehicleDetailLabel}>Kapacita</Text>
-                    <Text style={styles.vehicleDetailValue}>{item.capacity ? `${item.capacity}` : "—"}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.vehicleEquipment}>
-                  <Text style={styles.equipmentLabel}>Vybavení:</Text>
-                  <View style={styles.equipmentRow}>
-                    <Text style={[styles.equipmentItem, item.has_winch && styles.equipmentChecked]}>Naviják</Text>
-                    <Text style={[styles.equipmentItem, item.has_hydraulic_platform && styles.equipmentChecked]}>Hydraul. nástavba</Text>
-                    <Text style={[styles.equipmentItem, item.has_ramps && styles.equipmentChecked]}>Rampy</Text>
-                    <Text style={[styles.equipmentItem, item.has_straps && styles.equipmentChecked]}>Pásy</Text>
-                    <Text style={[styles.equipmentItem, item.has_jump_starter && styles.equipmentChecked]}>Startér</Text>
-                    <Text style={[styles.equipmentItem, item.has_compressor && styles.equipmentChecked]}>Kompresor</Text>
-                  </View>
-                </View>
-
-                <View style={styles.vehicleActions}>
-                  <TouchableOpacity style={styles.secondary} onPress={() => editVehicle(item)}>
-                    <Text style={styles.secondaryText}>Upravit</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.dangerButton} onPress={() => deleteVehicle(item)}>
-                    <Text style={styles.dangerButtonText}>Smazat</Text>
-                  </TouchableOpacity>
-                </View>
-              </TouchableOpacity>
-            )}
-          />
-        )}
-
-        <View style={styles.bottomAction}>
-          <TouchableOpacity style={styles.secondary} onPress={() => setScreen("profile")}>
-            <Text style={styles.secondaryText}>Zpět na profil</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.customerActionRowSubtle} onPress={() => setScreen("profile")}>
-            <Text style={styles.customerActionTextSubtle}>← Zpět na profil</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.customerActionRowSubtle} onPress={() => setScreen("overview")}>
-            <Text style={styles.customerActionTextSubtle}>Zpět na přehled</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
 
   return null;
 }
 
-function formatSupabaseError(error: {
-  message?: string;
-  code?: string;
-  details?: string;
-  hint?: string;
-}) {
-  return [error.message, error.code && `Kód: ${error.code}`, error.details && `Detaily: ${error.details}`, error.hint && `Nápověda: ${error.hint}`]
-    .filter(Boolean)
-    .join("\n");
-}
 
-function pickupDisplayLabel(job: Job) {
-  if (job.pickupAddress?.trim()) return job.pickupAddress.trim();
-  if (job.pickup) return `${job.pickup.latitude.toFixed(5)}, ${job.pickup.longitude.toFixed(5)}`;
-  return "Místo vyzvednutí neuvedeno";
-}
 
-function routeDisplayLabel(job: Job) {
-  return `Vyzvednutí ${pickupDisplayLabel(job)}  →  ${job.destination}`;
-}
 
-function requestTimingLabel(job: Job) {
-  if (job.requestedDate) {
-    if (job.requestedEndDate && job.requestedEndDate !== job.requestedDate) {
-      return formatDateRange(job.requestedDate, job.requestedEndDate);
-    }
-    if (job.timePreference === "specific") {
-      const date = formatDate(job.requestedDate);
-      const time = formatTime(job.requestedTime);
-      return time ? `${date}, ${time}` : date || "Konkrétní termín";
-    }
-    const date = formatDate(job.requestedDate);
-    if (date) return date;
-  }
-  return timePreferenceLabel(job.timePreference);
-}
-
-function formatDateRange(from: string, to: string) {
-  const [fromYear, fromMonth, fromDay] = from.slice(0, 10).split("-").map(Number);
-  const [toYear, toMonth, toDay] = to.slice(0, 10).split("-").map(Number);
-  if (fromYear === toYear && fromMonth === toMonth) {
-    return `${fromDay}.–${toDay}. ${toMonth}. ${toYear}`;
-  }
-  return `${formatDate(from)} – ${formatDate(to)}`;
-}
-
-function triStateLabel(value: boolean | null | undefined): string {
-  if (value === true) return "Ano";
-  if (value === false) return "Ne";
-  return "Neví se";
-}
-
-function mobilityOperableLabel(mobility?: VehicleMobility): string {
-  if (mobility === "drivable") return "Ano";
-  if (mobility === "not_drivable") return "Ne";
-  return "Neví se";
-}
-
-function offerCountLabel(count: number) {
-  if (count === 1) return "1 cenová nabídka";
-  if (count >= 2 && count <= 4) return `${count} cenové nabídky`;
-  return `${count} cenových nabídek`;
-}
-
-function timePreferenceLabel(preference?: TimePreference) {
-  switch (preference) {
-    case "asap": return "Co nejdříve";
-    case "within_24h": return "Do 24 hodin";
-    case "within_3_days": return "Do 3 dnů";
-    case "within_week": return "Do týdne";
-    case "specific": return "Konkrétní termín";
-    default: return "Co nejdříve";
-  }
-}
-
-function vehicleMobilityLabel(mobility?: VehicleMobility) {
-  switch (mobility) {
-    case "drivable": return "Samo najede na vlek";
-    case "partially_drivable": return "Jede, ale má problém";
-    case "not_drivable": return "Nenajede na vlek – nutný naviják";
-    case "unknown": return "Stav vozidla není jistý";
-    default: return "Stav vozidla není jistý";
-  }
-}
-
-function offerStatusLabel(status: TowOffer["status"]) {
-  switch (status) {
-    case "pending": return "Čeká na rozhodnutí";
-    case "accepted": return "Přijato";
-    case "rejected": return "Odmítnuto";
-    case "withdrawn": return "Staženo";
-  }
-}
-
-function formatDate(date: string | null | undefined) {
-  if (!date) return null;
-  const [year, month, day] = date.slice(0, 10).split("-");
-  return `${Number(day)}. ${Number(month)}. ${year}`;
-}
-
-function formatTime(time: string | null | undefined) {
-  return time ? time.slice(0, 5) : null;
-}
-
-function formatOfferArrivalDateTime(value: string | null | undefined) {
-  if (!value) return "Čas příjezdu neuveden";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Čas příjezdu neuveden";
-
-  return `${date.toLocaleDateString("cs-CZ")} v ${date.toLocaleTimeString("cs-CZ", {
-    hour: "2-digit",
-    minute: "2-digit",
-  })}`;
-}
-
-function formatPostgresDate(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function formatPostgresTime(date: Date) {
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${hours}:${minutes}:00`;
-}
-
-function statusLabel(status?: JobStatus) {
-  switch (status) {
-    case "open": return "🔎 Otevřená poptávka";
-    case "offer_selected": return "✓ Přepravce vybrán";
-    case "in_progress": return "🚛 Přeprava probíhá";
-    case "completed": return "✓ Odtah dokončen";
-    default: return "Čekáme na stav";
-  }
-}
-
-function transportStatusLabel(status?: JobStatus) {
-  switch (status) {
-    case "open": return "Otevřená";
-    case "offer_selected": return "Vybrán přepravce";
-    case "in_progress": return "Probíhá";
-    case "completed": return "Dokončeno";
-    case "cancelled": return "Zrušeno";
-    default: return "Neznámý stav";
-  }
-}
-
-function transportLifecycleStatusLabel(status?: JobStatus) {
-  switch (status) {
-    case "offer_selected": return "Potvrzeno";
-    case "in_progress": return "Přeprava probíhá";
-    case "completed": return "Dokončeno";
-    case "cancelled": return "Zrušeno";
-    default: return transportStatusLabel(status);
-  }
-}
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: DESIGN.colors.background },
-  hero: { height: "48%", backgroundColor: DESIGN.colors.primarySoft },
-  heroImage: { width: "100%", height: "100%" },
-  heroFallback: { flex: 1, alignItems: "center", justifyContent: "center" },
-  heroEmoji: { fontSize: 90 },
-  welcomeBody: { flex: 1, padding: 26, alignItems: "center" },
-  brand: { fontSize: 42, fontWeight: "800", marginTop: 5, color: DESIGN.colors.textPrimary },
-  tagline: { fontSize: 16, color: DESIGN.colors.textSecondary, marginTop: 8, marginBottom: 28, textAlign: "center" },
-  introScroll: { paddingBottom: 24, backgroundColor: DESIGN.colors.background },
-  introHero: { height: 300, backgroundColor: DESIGN.colors.primarySoft },
-  introPanel: {
-    marginTop: -24,
-    padding: 22,
-    paddingTop: 28,
-    borderTopLeftRadius: 34,
-    borderTopRightRadius: 34,
-    backgroundColor: DESIGN.colors.surface,
-  },
-  introClaim: { color: DESIGN.colors.textPrimary, fontSize: 30, lineHeight: 36, fontWeight: "800", textAlign: "center", marginBottom: 24 },
-  benefitRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 24 },
-  benefitItem: { width: "31%", alignItems: "center", paddingVertical: 12, borderRadius: 16, backgroundColor: DESIGN.colors.background },
-  benefitIcon: { color: DESIGN.colors.primary, fontSize: 22, fontWeight: "800", marginBottom: 6 },
-  benefitText: { color: DESIGN.colors.textSecondary, fontSize: 12, lineHeight: 16, fontWeight: "700", textAlign: "center" },
-  introTransport: { minHeight: 64, flexDirection: "row", alignItems: "center", paddingHorizontal: 18, borderRadius: 19, backgroundColor: DESIGN.colors.textPrimary, shadowColor: DESIGN.colors.textPrimary, shadowOpacity: 0.2, shadowRadius: 10, shadowOffset: { width: 0, height: 5 }, elevation: 4 },
-  transportText: { flex: 1, color: DESIGN.colors.surface, fontSize: 18, fontWeight: "700" },
-  introServiceRow: { minHeight: 62, flexDirection: "row", alignItems: "center", marginTop: 12, paddingHorizontal: 18, borderWidth: 1, borderColor: "#dce3ea", borderRadius: 19, backgroundColor: DESIGN.colors.surface },
-  serviceIcon: { width: 34, fontSize: 22, textAlign: "left" },
-  serviceText: { flex: 1, color: DESIGN.colors.textPrimary, fontSize: 16, fontWeight: "700" },
-  serviceArrow: { color: DESIGN.colors.textSecondary, fontSize: 28, lineHeight: 28 },
-  introLogin: { minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "center", marginTop: 22 },
-  introLoginText: { color: DESIGN.colors.textPrimary, fontSize: 15, fontWeight: "700" },
-  introSignup: { alignItems: "center", paddingVertical: 10 },
-  introSignupText: { color: DESIGN.colors.primary, fontSize: 14, fontWeight: "700" },
-  headerSafeArea: { backgroundColor: DESIGN.colors.surface, paddingTop: Platform.OS === "android" ? NativeStatusBar.currentHeight || 0 : 0 },
-  header: { paddingHorizontal: DESIGN.spacing.xl, paddingTop: DESIGN.spacing.md, paddingBottom: DESIGN.spacing.md, flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: DESIGN.colors.surface, borderBottomWidth: 1, borderBottomColor: DESIGN.colors.border },
-  logo: { fontSize: 12, fontWeight: "800", color: DESIGN.colors.primary, letterSpacing: 1.6 },
-  headerTitle: { color: DESIGN.colors.textPrimary, fontSize: 24, fontWeight: "800", marginTop: DESIGN.spacing.xs },
-  headerIconButton: { width: 32, height: 32, borderRadius: DESIGN.radius.medium, borderWidth: 1, borderColor: DESIGN.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: DESIGN.colors.surface },
-  headerSignOut: { color: DESIGN.colors.textSecondary, fontWeight: "800", fontSize: 15 },
-  form: { padding: DESIGN.spacing.xxl, gap: DESIGN.spacing.md },
-  registrationContent: { padding: DESIGN.spacing.xxl, paddingBottom: 40 },
-  content: { padding: DESIGN.spacing.xl, paddingBottom: 40 },
-  requestContent: { padding: DESIGN.spacing.xl, paddingTop: DESIGN.spacing.md, paddingBottom: 40, backgroundColor: DESIGN.colors.background },
-  stepHeader: { marginBottom: DESIGN.spacing.md },
-  stepCounter: { color: DESIGN.colors.textSecondary, fontSize: 12, fontWeight: "700", marginBottom: 4 },
-  stepTitle: { color: DESIGN.colors.textPrimary, fontSize: 26, fontWeight: "800" },
-  stepRule: { height: 2, width: 76, borderRadius: 2, backgroundColor: DESIGN.colors.primary, marginTop: DESIGN.spacing.md },
-  requestProgressLine: { flexDirection: "row", gap: 6, marginBottom: DESIGN.spacing.xl },
-  requestProgressSegment: { flex: 1, height: 3, borderRadius: 3, backgroundColor: DESIGN.colors.border },
-  requestProgressSegmentActive: { backgroundColor: DESIGN.colors.primary },
-  requestProgress: { flexDirection: "row", justifyContent: "space-between", marginBottom: DESIGN.spacing.lg },
-  requestProgressItem: { flex: 1, alignItems: "center" },
-  requestProgressDot: { width: 28, height: 28, borderRadius: DESIGN.radius.large, borderWidth: 1, borderColor: DESIGN.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: DESIGN.colors.surface },
-  requestProgressDotActive: { backgroundColor: DESIGN.colors.primary, borderColor: DESIGN.colors.primary },
-  requestProgressNumber: { color: DESIGN.colors.textSecondary, fontSize: 12, fontWeight: "800" },
-  requestProgressNumberActive: { color: DESIGN.colors.surface },
-  requestProgressLabel: { color: DESIGN.colors.textSecondary, fontSize: 11, fontWeight: "700", marginTop: DESIGN.spacing.xs, textAlign: "center" },
-  requestProgressLabelActive: { color: DESIGN.colors.textPrimary },
-  requestPanel: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: DESIGN.radius.large, padding: DESIGN.spacing.lg, backgroundColor: DESIGN.colors.surface },
-  requestPanelFlat: { borderTopWidth: 1, borderTopColor: DESIGN.colors.border, paddingTop: DESIGN.spacing.lg, marginBottom: DESIGN.spacing.lg },
-  formSectionLabel: { color: DESIGN.colors.textPrimary, fontSize: 13, fontWeight: "800", marginBottom: DESIGN.spacing.sm, marginTop: DESIGN.spacing.md },
-  chipGrid: { flexDirection: "row", flexWrap: "wrap", gap: DESIGN.spacing.sm, marginBottom: DESIGN.spacing.md },
-  selectChip: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: DESIGN.radius.medium, paddingHorizontal: DESIGN.spacing.md, paddingVertical: 9, backgroundColor: DESIGN.colors.surface },
-  selectChipActive: { borderColor: DESIGN.colors.primary, backgroundColor: DESIGN.colors.primary },
-  selectChipText: { color: DESIGN.colors.textPrimary, fontSize: 13, fontWeight: "600" },
-  selectChipTextActive: { color: DESIGN.colors.surface },
-  compactInput: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: DESIGN.radius.medium, paddingHorizontal: DESIGN.spacing.md, paddingVertical: 10, fontSize: 14, color: DESIGN.colors.textPrimary, backgroundColor: DESIGN.colors.surface, marginBottom: DESIGN.spacing.sm },
-  inlineSecondary: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: DESIGN.radius.medium, paddingHorizontal: DESIGN.spacing.md, paddingVertical: 10, alignItems: "center", backgroundColor: DESIGN.colors.surface, marginBottom: DESIGN.spacing.sm },
-  inlinePickerRow: { flexDirection: "row", gap: DESIGN.spacing.sm, marginTop: DESIGN.spacing.sm },
-  inlinePicker: { flex: 1 },
-  requestHint: { color: DESIGN.colors.textSecondary, fontSize: 12, lineHeight: 18, marginTop: DESIGN.spacing.md },
-  requestNavRow: { flexDirection: "row", gap: 10, marginTop: 2 },
-  requestNavRowSplit: { flexDirection: "row", gap: DESIGN.spacing.md, marginTop: DESIGN.spacing.md },
-  requestNavButton: { flex: 1 },
-  pricePrincipleBox: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: DESIGN.radius.medium, padding: DESIGN.spacing.lg, marginTop: DESIGN.spacing.lg, backgroundColor: DESIGN.colors.background },
-  pricePrincipleTitle: { color: DESIGN.colors.textPrimary, fontSize: 15, fontWeight: "800" },
-  summaryLabel: { color: DESIGN.colors.primary, fontSize: 11, fontWeight: "800", letterSpacing: 0.8, marginTop: DESIGN.spacing.lg },
-  summaryValue: { color: DESIGN.colors.textPrimary, fontSize: 15, lineHeight: 21, marginTop: 4 },
-  summaryLine: { borderBottomWidth: 1, borderBottomColor: DESIGN.colors.border, paddingBottom: DESIGN.spacing.md, marginBottom: DESIGN.spacing.sm },
-  requestSuccessContent: { flex: 1, padding: 28, alignItems: "center", justifyContent: "center", backgroundColor: DESIGN.colors.background },
-  successMark: { width: 56, height: 56, borderRadius: 28, overflow: "hidden", backgroundColor: DESIGN.colors.textPrimary, color: DESIGN.colors.surface, fontSize: 34, lineHeight: 54, textAlign: "center", marginBottom: 18 },
-  requestDetailContent: { padding: DESIGN.spacing.xl, paddingTop: DESIGN.spacing.md, paddingBottom: 40, backgroundColor: DESIGN.colors.background },
-  detailStatusTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: DESIGN.spacing.md, marginBottom: DESIGN.spacing.sm },
-  detailEyebrow: { color: DESIGN.colors.primary, fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase" },
-  detailStatusPill: { alignSelf: "flex-start", maxWidth: "48%", color: DESIGN.colors.primary, backgroundColor: DESIGN.colors.primarySoft, borderRadius: 999, overflow: "hidden", paddingHorizontal: 9, paddingVertical: 5, fontSize: 10, fontWeight: "800", textTransform: "uppercase" },
-  detailSectionTitleV2: { color: DESIGN.colors.textPrimary, fontSize: 15, fontWeight: "800", marginBottom: DESIGN.spacing.md },
-  detailSectionHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: DESIGN.spacing.sm, marginBottom: DESIGN.spacing.sm },
-  detailBodyText: { color: DESIGN.colors.textPrimary, fontSize: 14, lineHeight: 21 },
-  detailBodyMuted: { color: DESIGN.colors.textSecondary, fontSize: 14, lineHeight: 21 },
-  detailPriceText: { color: DESIGN.colors.textPrimary, fontSize: 24, lineHeight: 30, fontWeight: "800", marginBottom: DESIGN.spacing.sm },
-  detailProviderName: { color: DESIGN.colors.textPrimary, fontSize: 17, lineHeight: 23, fontWeight: "800", marginBottom: DESIGN.spacing.xs },
-  detailOfferCard: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: 16, padding: DESIGN.spacing.lg, marginBottom: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface },
-  detailOfferAccepted: { borderColor: DESIGN.colors.success, backgroundColor: "#F0FDF4" },
-  detailOfferRejected: { opacity: 0.72 },
-  detailOfferMessage: { color: DESIGN.colors.textPrimary, fontSize: 14, lineHeight: 21, marginTop: DESIGN.spacing.sm, paddingTop: DESIGN.spacing.sm, borderTopWidth: 1, borderTopColor: DESIGN.colors.border },
-  detailRefreshButton: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: 12, paddingHorizontal: DESIGN.spacing.md, paddingVertical: 8, backgroundColor: DESIGN.colors.surface },
-  detailRefreshText: { color: DESIGN.colors.primary, fontSize: 12, fontWeight: "800" },
-  detailEmptyCard: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: 16, padding: DESIGN.spacing.lg, marginBottom: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface },
-  detailEmptyTitle: { color: DESIGN.colors.textPrimary, fontSize: 15, fontWeight: "800" },
-  detailEmptyText: { color: DESIGN.colors.textSecondary, fontSize: 13, lineHeight: 19, marginTop: 4 },
-  detailDangerZone: { borderWidth: 1, borderColor: "#F8CACA", borderRadius: 16, padding: DESIGN.spacing.lg, marginTop: DESIGN.spacing.sm, marginBottom: DESIGN.spacing.md, backgroundColor: "#FFF7F7" },
-  detailDangerTitle: { color: DESIGN.colors.danger, fontSize: 15, fontWeight: "800" },
-  detailDangerCopy: { color: DESIGN.colors.textSecondary, fontSize: 13, lineHeight: 19, marginTop: 4 },
-  detailTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", borderBottomWidth: 1, borderBottomColor: DESIGN.colors.border, paddingBottom: DESIGN.spacing.lg, marginBottom: DESIGN.spacing.lg },
-  detailHeroTitle: { color: DESIGN.colors.textPrimary, fontSize: 24, fontWeight: "800", lineHeight: 30 },
-  detailSectionFlat: { borderBottomWidth: 1, borderBottomColor: DESIGN.colors.border, paddingBottom: DESIGN.spacing.lg, marginBottom: DESIGN.spacing.lg },
-  detailTwoColumnRow: { flexDirection: "row", gap: DESIGN.spacing.md, marginBottom: DESIGN.spacing.lg },
-  detailMiniSection: { flex: 1, borderBottomWidth: 1, borderBottomColor: DESIGN.colors.border, paddingBottom: DESIGN.spacing.md },
-  detailValueStrong: { color: DESIGN.colors.textPrimary, fontSize: 14, fontWeight: "700", lineHeight: 20 },
-  routeEndpoint: { color: DESIGN.colors.textPrimary, fontSize: 17, fontWeight: "700", lineHeight: 23 },
-  routeArrowDown: { color: DESIGN.colors.textSecondary, fontSize: 18, marginVertical: DESIGN.spacing.xs },
-  offerHeaderStrip: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: DESIGN.spacing.sm, marginBottom: DESIGN.spacing.sm },
-  offerRowCard: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: DESIGN.radius.medium, padding: DESIGN.spacing.md, marginBottom: DESIGN.spacing.sm, backgroundColor: DESIGN.colors.surface },
-  requestDetailHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
-  requestDetailStatus: { color: DESIGN.colors.textPrimary, fontSize: 13, fontWeight: "800", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, backgroundColor: DESIGN.colors.primarySoft, overflow: "hidden" },
-  detailSectionCard: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: DESIGN.radius.medium, padding: 14, marginBottom: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface, shadowColor: DESIGN.colors.primaryDark, shadowOpacity: 0.03, shadowRadius: 5, shadowOffset: { width: 0, height: 1 }, elevation: 1 },
-  detailSectionTitle: { color: DESIGN.colors.primary, fontSize: 11, fontWeight: "800", letterSpacing: 0.8, marginBottom: 8 },
-  detailPrimary: { color: DESIGN.colors.textPrimary, fontSize: 18, fontWeight: "800" },
-  detailLabel: { color: DESIGN.colors.textSecondary, fontSize: 12, fontWeight: "800", marginTop: 8 },
-  detailValue: { color: DESIGN.colors.textPrimary, fontSize: 14, lineHeight: 20, marginTop: 3 },
-  transportLead: { marginTop: -DESIGN.spacing.sm, marginBottom: DESIGN.spacing.lg },
-  detailMuted: { color: DESIGN.colors.textSecondary, fontSize: 13, lineHeight: 19, marginTop: 4 },
-  offerCardCompact: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: DESIGN.radius.medium, padding: 14, marginBottom: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface, shadowColor: DESIGN.colors.primaryDark, shadowOpacity: 0.04, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
-  offerPriceCompact: { color: DESIGN.colors.textPrimary, fontSize: 17, fontWeight: "800", marginBottom: 4 },
-  appContent: { padding: DESIGN.spacing.xl, paddingTop: DESIGN.spacing.lg, paddingBottom: 96, backgroundColor: DESIGN.colors.background },
-  shellEyebrow: { color: DESIGN.colors.primary, fontSize: 11, fontWeight: "800", letterSpacing: 1.1, marginBottom: DESIGN.spacing.sm },
-  dashboardPanel: { gap: DESIGN.spacing.sm, marginBottom: DESIGN.spacing.xl },
-  actionRow: { minHeight: 72, flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: DESIGN.radius.large, paddingHorizontal: DESIGN.spacing.md, paddingVertical: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface, shadowColor: DESIGN.colors.primaryDark, shadowOpacity: 0.03, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
-  actionIcon: { width: 36, height: 36, borderRadius: 12, overflow: "hidden", backgroundColor: DESIGN.colors.background, color: DESIGN.colors.primary, fontSize: 18, lineHeight: 34, textAlign: "center", marginRight: DESIGN.spacing.md, fontWeight: "800" },
-  actionBody: { flex: 1 },
-  actionSubtitle: { color: DESIGN.colors.textSecondary, fontSize: 13, marginTop: 3 },
-  actionChevron: { color: DESIGN.colors.textSecondary, fontSize: 24, lineHeight: 24, marginLeft: DESIGN.spacing.sm },
-  dashboardSection: { marginTop: DESIGN.spacing.lg },
-  sectionLabel: { color: DESIGN.colors.textSecondary, fontSize: 11, fontWeight: "800", letterSpacing: 1, marginBottom: DESIGN.spacing.sm, textTransform: "uppercase" },
-  emptyPanel: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: DESIGN.radius.large, padding: DESIGN.spacing.lg, backgroundColor: DESIGN.colors.surface },
-  emptyPanelCompact: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: DESIGN.radius.large, padding: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface },
-  emptyTitle: { color: DESIGN.colors.textPrimary, fontSize: 15, fontWeight: "700" },
-  emptyCopy: { color: DESIGN.colors.textSecondary, fontSize: 13, lineHeight: 18, marginTop: 4 },
-  dashboardGrid: { gap: DESIGN.spacing.md, marginTop: DESIGN.spacing.xl },
-  infoTile: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: DESIGN.radius.large, padding: DESIGN.spacing.lg, backgroundColor: DESIGN.colors.surface },
-  infoTileTitle: { color: DESIGN.colors.textPrimary, fontSize: 15, fontWeight: "700", lineHeight: 20 },
-  dispatchRow: { flexDirection: "row", alignItems: "center", gap: DESIGN.spacing.md, borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: DESIGN.radius.large, padding: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface },
-  dispatchMain: { flex: 1 },
-  actionCard: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: DESIGN.radius.large, padding: DESIGN.spacing.lg, marginTop: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface, shadowColor: DESIGN.colors.primaryDark, shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
-  actionTitle: { color: DESIGN.colors.textPrimary, fontSize: 15, fontWeight: "700" },
-  transportSectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: DESIGN.spacing.lg, marginBottom: DESIGN.spacing.sm },
-  transportFilterHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: DESIGN.spacing.sm },
-  transportCount: { color: DESIGN.colors.textSecondary, fontSize: 12, fontWeight: "800" },
-  segmentedBar: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: DESIGN.colors.border, marginBottom: DESIGN.spacing.lg },
-  segmentedItem: { paddingRight: DESIGN.spacing.lg, paddingVertical: DESIGN.spacing.sm, alignItems: "flex-start" },
-  segmentedText: { color: DESIGN.colors.textSecondary, fontSize: 13, fontWeight: "600" },
-  segmentedTextActive: { color: DESIGN.colors.textPrimary, fontWeight: "800" },
-  segmentedUnderline: { height: 2, width: "100%", backgroundColor: DESIGN.colors.primary, marginTop: DESIGN.spacing.sm, borderRadius: 2 },
-  devPreviewButton: { minHeight: 40, justifyContent: "center", alignItems: "center", marginTop: DESIGN.spacing.sm, marginBottom: DESIGN.spacing.sm },
-  devPreviewLink: { color: DESIGN.colors.textSecondary, fontSize: 12, textAlign: "center", fontWeight: "700" },
-  dispatchCard: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: DESIGN.radius.medium, paddingHorizontal: DESIGN.spacing.md, paddingVertical: DESIGN.spacing.sm, marginBottom: DESIGN.spacing.sm, backgroundColor: DESIGN.colors.surface },
-  dispatchHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 },
-  dispatchLabel: { color: DESIGN.colors.textSecondary, fontSize: 10, fontWeight: "800", letterSpacing: 0.9 },
-  dispatchVehicle: { color: DESIGN.colors.textPrimary, fontSize: 15, fontWeight: "700", marginBottom: 2 },
-  dispatchRoute: { color: DESIGN.colors.textPrimary, fontSize: 14, fontWeight: "700" },
-  routeLine: { color: DESIGN.colors.textPrimary, fontSize: 14, lineHeight: 19, marginTop: 4 },
-  dispatchFooter: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginTop: DESIGN.spacing.sm },
-  dispatchMeta: { color: DESIGN.colors.textSecondary, fontSize: 12, lineHeight: 17 },
-  dispatchArrow: { color: DESIGN.colors.textSecondary, fontSize: 19, fontWeight: "700" },
-  statusPill: { alignSelf: "flex-start", color: DESIGN.colors.primary, backgroundColor: DESIGN.colors.primarySoft, borderRadius: 999, overflow: "hidden", paddingHorizontal: 8, paddingVertical: 4, fontSize: 10, fontWeight: "800", textTransform: "uppercase" },
-  transportCard: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: DESIGN.radius.medium, padding: 14, marginBottom: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface, shadowColor: DESIGN.colors.primaryDark, shadowOpacity: 0.04, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
-  transportCardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 },
-  transportCardMain: { flex: 1 },
-  transportEyebrow: { color: DESIGN.colors.primary, fontSize: 11, fontWeight: "800", letterSpacing: 0.8, marginBottom: 3 },
-  transportTitle: { color: DESIGN.colors.textPrimary, fontSize: 17, fontWeight: "800" },
-  transportProblem: { color: "#334155", fontSize: 13, marginTop: 2 },
-  transportRoute: { color: "#334155", fontSize: 13, marginTop: 8, lineHeight: 18 },
-  transportMetaRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
-  transportMeta: { color: DESIGN.colors.textSecondary, fontSize: 12, fontWeight: "700" },
-  transportBadge: { color: DESIGN.colors.textPrimary, fontSize: 11, fontWeight: "800", textTransform: "uppercase" },
-  transportStatus: { color: DESIGN.colors.textPrimary, fontSize: 12, fontWeight: "800" },
-  transportOfferCount: { color: DESIGN.colors.primary, fontSize: 12, fontWeight: "800", marginTop: 8, textTransform: "uppercase" },
-  transportArrow: { color: DESIGN.colors.textSecondary, fontSize: 20, fontWeight: "800" },
-  bottomNavSafeArea: { backgroundColor: DESIGN.colors.surface, paddingBottom: 10 },
-  bottomNav: { minHeight: 80, flexDirection: "row", alignItems: "center", justifyContent: "space-around", borderTopWidth: 1, borderTopColor: DESIGN.colors.border, paddingTop: 8, paddingBottom: 10, backgroundColor: DESIGN.colors.surface },
-  bottomNavItem: { flex: 1, minHeight: 64, alignItems: "center", justifyContent: "center", gap: 4 },
-  bottomNavIcon: { color: DESIGN.colors.textSecondary, fontSize: 23, lineHeight: 27, fontWeight: "700" },
-  bottomNavText: { color: DESIGN.colors.textSecondary, fontSize: 13, lineHeight: 17, fontWeight: "600" },
-  bottomNavTextActive: { color: DESIGN.colors.primary },
-  bottomNavSos: { color: DESIGN.colors.danger },
-  bottomNavPlus: { width: 42, height: 42, borderRadius: 21, overflow: "hidden", backgroundColor: DESIGN.colors.primary, color: DESIGN.colors.surface, fontSize: 27, lineHeight: 38, textAlign: "center", marginBottom: -2 },
-  profileHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
-  profileBack: { color: DESIGN.colors.textPrimary, fontSize: 16, fontWeight: "700" },
-  profileHeaderIcon: { color: DESIGN.colors.primary, fontSize: 24 },
-  profileCard: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: 16, padding: 18, marginBottom: 14, backgroundColor: DESIGN.colors.surface },
-  profileName: { color: DESIGN.colors.textPrimary, fontSize: 24, fontWeight: "800" },
-  profileRole: { color: DESIGN.colors.textSecondary, marginTop: 5, fontWeight: "700" },
-  profileFieldLabel: { color: DESIGN.colors.textSecondary, fontSize: 12, fontWeight: "800", marginTop: 12 },
-  profileFieldValue: { color: DESIGN.colors.textPrimary, fontSize: 16, marginTop: 3 },
-  profileLinkCard: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: 16, padding: 16, marginBottom: 12, backgroundColor: DESIGN.colors.surface },
-  profileLogoutRow: { borderWidth: 1, borderColor: "#F2D5D5", borderRadius: DESIGN.radius.large, padding: DESIGN.spacing.md, marginTop: DESIGN.spacing.lg, marginBottom: DESIGN.spacing.xl, backgroundColor: "#FFF7F7", alignItems: "center" },
-  profileLogoutText: { color: DESIGN.colors.danger, fontSize: 14, fontWeight: "700" },
-  profileLinkTitle: { color: DESIGN.colors.textPrimary, fontSize: 17, fontWeight: "800" },
-  profileLinkText: { color: DESIGN.colors.textSecondary, marginTop: 5 },
-  navigationSection: { marginTop: 10 },
-  customerContent: { padding: 20, paddingTop: 18, paddingBottom: 32 },
-  scroll: { flex: 1 },
-  bigTitle: { fontSize: 24, fontWeight: "800", color: DESIGN.colors.textPrimary, marginBottom: DESIGN.spacing.sm },
-  primary: { backgroundColor: DESIGN.colors.primary, borderRadius: DESIGN.radius.large, paddingVertical: DESIGN.spacing.md, paddingHorizontal: DESIGN.spacing.lg, alignItems: "center", marginTop: DESIGN.spacing.lg },
-  primaryText: { color: DESIGN.colors.surface, fontSize: 14, fontWeight: "800", letterSpacing: 0.2 },
-  secondary: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: DESIGN.radius.large, paddingVertical: DESIGN.spacing.md, paddingHorizontal: DESIGN.spacing.lg, alignItems: "center", marginTop: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface },
-  secondaryText: { color: DESIGN.colors.textPrimary, fontWeight: "800", fontSize: 14 },
-  link: { color: DESIGN.colors.primary, fontWeight: "700", marginTop: 18 },
-  input: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: DESIGN.radius.medium, paddingHorizontal: DESIGN.spacing.md, paddingVertical: DESIGN.spacing.md, fontSize: 15, color: DESIGN.colors.textPrimary, backgroundColor: DESIGN.colors.surface, marginTop: DESIGN.spacing.sm },
-  roleCard: { flexDirection: "row", alignItems: "center", gap: 16, borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: 16, padding: 18, marginTop: 10 },
-  roleIcon: { fontSize: 35 },
-  roleTitle: { fontSize: 18, fontWeight: "800" },
-  muted: { color: DESIGN.colors.textSecondary, marginTop: 3 },
-  mapWrap: { height: 280, marginHorizontal: 14, borderRadius: 18, overflow: "hidden", position: "relative" },
-  customerMapWrap: {
-    height: 230,
-    borderRadius: 24,
-    shadowColor: DESIGN.colors.textPrimary,
-    shadowOpacity: 0.14,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 4,
-  },
-  map: { flex: 1 },
-  locationButton: { position: "absolute", right: 12, top: 12, backgroundColor: DESIGN.colors.surface, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 12 },
-  customerLocationButton: {
-    right: 12,
-    top: 12,
-    paddingHorizontal: 11,
-    paddingVertical: 8,
-    borderRadius: 18,
-    shadowColor: DESIGN.colors.textPrimary,
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 3,
-  },
-  locationButtonText: { fontWeight: "700", color: DESIGN.colors.textPrimary },
-  driverTop: { paddingHorizontal: 20, paddingBottom: 8 },
-  list: { padding: 20, paddingTop: 8 },
-  filterRow: { gap: 8, paddingRight: 12 },
-  filterPanel: { backgroundColor: DESIGN.colors.background, borderRadius: 14, padding: 12, marginTop: 12 },
-  resultCount: { color: DESIGN.colors.textSecondary, fontWeight: "700", marginTop: 14, marginBottom: 4 },
-  sectionTitle: { fontSize: 16, fontWeight: "800", color: DESIGN.colors.textPrimary, marginBottom: DESIGN.spacing.sm },
-  jobCard: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: DESIGN.radius.large, padding: DESIGN.spacing.lg, marginBottom: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface },
-  marketCard: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: DESIGN.radius.large, padding: DESIGN.spacing.lg, marginBottom: DESIGN.spacing.md, backgroundColor: DESIGN.colors.surface },
-  acceptedCard: { borderWidth: 1, borderColor: DESIGN.colors.success, borderRadius: DESIGN.radius.large, padding: DESIGN.spacing.lg, marginBottom: DESIGN.spacing.md, backgroundColor: "#ecfdf5" },
-  acceptedTitle: { color: DESIGN.colors.primary, fontSize: 12, fontWeight: "800", marginBottom: 4 },
-  acceptedPrice: { color: DESIGN.colors.textPrimary, fontSize: 24, fontWeight: "800", marginTop: 12 },
-  offerCard: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: 16, padding: 16, marginBottom: 12, backgroundColor: DESIGN.colors.surface },
-  offerTitle: { color: DESIGN.colors.textPrimary, fontSize: 15, fontWeight: "800" },
-  offerPrice: { color: DESIGN.colors.textPrimary, fontSize: 24, fontWeight: "800", marginTop: 12 },
-  offerEta: { color: DESIGN.colors.primary, fontSize: 16, fontWeight: "700", marginTop: 6 },
-  offerMessage: { color: DESIGN.colors.textSecondary, marginTop: 10, fontStyle: "italic" },
-  refreshButton: { borderWidth: 1, borderColor: DESIGN.colors.border, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 10 },
-  refreshButtonText: { color: DESIGN.colors.primary, fontWeight: "700" },
-  marketEyebrow: { color: DESIGN.colors.primary, fontSize: 12, fontWeight: "800", letterSpacing: 0.5 },
-  urgentBadge: { maxWidth: "58%", color: DESIGN.colors.primary, backgroundColor: DESIGN.colors.primarySoft, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, fontSize: 11, fontWeight: "800", textAlign: "right" },
-  cardLabel: { color: DESIGN.colors.textPrimary, fontWeight: "800", marginTop: 12 },
-  detailLink: { color: DESIGN.colors.primary, fontWeight: "800", textAlign: "right", marginTop: 14 },
-  routesSection: { marginTop: 12, paddingTop: 18, borderTopWidth: 1, borderTopColor: DESIGN.colors.border },
-  rowBetween: { flexDirection: "row", justifyContent: "space-between" },
-  jobId: { fontWeight: "800" },
-  badge: { fontSize: 11, fontWeight: "800", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, backgroundColor: DESIGN.colors.primarySoft, color: DESIGN.colors.primary },
-  jobTitle: { fontSize: 17, fontWeight: "700", marginTop: 10, marginBottom: 4 },
-  empty: { color: DESIGN.colors.textSecondary, textAlign: "center", marginTop: 40 },
-  bottomAction: { padding: 20 },
-  label: { fontWeight: "800", marginTop: 14, color: DESIGN.colors.textPrimary },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
-  chip: { borderWidth: 1, borderColor: DESIGN.colors.border, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 20 },
-  chipActive: { backgroundColor: DESIGN.colors.primarySoft, borderColor: DESIGN.colors.primary },
-  statusBox: { backgroundColor: DESIGN.colors.background, borderRadius: 14, padding: 16, marginTop: 16 },
-  statusTitle: { fontSize: 17, fontWeight: "800", color: DESIGN.colors.textPrimary, marginBottom: 5 },
-  error: { color: DESIGN.colors.danger, marginBottom: 10 },
-  customerDescription: { color: DESIGN.colors.textSecondary, fontSize: 15, lineHeight: 22, marginTop: 4, marginBottom: 8 },
-  customerPrimary: {
-    backgroundColor: DESIGN.colors.textPrimary,
-    borderRadius: 18,
-    minHeight: 60,
-    paddingHorizontal: 18,
-    paddingVertical: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 12,
-    shadowColor: DESIGN.colors.textPrimary,
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 4,
-  },
-  customerActionRow: {
-    minHeight: 56,
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 14,
-    paddingHorizontal: 16,
-    borderWidth: 1,
-    borderColor: "#e3e8ef",
-    borderRadius: 17,
-    backgroundColor: DESIGN.colors.surface,
-  },
-  customerActionRowSubtle: {
-    minHeight: 52,
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 8,
-    paddingHorizontal: 16,
-    borderRadius: 17,
-  },
-  customerActionIcon: { width: 28, color: DESIGN.colors.primary, fontSize: 20, fontWeight: "700" },
-  customerActionText: { flex: 1, color: DESIGN.colors.textPrimary, fontSize: 16, fontWeight: "700" },
-  customerActionTextSubtle: { flex: 1, color: DESIGN.colors.textSecondary, fontSize: 15, fontWeight: "600" },
-  customerActionArrow: { color: DESIGN.colors.textSecondary, fontSize: 27, lineHeight: 27 },
-  vehicleCard: {
-    borderWidth: 1,
-    borderColor: DESIGN.colors.border,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    backgroundColor: DESIGN.colors.surface,
-  },
-  vehicleHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 12,
-  },
-  vehicleName: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: DESIGN.colors.textPrimary,
-  },
-  vehicleInfo: {
-    fontSize: 14,
-    color: DESIGN.colors.textSecondary,
-    marginTop: 3,
-  },
-  statusBadge: {
-    alignSelf: "flex-start",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 12,
-    marginTop: 6,
-  },
-  activeBadge: {
-    backgroundColor: "#dcfce7",
-    borderColor: "#22c55e",
-    borderWidth: 1,
-  },
-  inactiveBadge: {
-    backgroundColor: "#fef3c7",
-    borderColor: "#f59e0b",
-    borderWidth: 1,
-  },
-  statusBadgeText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: DESIGN.colors.textSecondary,
-  },
-  vehicleDetails: {
-    borderTopWidth: 1,
-    borderTopColor: "#e5e7eb",
-    paddingTop: 14,
-    marginBottom: 10,
-  },
-  vehicleDetailRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 6,
-  },
-  vehicleDetailLabel: {
-    color: DESIGN.colors.textSecondary,
-    fontSize: 14,
-    flex: 1
-  },
-  vehicleDetailValue: {
-    color: DESIGN.colors.textPrimary,
-    fontSize: 14,
-    fontWeight: "600",
-    textAlign: "right",
-  },
-  vehicleEquipment: {
-    borderTopWidth: 1,
-    borderTopColor: "#e5e7eb",
-    paddingTop: 14,
-    marginBottom: 12,
-  },
-  equipmentLabel: {
-    color: DESIGN.colors.textPrimary,
-    fontSize: 13,
-    fontWeight: "700",
-    marginBottom: 8,
-  },
-  equipmentRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  equipmentItem: {
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    fontSize: 12,
-    color: DESIGN.colors.textSecondary,
-  },
-  equipmentChecked: {
-    backgroundColor: DESIGN.colors.primarySoft,
-    borderColor: DESIGN.colors.primary,
-    color: DESIGN.colors.primary,
-  },
-  vehicleActions: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 4,
-  },
-  dangerButton: {
-    backgroundColor: "#fef2f2",
-    borderColor: "#ef4444",
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 10,
-    flex: 1,
-    alignItems: "center",
-  },
-  dangerButtonText: {
-    color: "#ef4444",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  multilineInput: {
-    height: 80,
-    textAlignVertical: "top",
-  },
-});
 
 export default function RoadLinkApp() {
   return (
