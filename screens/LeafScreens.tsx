@@ -34,24 +34,29 @@ export function CreateScreen({
   onItemPress,
   onRequestFlow,
   onCapacityFlow,
+  onBackOverview,
 }: {
   screen: string;
   onItemPress: (key: string) => void;
   onRequestFlow: () => void;
   onCapacityFlow: () => void;
+  onBackOverview: () => void;
 }) {
   return (
     <SafeAreaView style={styles.container}>
-      <Header title="Nový požadavek" />
+      <Header title="Vytvořit" />
       <ScrollView style={styles.scroll} contentContainerStyle={styles.appContent} keyboardShouldPersistTaps="handled">
+        <TouchableOpacity style={styles.formBackButtonInline} onPress={onBackOverview} accessibilityLabel="Zpět na Přehled">
+          <Text style={styles.formBackText}>‹ Zpět na Přehled</Text>
+        </TouchableOpacity>
         <Text style={styles.bigTitle}>Co chcete vytvořit?</Text>
         <TouchableOpacity style={styles.actionCard} onPress={onRequestFlow}>
-          <Text style={styles.actionTitle}>Poptávka</Text>
-          <Text style={styles.muted}>Potřebuji přepravit vozidlo</Text>
+          <Text style={styles.actionTitle}>Poptávka přepravy</Text>
+          <Text style={styles.muted}>Potřebuji přepravit vozidlo.</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.actionCard} onPress={onCapacityFlow}>
           <Text style={styles.actionTitle}>Volná kapacita</Text>
-          <Text style={styles.muted}>Mám volné místo na trase</Text>
+          <Text style={styles.muted}>Nabízím volné místo na své trase.</Text>
         </TouchableOpacity>
       </ScrollView>
       <BottomNav screen={screen} onItemPress={onItemPress} />
