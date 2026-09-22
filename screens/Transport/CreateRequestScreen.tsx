@@ -1,6 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, BackHandler, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { useFocusEffect } from "@react-navigation/native";
+import React, { useEffect, useRef, useState } from "react";
+import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { SafeAreaView } from "../../components/SafeAreaViewCompat";
 import { FieldError, FormBackHeader, FormSection, ReviewRow } from "../../components/form/FormParts";
@@ -15,12 +14,14 @@ import {
   LOADING_STATE_OPTIONS,
   loadingOptionToFields,
   requestSnapshot,
+  resolvePrivateAddress,
   validateRequestForm,
   type LoadingStateOption,
   type RequestErrorKey,
 } from "../../lib/createFormLogic";
 import { validatePublicLocationLabel } from "../../lib/publicMarket";
 import { navigateLegacy } from "../../navigation/navigationRef";
+import { useFormBackGuard } from "../../hooks/useBackHandlers";
 
 const INITIAL_LOADING_STATE: LoadingStateOption = "drive";
 
@@ -75,6 +76,8 @@ export default function CreateRequestScreen() {
   const [creatingRequest, setCreatingRequest] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
+  // Volitelné upřesnění přesných míst — ve výchozím stavu sbalené (soukromé).
+  const [showPrecisePlaces, setShowPrecisePlaces] = useState(false);
 
   // Při zavření formuláře (jakýmkoli způsobem) vrátíme poslední hodnoty do kontextu.
   const draftRef = useRef<RequestDraft>({ pickupText, destination, pickupPublicLabel, destinationPublicLabel, vehicle, problem });
@@ -117,19 +120,9 @@ export default function CreateRequestScreen() {
     else showDiscardDraftConfirmation(leave);
   }
 
-  // Hardwarové tlačítko Zpět (Android): stejná kontrola neuložených změn jako tlačítko ‹ Zpět.
-  // Handler čte vždy aktuální leaveRequestForm přes ref.
-  const leaveRef = useRef(leaveRequestForm);
-  leaveRef.current = leaveRequestForm;
-  useFocusEffect(
-    useCallback(() => {
-      const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-        leaveRef.current();
-        return true;
-      });
-      return () => subscription.remove();
-    }, [])
-  );
+  // Hardwarové tlačítko Zpět (Android) a horní ‹ Zpět sdílejí jednu cestu:
+  // leaveRequestForm → čistý formulář odejde, rozepsaný ukáže discard dialog.
+  useFormBackGuard(leaveRequestForm);
 
   async function createJob() {
     if (!userId) {
@@ -167,8 +160,6 @@ export default function CreateRequestScreen() {
 
     setCreatingRequest(true);
     try {
-      const trimmedPickupAddress = pickupText.trim();
-      const trimmedDestination = destination.trim();
       // Veřejné labely (město/obec) — povinné, trimované, max 80 znaků;
       // validované validatePublicLocationLabel (bez e-mailu/URL/telefonu).
       // Nikdy se nepřepisují z přesné adresy — viz ROADLINK_AGENT_RULES.
@@ -178,6 +169,10 @@ export default function CreateRequestScreen() {
         setRequestErrors((current) => ({ ...current, publicPlace: (validatedPickupPublic.valid ? validatedDestinationPublic.error : validatedPickupPublic.error) ?? "Zadejte veřejné město/obec." }));
         return;
       }
+      // Soukromá přesná adresa: vyplněná hodnota, nebo bezpečný fallback =
+      // zadané veřejné město/obec (DB sloupce a geocoding zůstávají beze změny).
+      const trimmedPickupAddress = resolvePrivateAddress(validatedPickupPublic.value, pickupText);
+      const trimmedDestination = resolvePrivateAddress(validatedDestinationPublic.value, destination);
       const [pickupCoordinates, destinationCoordinates] = await Promise.all([
         geocodeAddress(trimmedPickupAddress),
         geocodeAddress(trimmedDestination),
@@ -268,16 +263,24 @@ export default function CreateRequestScreen() {
         <Text style={styles.formIntroText}>Zadejte trasu, termín a stav vozidla. Odeslání vytvoří poptávku v Trhu přepravy.</Text>
 
         <FormSection title="Trasa">
-          <Text style={styles.label}>Odkud – přesné místo (soukromé)</Text>
-          <TextInput style={styles.compactInput} value={pickupText} onChangeText={(value) => { setPickupText(value); setRequestErrors((current) => ({ ...current, route: undefined })); }} placeholder="Např. Praha, ulice a číslo popisné" returnKeyType="next" />
-          <Text style={styles.label}>Odkud – město/obec (veřejné)</Text>
+          <Text style={styles.label}>Odkud – město/obec</Text>
           <Text style={styles.publicHintText}>Tento údaj bude viditelný veřejně.</Text>
-          <TextInput style={styles.compactInput} value={pickupPublicLabel} onChangeText={(value) => { setPickupPublicLabel(value); setRequestErrors((current) => ({ ...current, publicPlace: undefined })); }} placeholder="Např. Praha" maxLength={80} returnKeyType="next" />
-          <Text style={styles.label}>Kam – přesné místo (soukromé)</Text>
-          <TextInput style={styles.compactInput} value={destination} onChangeText={(value) => { setDestination(value); setRequestErrors((current) => ({ ...current, route: undefined })); }} placeholder="Např. Brno, ulice a číslo popisné" returnKeyType="next" />
-          <Text style={styles.label}>Kam – město/obec (veřejné)</Text>
+          <TextInput style={styles.compactInput} value={pickupPublicLabel} onChangeText={(value) => { setPickupPublicLabel(value); setRequestErrors((current) => ({ ...current, publicPlace: undefined, route: undefined })); }} placeholder="Např. Praha" maxLength={80} returnKeyType="next" />
+          <Text style={styles.label}>Kam – město/obec</Text>
           <Text style={styles.publicHintText}>Tento údaj bude viditelný veřejně.</Text>
-          <TextInput style={styles.compactInput} value={destinationPublicLabel} onChangeText={(value) => { setDestinationPublicLabel(value); setRequestErrors((current) => ({ ...current, publicPlace: undefined })); }} placeholder="Např. Brno" maxLength={80} returnKeyType="next" />
+          <TextInput style={styles.compactInput} value={destinationPublicLabel} onChangeText={(value) => { setDestinationPublicLabel(value); setRequestErrors((current) => ({ ...current, publicPlace: undefined, route: undefined })); }} placeholder="Např. Brno" maxLength={80} returnKeyType="next" />
+          <TouchableOpacity style={styles.expandToggle} onPress={() => setShowPrecisePlaces((current) => !current)} accessibilityRole="button" accessibilityState={{ expanded: showPrecisePlaces }} accessibilityLabel="Upřesnit přesné místo">
+            <Text style={styles.expandToggleText}>{showPrecisePlaces ? "− Upřesnit přesné místo" : "+ Upřesnit přesné místo"}</Text>
+          </TouchableOpacity>
+          {showPrecisePlaces ? (
+            <>
+              <Text style={styles.label}>Přesné místo nakládky (soukromé)</Text>
+              <TextInput style={styles.compactInput} value={pickupText} onChangeText={(value) => { setPickupText(value); setRequestErrors((current) => ({ ...current, route: undefined })); }} placeholder="Např. Praha, ulice a číslo popisné" returnKeyType="next" />
+              <Text style={styles.label}>Přesné místo vykládky (soukromé)</Text>
+              <TextInput style={styles.compactInput} value={destination} onChangeText={(value) => { setDestination(value); setRequestErrors((current) => ({ ...current, route: undefined })); }} placeholder="Např. Brno, ulice a číslo popisné" returnKeyType="next" />
+              <Text style={styles.privateHintText}>Přesné místo je soukromé a zobrazí se pouze oprávněnému účastníkovi přepravy.</Text>
+            </>
+          ) : null}
           <FieldError message={requestErrors.route} />
           <FieldError message={requestErrors.publicPlace} />
           <TouchableOpacity style={styles.inlineSecondary} onPress={requestLocation} accessibilityLabel="Použít aktuální polohu">

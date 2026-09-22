@@ -5,6 +5,7 @@ import { AppHeader as Header } from "../../components/AppHeader";
 import { AppBottomNav } from "../../components/AppBottomNav";
 import { useAppContext } from "../../contexts/AppContext";
 import { navigateLegacy } from "../../navigation/navigationRef";
+import { useHardwareBackAction } from "../../hooks/useBackHandlers";
 import { styles } from "../../lib/appStyles";
 import {
   carrierRouteDepartureLabel,
@@ -36,6 +37,9 @@ export default function RouteDetailRoute() {
     setTransportTab("capacity");
     navigateLegacy("transport");
   };
+
+  // Hardwarové Zpět = stejná cesta jako horní ‹ Zpět (jinak by Back ukončil aplikaci).
+  useHardwareBackAction(backToCapacity);
 
   async function handleInterestPress() {
     if (!userId) {

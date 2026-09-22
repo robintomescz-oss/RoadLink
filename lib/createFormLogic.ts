@@ -101,8 +101,11 @@ export type CapacityErrorKey = "route" | "publicPlace" | "departure" | "capacity
 
 export function validateRequestForm(input: RequestValidationInput): ValidationResult<RequestErrorKey> {
   const errors: Partial<Record<RequestErrorKey, string>> = {};
-  if (!input.pickupText.trim()) errors.route = "Vyplňte prosím místo vyzvednutí.";
-  else if (!input.destination.trim()) errors.route = "Vyplňte prosím cíl přepravy.";
+  // Trasa: povinné je veřejné město/obec. Přesné místo je volitelné (soukromá
+  // adresa pak bezpečně padne na město/obec — viz resolvePrivateAddress),
+  // takže postačí, když je vyplněné alespoň jedno z dvojice.
+  if (!input.pickupText.trim() && !(input.pickupPublicLabel ?? "").trim()) errors.route = "Vyplňte prosím místo vyzvednutí.";
+  else if (!input.destination.trim() && !(input.destinationPublicLabel ?? "").trim()) errors.route = "Vyplňte prosím cíl přepravy.";
 
   // Veřejné labely (město/obec) jsou pro nové záznamy povinné a jsou
   // viditelné ve veřejném anonymním feedu — platí pro ně vlastní pravidla.
@@ -137,8 +140,10 @@ export function validateCapacityForm(input: CapacityValidationInput): Validation
   const availableSpaces = Number(input.routeSpaces);
   const price = input.routePrice.trim() === "" ? null : Number(input.routePrice);
 
-  if (!input.routeFrom.trim()) errors.route = "Vyplňte prosím místo odjezdu.";
-  else if (!input.routeTo.trim()) errors.route = "Vyplňte prosím cíl trasy.";
+  // Trasa: povinné je veřejné město/obec; přesné místo je volitelné
+  // (fallback = město/obec, viz resolvePrivateAddress).
+  if (!input.routeFrom.trim() && !(input.fromPublicLabel ?? "").trim()) errors.route = "Vyplňte prosím místo odjezdu.";
+  else if (!input.routeTo.trim() && !(input.toPublicLabel ?? "").trim()) errors.route = "Vyplňte prosím cíl trasy.";
 
   // Veřejné labely (město/obec) — povinné, veřejně viditelné v anonymním feedu.
   if (input.fromPublicLabel !== undefined || input.toPublicLabel !== undefined) {
@@ -167,6 +172,18 @@ export function validateCapacityForm(input: CapacityValidationInput): Validation
 
 function dateToken(date: Date | null) {
   return date ? date.toISOString() : "";
+}
+
+/**
+ * Soukromá přesná adresa pro DB payload.
+ *
+ * Bez rozbaleného „Upřesnit přesné místo“ (nebo s prázdným polem) se jako
+ * soukromá adresa použije bezpečný fallback = zadané město/obec — DB sloupce
+ * i geocoding zůstávají beze změny, jen se nemusí přesné místo zadávat.
+ * Veřejný public label se přitom nikdy nepřepisuje z přesné adresy.
+ */
+export function resolvePrivateAddress(publicLabel: string, precisePlace: string): string {
+  return precisePlace.trim() || publicLabel.trim();
 }
 
 export function requestSnapshot(input: {

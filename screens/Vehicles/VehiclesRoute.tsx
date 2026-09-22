@@ -6,6 +6,7 @@ import { AppBottomNav as BottomNav } from "../../components/AppBottomNav";
 import { styles } from "../../lib/appStyles";
 import { useAppContext } from "../../contexts/AppContext";
 import { navigateLegacy } from "../../navigation/navigationRef";
+import { useHardwareBackTo } from "../../hooks/useBackHandlers";
 import type { CarrierVehicle } from "../../lib/types";
 
 export default function VehiclesRoute() {
@@ -17,9 +18,18 @@ export default function VehiclesRoute() {
   const onDelete = (item: CarrierVehicle) => {
     deleteVehicle(item);
   };
+
+  // Hardwarové Zpět = návrat na Profil (jinak by Back ukončil aplikaci).
+  useHardwareBackTo("profile");
+
   return (
     <SafeAreaView style={styles.container}>
       <Header title="Moje vozidla" />
+      <View style={styles.formBackHeader}>
+        <TouchableOpacity style={styles.formBackButton} onPress={goBack} accessibilityLabel="Zpět na profil">
+          <Text style={styles.formBackText}>‹ Profil</Text>
+        </TouchableOpacity>
+      </View>
       {vehiclesLoading ? (
         <View style={styles.scroll}>
           <Text style={styles.empty}>Načítám vozidla…</Text>
@@ -29,9 +39,6 @@ export default function VehiclesRoute() {
           <Text style={styles.empty}>Žádná vozidla.</Text>
           <TouchableOpacity style={styles.primary} onPress={goToAdd}>
             <Text style={styles.primaryText}>Přidat vozidlo</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.secondary} onPress={goBack}>
-            <Text style={styles.secondaryText}>Zpět na profil</Text>
           </TouchableOpacity>
         </ScrollView>
       ) : (
@@ -115,14 +122,6 @@ export default function VehiclesRoute() {
           )}
         />
       )}
-      <View style={styles.bottomAction}>
-        <TouchableOpacity style={styles.secondary} onPress={goBack}>
-          <Text style={styles.secondaryText}>Zpět na profil</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.customerActionRowSubtle} onPress={() => navigateLegacy("home")}>
-          <Text style={styles.customerActionTextSubtle}>Zpět na přehled</Text>
-        </TouchableOpacity>
-      </View>
       <BottomNav />
     </SafeAreaView>
   );

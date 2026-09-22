@@ -15,6 +15,7 @@ ROADLINK_TEST_CONTEXT.md
 !.roadlink/navigation-payload-regression.js
 !.roadlink/form-creation-tests.js
 !.roadlink/public-market-regression.js
+!.roadlink/post-native-fix-regression.js
 
 # Runtime snímky obrazovky a dočasné soubory v rootu
 /screen-devlauncher.png

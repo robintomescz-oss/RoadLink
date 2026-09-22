@@ -3,6 +3,7 @@ import { Alert, Text, View } from "react-native";
 import { supabase } from "../../lib/supabase";
 import { useAppContext } from "../../contexts/AppContext";
 import { navigateLegacy } from "../../navigation/navigationRef";
+import { useHardwareBackAction } from "../../hooks/useBackHandlers";
 import {
   formatOfferArrivalDateTime,
   offerStatusLabel,
@@ -56,6 +57,9 @@ export default function JobDetailRoute() {
     setTransportTab(requestViewMode === "owner" ? "mine" : "requests");
     navigateLegacy("transport");
   };
+
+  // Hardwarové Zpět = stejná cesta jako horní ‹ Zpět (jinak by Back ukončil aplikaci).
+  useHardwareBackAction(goBack);
 
   if (!activeJob) {
     return (

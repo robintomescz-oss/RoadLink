@@ -6,10 +6,18 @@ import { AppBottomNav as BottomNav } from "../../components/AppBottomNav";
 import { styles } from "../../lib/appStyles";
 import { useAppContext } from "../../contexts/AppContext";
 import { navigateLegacy } from "../../navigation/navigationRef";
-import { mapCarrierProfileToFormFields } from "../../hooks/useProfile";
+import { useHardwareBackTo } from "../../hooks/useBackHandlers";
 
+/**
+ * screen === "profile" z App.tsx.
+ *
+ * Redesign do karet: výchozí stav je krátký read-only souhrn (osobní údaje,
+ * přepravní profil, vozidla, ověření/pojištění, moje přeprava, účet). Dlouhé
+ * editační formuláře se otevřou až akcí „Upravit“ — business logika (hooky,
+ * payloady, Supabase) zůstává beze změny.
+ */
 export default function ProfileRoute() {
-  const { profileState } = useAppContext();
+  const { profileState, authState, userId, setTransportTab } = useAppContext();
   const {
     profile, profileLoading, profileEditing,
     profileFirstName, setProfileFirstName,
@@ -31,9 +39,25 @@ export default function ProfileRoute() {
     carrierPublicPhone, setCarrierPublicPhone,
     carrierPublicEmail, setCarrierPublicEmail,
     verificationStatus, insuranceStatus,
+    vehicles, vehiclesLoading,
     saveProfile, saveCarrierProfile, activateCarrierProfile, setProfileEditing,
   } = profileState;
+  const { signOutLoading, signOutUser } = authState;
   const goBack = () => navigateLegacy("home");
+
+  // Hardwarové Zpět: stejná cesta jako horní „← Přehled“ (jinak by Back ukončil aplikaci).
+  useHardwareBackTo("home");
+
+  const openMyTransport = () => {
+    setTransportTab("mine");
+    navigateLegacy("transport");
+  };
+
+  const handleSignOut = () => {
+    if (signOutLoading) return; // ochrana proti dvojitému stisku
+    signOutUser();
+  };
+
   if (profileLoading && !profile) {
     return (
       <SafeAreaView style={styles.container}>
@@ -45,26 +69,30 @@ export default function ProfileRoute() {
       </SafeAreaView>
     );
   }
+
+  // Nepřihlášený uživatel na Profil nikdy nesmí vidět privátní obrazovku.
+  if (!userId) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Header title="Profil" />
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+          <Text style={styles.empty}>Pro zobrazení profilu se přihlaste.</Text>
+        </ScrollView>
+        <BottomNav />
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.profileHeader}>
-        <TouchableOpacity onPress={goBack} accessibilityLabel="Zpět na přehled">
-          <Text style={styles.profileBack}>← Přehled</Text>
-        </TouchableOpacity>
-        <Text style={styles.profileHeaderIcon}>♙</Text>
-      </View>
+      <Header title="Profil" />
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text style={styles.bigTitle}>Můj profil</Text>
-
         {profile ? (
           <>
-            <View style={styles.profileCard}>
-              <Text style={styles.profileName}>{profile.first_name || "Uživatel"} {profile.last_name || ""}</Text>
-              <Text style={styles.profileRole}>RoadLink účet</Text>
-            </View>
-
+            {/* A. Osobní údaje */}
             {profileEditing ? (
               <View style={styles.profileCard}>
+                <Text style={styles.profileCardHeading}>Osobní údaje</Text>
                 <Text style={styles.label}>Jméno</Text>
                 <TextInput style={styles.input} value={profileFirstName} onChangeText={setProfileFirstName} placeholder="Jméno" />
                 <Text style={styles.label}>Příjmení</Text>
@@ -80,27 +108,33 @@ export default function ProfileRoute() {
               </View>
             ) : (
               <View style={styles.profileCard}>
-                <Text style={styles.profileFieldLabel}>Jméno</Text>
-                <Text style={styles.profileFieldValue}>{profile.first_name || "Neuvedeno"}</Text>
-                <Text style={styles.profileFieldLabel}>Příjmení</Text>
-                <Text style={styles.profileFieldValue}>{profile.last_name || "Neuvedeno"}</Text>
-                <Text style={styles.profileFieldLabel}>Telefon</Text>
-                <Text style={styles.profileFieldValue}>{profile.phone || "Neuvedeno"}</Text>
-                <Text style={styles.profileFieldLabel}>E-mail</Text>
-                <Text style={styles.profileFieldValue}>{profile.email}</Text>
+                <Text style={styles.profileCardHeading}>Osobní údaje</Text>
+                <Text style={styles.profileName}>{profile.first_name || "Uživatel"} {profile.last_name || ""}</Text>
+                <Text style={styles.profileRole}>RoadLink účet</Text>
+                <View style={[styles.profileSummaryRow, { marginTop: 10 }]}>
+                  <Text style={styles.profileSummaryLabel}>Telefon</Text>
+                  <Text style={styles.profileSummaryValue}>{profile.phone || "Neuvedeno"}</Text>
+                </View>
+                <View style={styles.profileSummaryRow}>
+                  <Text style={styles.profileSummaryLabel}>E-mail</Text>
+                  <Text style={styles.profileSummaryValue}>{profile.email}</Text>
+                </View>
                 <TouchableOpacity style={styles.primary} onPress={() => setProfileEditing(true)}>
-                  <Text style={styles.primaryText}>Upravit profil</Text>
+                  <Text style={styles.primaryText}>Upravit</Text>
                 </TouchableOpacity>
               </View>
             )}
 
-            {/* Přepravní profil */}
-            <Text style={styles.sectionTitle}>Přepravní profil</Text>
+            {/* B. Přepravní profil */}
             {carrierProfileLoading && !carrierProfile ? (
-              <Text style={styles.empty}>Načítám přepravní profil…</Text>
+              <View style={styles.profileCard}>
+                <Text style={styles.profileCardHeading}>Přepravní profil</Text>
+                <Text style={styles.empty}>Načítám přepravní profil…</Text>
+              </View>
             ) : carrierProfile ? (
               carrierProfileEditing ? (
                 <View style={styles.profileCard}>
+                  <Text style={styles.profileCardHeading}>Přepravní profil</Text>
                   <Text style={styles.label}>Název / jméno</Text>
                   <TextInput style={styles.input} value={carrierDisplayName} onChangeText={setCarrierDisplayName} placeholder="Název / jméno" />
                   <Text style={styles.label}>Typ podnikání</Text>
@@ -166,28 +200,23 @@ export default function ProfileRoute() {
                 </View>
               ) : (
                 <View style={styles.profileCard}>
-                  <Text style={styles.profileFieldLabel}>Název / jméno</Text>
-                  <Text style={styles.profileFieldValue}>{carrierProfile.display_name || "Neuvedeno"}</Text>
-                  <Text style={styles.profileFieldLabel}>Typ podnikání</Text>
-                  <Text style={styles.profileFieldValue}>{carrierProfile.business_type === "company" ? "Firma" : "OSVČ"}</Text>
-                  <Text style={styles.profileFieldLabel}>IČO</Text>
-                  <Text style={styles.profileFieldValue}>{carrierProfile.ico || "Neuvedeno"}</Text>
-                  <Text style={styles.profileFieldLabel}>Popis</Text>
-                  <Text style={styles.profileFieldValue}>{carrierProfile.description || "Neuvedeno"}</Text>
-                  <Text style={styles.profileFieldLabel}>Oblast působení</Text>
-                  <Text style={styles.profileFieldValue}>{carrierProfile.service_area || "Neuvedeno"}</Text>
-                  <Text style={styles.profileFieldLabel}>Maximální vzdálenost</Text>
-                  <Text style={styles.profileFieldValue}>{carrierProfile.max_radius_km == null ? "Neuvedeno" : `${carrierProfile.max_radius_km} km`}</Text>
-                  <Text style={styles.profileFieldLabel}>Roky zkušeností</Text>
-                  <Text style={styles.profileFieldValue}>{carrierProfile.years_experience == null ? "Neuvedeno" : carrierProfile.years_experience}</Text>
-                  <Text style={styles.profileFieldLabel}>Dostupnost 24/7</Text>
-                  <Text style={styles.profileFieldValue}>{carrierProfile.available_24_7 ? "Ano" : "Ne"}</Text>
-                  <Text style={styles.profileFieldLabel}>Veřejný telefon</Text>
-                  <Text style={styles.profileFieldValue}>{carrierProfile.public_phone || "Neuvedeno"}</Text>
-                  <Text style={styles.profileFieldLabel}>Veřejný e-mail</Text>
-                  <Text style={styles.profileFieldValue}>{carrierProfile.public_email || "Neuvedeno"}</Text>
-                  <Text style={styles.profileFieldLabel}>Stav profilu</Text>
-                  <Text style={styles.profileFieldValue}>{carrierProfile.status || "Neuvedeno"}</Text>
+                  <Text style={styles.profileCardHeading}>Přepravní profil</Text>
+                  <View style={styles.profileSummaryRow}>
+                    <Text style={styles.profileSummaryLabel}>Název / jméno</Text>
+                    <Text style={styles.profileSummaryValue}>{carrierProfile.display_name || "Neuvedeno"}</Text>
+                  </View>
+                  <View style={styles.profileSummaryRow}>
+                    <Text style={styles.profileSummaryLabel}>Typ podnikání</Text>
+                    <Text style={styles.profileSummaryValue}>{carrierProfile.business_type === "company" ? "Firma" : "OSVČ"}</Text>
+                  </View>
+                  <View style={styles.profileSummaryRow}>
+                    <Text style={styles.profileSummaryLabel}>Oblast působení</Text>
+                    <Text style={styles.profileSummaryValue}>{carrierProfile.service_area || "Neuvedeno"}</Text>
+                  </View>
+                  <View style={styles.profileSummaryRow}>
+                    <Text style={styles.profileSummaryLabel}>Stav profilu</Text>
+                    <Text style={styles.profileSummaryValue}>{carrierProfile.status || "Neuvedeno"}</Text>
+                  </View>
                   <TouchableOpacity style={styles.primary} onPress={() => setCarrierProfileEditing(true)}>
                     <Text style={styles.primaryText}>Upravit přepravní profil</Text>
                   </TouchableOpacity>
@@ -195,47 +224,66 @@ export default function ProfileRoute() {
               )
             ) : (
               <View style={styles.profileCard}>
-                <Text style={styles.profileFieldLabel}>Přepravní profil</Text>
-                <Text style={styles.profileFieldValue}>Zatím není aktivovaný.</Text>
+                <Text style={styles.profileCardHeading}>Přepravní profil</Text>
+                <Text style={styles.profileSummaryValue}>Zatím není aktivovaný.</Text>
                 <TouchableOpacity style={styles.primary} onPress={activateCarrierProfile} disabled={carrierProfileLoading}>
                   <Text style={styles.primaryText}>{carrierProfileLoading ? "Aktivuji..." : "Aktivovat přepravní profil"}</Text>
                 </TouchableOpacity>
               </View>
             )}
+
+            {/* C. Vozidla */}
+            <View style={styles.profileCard}>
+              <Text style={styles.profileCardHeading}>Vozidla</Text>
+              <Text style={styles.profileSummaryValue}>
+                {vehiclesLoading ? "Načítám vozidla…" : vehicles.length === 0 ? "Žádná vozidla" : vehicles.length === 1 ? "1 vozidlo" : `${vehicles.length} vozidel`}
+              </Text>
+              <TouchableOpacity style={styles.primary} onPress={() => navigateLegacy("vehicles")}>
+                <Text style={styles.primaryText}>Spravovat vozidla</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* D. Ověření a pojištění */}
+            <View style={styles.profileCard}>
+              <Text style={styles.profileCardHeading}>Ověření a pojištění</Text>
+              <View style={styles.profileSummaryRow}>
+                <Text style={styles.profileSummaryLabel}>Ověření</Text>
+                <Text style={styles.profileSummaryValue}>{verificationStatus === "verified" ? "Ověřeno" : verificationStatus === "rejected" ? "Zamítnuto" : verificationStatus === "pending" ? "Čeká na ověření" : "Zatím bez stavu"}</Text>
+              </View>
+              <View style={styles.profileSummaryRow}>
+                <Text style={styles.profileSummaryLabel}>Pojištění</Text>
+                <Text style={styles.profileSummaryValue}>{insuranceStatus || "Zatím bez stavu"}</Text>
+              </View>
+            </View>
           </>
         ) : (
           <Text style={styles.empty}>Profil se nepodařilo načíst.</Text>
         )}
 
-        {/* Akce a odkazy */}
-        {carrierProfile ? (
-          <>
-            <TouchableOpacity style={styles.customerActionRow} onPress={() => navigateLegacy("vehicles")}>
-              <Text style={styles.customerActionIcon}>▤</Text>
-              <Text style={styles.customerActionText}>Moje vozidla</Text>
-              <Text style={styles.customerActionArrow}>›</Text>
-            </TouchableOpacity>
-            <View style={styles.profileLinkCard}>
-              <Text style={styles.profileLinkTitle}>Ověření</Text>
-              <Text style={styles.profileLinkText}>{verificationStatus === "verified" ? "Ověřeno" : verificationStatus === "rejected" ? "Zamítnuto" : verificationStatus === "pending" ? "Čeká na ověření" : "Zatím bez stavu"}</Text>
-            </View>
-            <View style={styles.profileLinkCard}>
-              <Text style={styles.profileLinkTitle}>Pojištění</Text>
-              <Text style={styles.profileLinkText}>{insuranceStatus || "Zatím bez stavu"}</Text>
-            </View>
-          </>
-        ) : null}
+        {/* E. Moje přeprava */}
+        <View style={styles.profileCard}>
+          <Text style={styles.profileCardHeading}>Moje přeprava</Text>
+          <TouchableOpacity style={styles.customerActionRow} onPress={openMyTransport} accessibilityLabel="Otevřít moje přepravní poptávky">
+            <Text style={styles.customerActionIcon}>▤</Text>
+            <Text style={styles.customerActionText}>Moje poptávky</Text>
+            <Text style={styles.customerActionArrow}>›</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.customerActionRow} onPress={openMyTransport} accessibilityLabel="Otevřít moji aktivitu v přepravě">
+            <Text style={styles.customerActionIcon}>▤</Text>
+            <Text style={styles.customerActionText}>Moje aktivita</Text>
+            <Text style={styles.customerActionArrow}>›</Text>
+          </TouchableOpacity>
+        </View>
 
-        <TouchableOpacity style={styles.profileLinkCard} onPress={() => { navigateLegacy("transport"); }}>
-          <Text style={styles.profileLinkTitle}>Moje poptávky</Text>
-          <Text style={styles.profileLinkText}>Otevřít moje přepravní poptávky</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.profileLinkCard} onPress={() => navigateLegacy("home")}>
-          <Text style={styles.profileLinkTitle}>Moje aktivita</Text>
-          <Text style={styles.profileLinkText}>Otevřít osobní přehled přeprav a nabídek</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.profileLogoutRow} onPress={() => {}}>
-          <Text style={styles.profileLogoutText}>Odhlásit se</Text>
+        {/* F. Účet */}
+        <TouchableOpacity
+          style={styles.profileLogoutRow}
+          onPress={handleSignOut}
+          disabled={signOutLoading}
+          accessibilityLabel="Odhlásit se"
+          accessibilityState={{ busy: signOutLoading }}
+        >
+          <Text style={styles.profileLogoutText}>{signOutLoading ? "Odhlašuji…" : "Odhlásit se"}</Text>
         </TouchableOpacity>
       </ScrollView>
       <BottomNav />

@@ -1,16 +1,18 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Alert, BackHandler, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { supabase } from "../../lib/supabase";
 import { geocodeAddress } from "../../lib/geocode";
 import { canonicalVehicleType } from "../../lib/labels";
-import { capacitySnapshot, type CapacityErrorKey, validateCapacityForm } from "../../lib/createFormLogic";
+import { capacitySnapshot, resolvePrivateAddress, type CapacityErrorKey, validateCapacityForm } from "../../lib/createFormLogic";
 import { FormBackHeader, FormSection, FieldError, ReviewRow } from "../../components/form/FormParts";
+import { showDiscardDraftConfirmation } from "../../components/form/showDiscardDraftConfirmation";
 import { validatePublicLocationLabel } from "../../lib/publicMarket";
 import { SafeAreaView } from "../../components/SafeAreaViewCompat";
 import { useAppContext } from "../../contexts/AppContext";
 import { navigateLegacy } from "../../navigation/navigationRef";
 import { styles } from "../../lib/appStyles";
+import { useFormBackGuard } from "../../hooks/useBackHandlers";
 
 export default function RouteFormRoute() {
   const { userId, transportState } = useAppContext();
@@ -31,6 +33,8 @@ export default function RouteFormRoute() {
   const [creatingRoute, setCreatingRoute] = useState(false);
   const [showRouteDatePicker, setShowRouteDatePicker] = useState(false);
   const [showRouteTimePicker, setShowRouteTimePicker] = useState(false);
+  // Volitelné upřesnění přesných míst — ve výchozím stavu sbalené (soukromé).
+  const [showPrecisePlaces, setShowPrecisePlaces] = useState(false);
   const routeScrollRef = useRef<ScrollView | null>(null);
   const initialSnapshotRef = useRef<string | null>(null);
 
@@ -59,13 +63,9 @@ export default function RouteFormRoute() {
     else showDiscardDraftConfirmation(leave);
   }
 
-  useEffect(() => {
-    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      leaveRouteForm();
-      return true;
-    });
-    return () => subscription.remove();
-  }, [routeFrom, routeTo, routeFromPublicLabel, routeToPublicLabel, routeDepartureDate, routeDepartureTime, routeSpaces, routeMaxDeviationKm, routeVehicleTypes, routePrice, routePriceMode, routeDescription, creatingRoute]);
+  // Hardwarové Zpět (Android) a horní ‹ Zpět sdílejí jednu cestu:
+  // leaveRouteForm → čistý formulář odejde, rozepsaný ukáže discard dialog.
+  useFormBackGuard(leaveRouteForm);
 
   async function createRoute() {
     if (!userId) return;
@@ -84,8 +84,6 @@ export default function RouteFormRoute() {
 
     setCreatingRoute(true);
     try {
-      const fromAddress = routeFrom.trim();
-      const toAddress = routeTo.trim();
       // Veřejné labely (město/obec) — povinné, trimované, max 80 znaků;
       // validované validatePublicLocationLabel (bez e-mailu/URL/telefonu).
       // Nikdy se nepřepisují z přesné adresy — viz ROADLINK_AGENT_RULES.
@@ -95,6 +93,10 @@ export default function RouteFormRoute() {
         setRouteErrors((current) => ({ ...current, publicPlace: (validatedFromPublic.valid ? validatedToPublic.error : validatedFromPublic.error) ?? "Zadejte veřejné město/obec." }));
         return;
       }
+      // Soukromá přesná místa: vyplněná hodnota, nebo bezpečný fallback =
+      // zadané veřejné město/obec (DB sloupce a geocoding zůstávají beze změny).
+      const fromAddress = resolvePrivateAddress(validatedFromPublic.value, routeFrom);
+      const toAddress = resolvePrivateAddress(validatedToPublic.value, routeTo);
       const vehicleType = canonicalVehicleType(routeVehicleTypes);
       const [fromCoordinates, toCoordinates] = await Promise.all([geocodeAddress(fromAddress), geocodeAddress(toAddress)]);
       const departureAt = new Date(routeDepartureDate!);
@@ -142,16 +144,24 @@ export default function RouteFormRoute() {
         <Text style={styles.formIntroTitle}>Nová volná kapacita</Text>
         <Text style={styles.formIntroText}>Nabídněte volné místo na trase, kterou už plánujete jet.</Text>
         <FormSection title="Trasa">
-          <Text style={styles.label}>Odkud – přesné místo (soukromé)</Text>
-          <TextInput style={styles.compactInput} value={routeFrom} onChangeText={(value) => { setRouteFrom(value); setRouteErrors((current) => ({ ...current, route: undefined })); }} placeholder="Místo odjezdu – ulice, číslo popisné" />
-          <Text style={styles.label}>Odkud – město/obec (veřejné)</Text>
+          <Text style={styles.label}>Odkud – město/obec</Text>
           <Text style={styles.publicHintText}>Tento údaj bude viditelný veřejně.</Text>
-          <TextInput style={styles.compactInput} value={routeFromPublicLabel} onChangeText={(value) => { setRouteFromPublicLabel(value); setRouteErrors((current) => ({ ...current, publicPlace: undefined })); }} placeholder="Např. Praha" maxLength={80} />
-          <Text style={styles.label}>Kam – přesné místo (soukromé)</Text>
-          <TextInput style={styles.compactInput} value={routeTo} onChangeText={(value) => { setRouteTo(value); setRouteErrors((current) => ({ ...current, route: undefined })); }} placeholder="Cíl trasy – ulice, číslo popisné" />
-          <Text style={styles.label}>Kam – město/obec (veřejné)</Text>
+          <TextInput style={styles.compactInput} value={routeFromPublicLabel} onChangeText={(value) => { setRouteFromPublicLabel(value); setRouteErrors((current) => ({ ...current, publicPlace: undefined, route: undefined })); }} placeholder="Např. Praha" maxLength={80} />
+          <Text style={styles.label}>Kam – město/obec</Text>
           <Text style={styles.publicHintText}>Tento údaj bude viditelný veřejně.</Text>
-          <TextInput style={styles.compactInput} value={routeToPublicLabel} onChangeText={(value) => { setRouteToPublicLabel(value); setRouteErrors((current) => ({ ...current, publicPlace: undefined })); }} placeholder="Např. Brno" maxLength={80} />
+          <TextInput style={styles.compactInput} value={routeToPublicLabel} onChangeText={(value) => { setRouteToPublicLabel(value); setRouteErrors((current) => ({ ...current, publicPlace: undefined, route: undefined })); }} placeholder="Např. Brno" maxLength={80} />
+          <TouchableOpacity style={styles.expandToggle} onPress={() => setShowPrecisePlaces((current) => !current)} accessibilityRole="button" accessibilityState={{ expanded: showPrecisePlaces }} accessibilityLabel="Upřesnit přesné místo">
+            <Text style={styles.expandToggleText}>{showPrecisePlaces ? "− Upřesnit přesné místo" : "+ Upřesnit přesné místo"}</Text>
+          </TouchableOpacity>
+          {showPrecisePlaces ? (
+            <>
+              <Text style={styles.label}>Přesné místo nakládky (soukromé)</Text>
+              <TextInput style={styles.compactInput} value={routeFrom} onChangeText={(value) => { setRouteFrom(value); setRouteErrors((current) => ({ ...current, route: undefined })); }} placeholder="Místo odjezdu – ulice, číslo popisné" />
+              <Text style={styles.label}>Přesné místo vykládky (soukromé)</Text>
+              <TextInput style={styles.compactInput} value={routeTo} onChangeText={(value) => { setRouteTo(value); setRouteErrors((current) => ({ ...current, route: undefined })); }} placeholder="Cíl trasy – ulice, číslo popisné" />
+              <Text style={styles.privateHintText}>Přesné místo je soukromé a zobrazí se pouze oprávněnému účastníkovi přepravy.</Text>
+            </>
+          ) : null}
           <FieldError message={routeErrors.route} />
           <FieldError message={routeErrors.publicPlace} />
         </FormSection>

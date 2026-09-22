@@ -237,6 +237,15 @@ export const styles = StyleSheet.create({
   profileLogoutText: { color: DESIGN.colors.danger, fontSize: 14, fontWeight: "700" },
   profileLinkTitle: { color: DESIGN.colors.textPrimary, fontSize: 17, fontWeight: "800" },
   profileLinkText: { color: DESIGN.colors.textSecondary, marginTop: 5 },
+  // Redesign profilu do karet: kompaktní stavové řádky a nadpisy karet.
+  profileCardHeading: { color: DESIGN.colors.textPrimary, fontSize: 16, fontWeight: "800", marginBottom: 4 },
+  profileSummaryRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 7, borderTopWidth: 1, borderTopColor: DESIGN.colors.border },
+  profileSummaryLabel: { color: DESIGN.colors.textSecondary, fontSize: 13, fontWeight: "700", flexShrink: 1 },
+  profileSummaryValue: { color: DESIGN.colors.textPrimary, fontSize: 14, fontWeight: "600", textAlign: "right", flexShrink: 1, marginLeft: 12 },
+  // Volitelné upřesnění přesného místa ve formulářích (nenápadná akce + vysvětlení).
+  expandToggle: { alignSelf: "flex-start", minHeight: 44, justifyContent: "center", paddingHorizontal: 8, marginTop: 2, marginBottom: DESIGN.spacing.sm },
+  expandToggleText: { color: DESIGN.colors.primary, fontSize: 13, fontWeight: "700" },
+  privateHintText: { color: DESIGN.colors.textSecondary, fontSize: 12, lineHeight: 18, marginBottom: DESIGN.spacing.sm },
   navigationSection: { marginTop: 10 },
   customerContent: { padding: 20, paddingTop: 18, paddingBottom: 32 },
   scroll: { flex: 1 },
