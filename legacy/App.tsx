@@ -1,3 +1,16 @@
+// ---------------------------------------------------------------------------
+// ZMRAZENÝ LEGACY SOUBOR — není součástí běžící aplikace.
+//
+// Vstupní bod aplikace je index.js -> navigation/AppNavigator. Tento soubor je
+// původní monolitický App.tsx z doby před rozdělením a slouží už jen jako
+// referenční záloha původního chování. Adresář legacy/ je vyloučený z typechecku
+// (viz tsconfig.json) a nic ho neimportuje.
+//
+// Neopravujte v něm chyby a nehledejte v něm aktuální pravdu: kopie handlerů
+// tu už jsou zastaralé. Živá spodní lišta používá klíč "overview", který
+// naviguje na route "home".
+// Živá logika je v components/, hooks/, lib/, navigation/ a screens/.
+// ---------------------------------------------------------------------------
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -10,10 +23,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { supabase } from "./lib/supabase";
-import GlobalHome from "./lib/GlobalHome";
-import TransportCard from "./lib/TransportCard";
-import OfferProviderDetailsScreen from "./screens/OfferProviderDetailsScreen";
+import { supabase } from "../lib/supabase";
+import GlobalHome from "../lib/GlobalHome";
+import TransportCard from "../lib/TransportCard";
+import OfferProviderDetailsScreen from "../screens/OfferProviderDetailsScreen";
 import {
   DetailInfoRow,
   DetailPrimaryAction,
@@ -21,7 +34,7 @@ import {
   DetailSection,
   DetailShell,
   DetailStatusHeader,
-} from "./components/transport/DetailComponents";
+} from "../components/transport/DetailComponents";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import MapView, { Marker, Polyline, Region } from "react-native-maps";
 import { StatusBar } from "expo-status-bar";
@@ -36,7 +49,7 @@ import {
   type TimePreference,
   type TowOffer,
   type VehicleMobility,
-} from "./lib/types";
+} from "../lib/types";
 import {
   canonicalVehicleType,
   carrierRouteDepartureLabel,
@@ -55,8 +68,8 @@ import {
   transportStatusLabel,
   triStateLabel,
   vehicleMobilityLabel,
-} from "./lib/labels";
-import { coordinatesFromValues, geocodeAddress } from "./lib/geocode";
+} from "../lib/labels";
+import { coordinatesFromValues, geocodeAddress } from "../lib/geocode";
 import {
   capacitySnapshot,
   fieldsToLoadingOption,
@@ -68,18 +81,18 @@ import {
   type CapacityErrorKey,
   type LoadingStateOption,
   type RequestErrorKey,
-} from "./lib/createFormLogic";
-import { DEFAULT_REGION } from "./lib/design";
-import { styles } from "./lib/appStyles";
-import { useLocation } from "./hooks/useLocation";
-import { useJobFilters } from "./hooks/useJobFilters";
-import { useTransportData } from "./hooks/useTransportData";
-import { useAuth } from "./hooks/useAuth";
-import { useProfile } from "./hooks/useProfile";
-import { AppHeader as Header } from "./components/AppHeader";
-import { BottomNav } from "./components/BottomNav";
-import { SafeAreaView } from "./components/SafeAreaViewCompat";
-import { CreateScreen, RequestSuccessScreen, RoleScreen, SosScreen } from "./screens/LeafScreens";
+} from "../lib/createFormLogic";
+import { DEFAULT_REGION } from "../lib/design";
+import { styles } from "../lib/appStyles";
+import { useLocation } from "../hooks/useLocation";
+import { useJobFilters } from "./useJobFilters";
+import { useTransportData } from "../hooks/useTransportData";
+import { useAuth } from "./useAuth";
+import { useProfile } from "../hooks/useProfile";
+import { AppHeader as Header } from "../components/AppHeader";
+import { BottomNav } from "../components/BottomNav";
+import { SafeAreaView } from "../components/SafeAreaViewCompat";
+import { CreateScreen, RequestSuccessScreen, RoleScreen, SosScreen } from "../screens/LeafScreens";
 
 
 

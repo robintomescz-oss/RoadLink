@@ -15,7 +15,6 @@
           "locationAlwaysAndWhenInUsePermission": "RoadLink potřebuje přístup k poloze, aby našel nejbližší odtahovou službu."
         }
       ],
-      "expo-sqlite",
       "@react-native-community/datetimepicker"
     ],
     "android": {
