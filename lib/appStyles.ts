@@ -104,7 +104,7 @@ export const styles = StyleSheet.create({
   summaryLine: { borderBottomWidth: 1, borderBottomColor: DESIGN.colors.border, paddingBottom: DESIGN.spacing.md, marginBottom: DESIGN.spacing.sm },
   requestSuccessContent: { flex: 1, padding: 28, alignItems: "center", justifyContent: "center", backgroundColor: DESIGN.colors.background },
   successMark: { width: 56, height: 56, borderRadius: 28, overflow: "hidden", backgroundColor: DESIGN.colors.textPrimary, color: DESIGN.colors.surface, fontSize: 34, lineHeight: 54, textAlign: "center", marginBottom: 18 },
-  requestDetailContent: { padding: DESIGN.spacing.xl, paddingTop: DESIGN.spacing.md, paddingBottom: 40, backgroundColor: DESIGN.colors.background },
+  requestDetailContent: { padding: DESIGN.spacing.xl, paddingTop: DESIGN.spacing.md, paddingBottom: 120, backgroundColor: DESIGN.colors.background },
   detailStatusTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: DESIGN.spacing.md, marginBottom: DESIGN.spacing.sm },
   detailEyebrow: { color: DESIGN.colors.primary, fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase" },
   detailStatusPill: { alignSelf: "flex-start", maxWidth: "48%", color: DESIGN.colors.primary, backgroundColor: DESIGN.colors.primarySoft, borderRadius: 999, overflow: "hidden", paddingHorizontal: 9, paddingVertical: 5, fontSize: 10, fontWeight: "800", textTransform: "uppercase" },

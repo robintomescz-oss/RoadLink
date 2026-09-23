@@ -88,7 +88,10 @@ assert(!requestFormSource.includes('BackHandler.addEventListener'), 'request for
 assert(!routeFormSource.includes('BackHandler.addEventListener'), 'route form has no duplicate BackHandler listener');
 assert(requestFormSource.includes('if (!dirty || creatingRequest) leave();'), 'clean form leaves without dialog and submit suppresses dialog');
 assert(routeFormSource.includes('if (!dirty || creatingRoute) leave();'), 'clean form leaves without dialog and submit suppresses dialog');
-assert(requestFormSource.includes('showDiscardDraftConfirmation(leave)'), 'dirty request form shows discard dialog');
+assert(requestFormSource.includes('showDiscardDraftConfirmation(discardAndLeave)'), 'dirty request form shows discard dialog with explicit draft reset');
+assert(requestFormSource.includes('draftRef.current = EMPTY_REQUEST_DRAFT'), 'discarded or submitted request draft is cleared before unmount');
+assert(requestFormSource.includes('setRequestDraft(EMPTY_REQUEST_DRAFT)'), 'cleared request draft is propagated to app context');
+assert(requestFormSource.includes('problem: ""'), 'cleared request draft does not prefill the optional note');
 assert(routeFormSource.includes('showDiscardDraftConfirmation(leave)'), 'dirty route form shows discard dialog');
 
 // Detaily a navigační obrazovky: hardware Back vede na předchozí obrazovku.
@@ -97,6 +100,12 @@ const routeDetailSource = read('screens/Transport/RouteDetailRoute.tsx');
 const vehiclesSource = read('screens/Vehicles/VehiclesRoute.tsx');
 assert(jobDetailSource.includes('useHardwareBackAction(goBack)'), 'JobDetailRoute hardware back mirrors header back');
 assert(routeDetailSource.includes('useHardwareBackAction(backToCapacity)'), 'RouteDetailRoute hardware back mirrors header back');
+const offerFormSource = read('screens/Transport/OfferFormRoute.tsx');
+assert(offerFormSource.includes('useHardwareBackAction(goBack)'), 'OfferFormRoute hardware back returns to request detail');
+assert(!offerFormSource.includes('onChange='), 'OfferFormRoute does not use deprecated DateTimePicker onChange');
+assert(!requestFormSource.includes('onChange='), 'request form does not use deprecated DateTimePicker onChange');
+assert(!routeFormSource.includes('onChange='), 'route form does not use deprecated DateTimePicker onChange');
+assert(!jobDetailSource.includes('label="Najede na vlek"'), 'request detail does not duplicate loading capability');
 assert(profileSource.includes('useHardwareBackTo("home")'), 'ProfileRoute hardware back returns to home');
 assert(vehiclesSource.includes('useHardwareBackTo("profile")'), 'VehiclesRoute hardware back returns to profile');
 

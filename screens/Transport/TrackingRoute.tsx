@@ -11,7 +11,6 @@ import {
   transportLifecycleStatusLabel,
   transportStatusLabel,
   vehicleMobilityLabel,
-  triStateLabel,
 } from "../../lib/labels";
 import { styles } from "../../lib/appStyles";
 import {
@@ -158,7 +157,6 @@ export default function TrackingRoute() {
         <DetailInfoRow label="Typ vozidla" value={activeJob.vehicle} />
         {activeJob.vehicleModel?.trim() ? <DetailInfoRow label="Model" value={activeJob.vehicleModel} /> : null}
         <DetailInfoRow label="Pojízdnost" value={vehicleMobilityLabel(activeJob.vehicleMobility)} />
-        {activeJob.canTrailer !== null && activeJob.canTrailer !== undefined ? <DetailInfoRow label="Najede na vlek" value={triStateLabel(activeJob.canTrailer)} /> : null}
         {activeJob.problem?.trim() ? <DetailInfoRow label="Popis" value={activeJob.problem} /> : null}
       </DetailSection>
       {selectedOffer ? (

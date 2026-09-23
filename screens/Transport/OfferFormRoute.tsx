@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Alert, ScrollView, Text, TextInput, TouchableOpacity } from "react-native";
-import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { SafeAreaView } from "../../components/SafeAreaViewCompat";
 import { AppHeader as Header } from "../../components/AppHeader";
 import { supabase } from "../../lib/supabase";
@@ -8,6 +8,7 @@ import { formatPostgresTime } from "../../lib/labels";
 import { styles } from "../../lib/appStyles";
 import { useAppContext } from "../../contexts/AppContext";
 import { navigateLegacy } from "../../navigation/navigationRef";
+import { useHardwareBackAction } from "../../hooks/useBackHandlers";
 
 export default function OfferFormRoute() {
   const { userId, transportState, profileState, setTransportTab } = useAppContext();
@@ -22,6 +23,7 @@ export default function OfferFormRoute() {
   const [submittingOffer, setSubmittingOffer] = useState(false);
 
   const goBack = () => navigateLegacy("job");
+  useHardwareBackAction(goBack);
 
   async function submitOffer() {
     if (!userId) {
@@ -120,13 +122,13 @@ export default function OfferFormRoute() {
           <Text style={styles.secondaryText}>{offerArrivalDate ? `📅 ${offerArrivalDate.toLocaleDateString("cs-CZ")}` : "📅 Vyberte datum"}</Text>
         </TouchableOpacity>
         {showOfferDatePicker ? (
-          <DateTimePicker value={offerArrivalDate || new Date()} mode="date" display="default" onChange={(event: DateTimePickerEvent, date?: Date) => { setShowOfferDatePicker(false); if (event.type === "set" && date) setOfferArrivalDate(date); }} />
+          <DateTimePicker value={offerArrivalDate || new Date()} mode="date" display="default" onValueChange={(_, date) => { setShowOfferDatePicker(false); setOfferArrivalDate(date); }} onDismiss={() => setShowOfferDatePicker(false)} />
         ) : null}
         <TouchableOpacity style={styles.secondary} onPress={() => setShowOfferTimePicker(true)}>
           <Text style={styles.secondaryText}>{offerArrivalTime ? `🕐 ${formatPostgresTime(offerArrivalTime).slice(0, 5)}` : "🕐 Vyberte čas"}</Text>
         </TouchableOpacity>
         {showOfferTimePicker ? (
-          <DateTimePicker value={offerArrivalTime || new Date()} mode="time" display="default" onChange={(event: DateTimePickerEvent, date?: Date) => { setShowOfferTimePicker(false); if (event.type === "set" && date) setOfferArrivalTime(date); }} />
+          <DateTimePicker value={offerArrivalTime || new Date()} mode="time" display="default" onValueChange={(_, date) => { setShowOfferTimePicker(false); setOfferArrivalTime(date); }} onDismiss={() => setShowOfferTimePicker(false)} />
         ) : null}
         <Text style={styles.label}>Zpráva</Text>
         <TextInput style={styles.input} value={offerMessage} onChangeText={setOfferMessage} placeholder="Doplňující informace" multiline />

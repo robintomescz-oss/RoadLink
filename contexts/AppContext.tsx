@@ -21,10 +21,8 @@ export type TransportTab = "all" | "requests" | "capacity" | "mine";
 
 /**
  * Poslední hodnoty formuláře nové poptávky. V původní App žily tyto čtyři pole
- * v paměti aplikace a přežívaly zavření formuláře (i "Zahodit") i odeslání,
- * takže nový formulář byl předvyplněný. Formulář si je teď bere odsud a při
- * zavření je sem vrací. Chceš-li vždy prázdný formulář, stačí zrušit
- * předvyplnění v CreateRequestScreen.
+ * v paměti aplikace a umožňují návrat k rozepsanému formuláři. Výslovná volba
+ * „Zahodit“ a úspěšné odeslání draft vyčistí.
  */
 export type RequestDraft = {
   pickupText: string;
@@ -41,7 +39,7 @@ const INITIAL_REQUEST_DRAFT: RequestDraft = {
   pickupPublicLabel: "",
   destinationPublicLabel: "",
   vehicle: "Osobní automobil",
-  problem: "Porucha",
+  problem: "",
 };
 
 type AuthState = ReturnType<typeof useAuthSession>;

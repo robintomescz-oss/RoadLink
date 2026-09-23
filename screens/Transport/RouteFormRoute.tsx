@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
-import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { supabase } from "../../lib/supabase";
 import { geocodeAddress } from "../../lib/geocode";
 import { canonicalVehicleType } from "../../lib/labels";
@@ -168,10 +168,10 @@ export default function RouteFormRoute() {
         <FormSection title="Odjezd">
           <Text style={styles.label}>Datum odjezdu</Text>
           <TouchableOpacity style={styles.inlineSecondary} onPress={() => setShowRouteDatePicker(true)}><Text style={styles.secondaryText}>{routeDepartureDate ? routeDepartureDate.toLocaleDateString("cs-CZ") : "Vybrat datum"}</Text></TouchableOpacity>
-          {showRouteDatePicker ? <DateTimePicker value={routeDepartureDate || new Date()} mode="date" display="default" onChange={(event: DateTimePickerEvent, date?: Date) => { setShowRouteDatePicker(false); if (event.type === "set" && date) { setRouteDepartureDate(date); setRouteErrors((current) => ({ ...current, departure: undefined })); } }} /> : null}
+          {showRouteDatePicker ? <DateTimePicker value={routeDepartureDate || new Date()} mode="date" display="default" onValueChange={(_, date) => { setShowRouteDatePicker(false); setRouteDepartureDate(date); setRouteErrors((current) => ({ ...current, departure: undefined })); }} onDismiss={() => setShowRouteDatePicker(false)} /> : null}
           <Text style={styles.label}>Přibližný čas odjezdu</Text>
           <TouchableOpacity style={styles.inlineSecondary} onPress={() => setShowRouteTimePicker(true)}><Text style={styles.secondaryText}>{routeDepartureTime ? `${String(routeDepartureTime.getHours()).padStart(2, "0")}:${String(routeDepartureTime.getMinutes()).padStart(2, "0")}` : "Vybrat čas"}</Text></TouchableOpacity>
-          {showRouteTimePicker ? <DateTimePicker value={routeDepartureTime || new Date()} mode="time" display="default" onChange={(event: DateTimePickerEvent, date?: Date) => { setShowRouteTimePicker(false); if (event.type === "set" && date) { setRouteDepartureTime(date); setRouteErrors((current) => ({ ...current, departure: undefined })); } }} /> : null}
+          {showRouteTimePicker ? <DateTimePicker value={routeDepartureTime || new Date()} mode="time" display="default" onValueChange={(_, date) => { setShowRouteTimePicker(false); setRouteDepartureTime(date); setRouteErrors((current) => ({ ...current, departure: undefined })); }} onDismiss={() => setShowRouteTimePicker(false)} /> : null}
           <FieldError message={routeErrors.departure} />
         </FormSection>
         <FormSection title="Kapacita">
@@ -199,7 +199,7 @@ export default function RouteFormRoute() {
         <FormSection title="Kontrola a odeslání">
           <ReviewRow label="Trasa" value={`${routeFromPublicLabel.trim() || "Odkud neuvedeno"} → ${routeToPublicLabel.trim() || "Kam neuvedeno"}`} />
           <ReviewRow label="Odjezd" value={`${routeDepartureDate ? routeDepartureDate.toLocaleDateString("cs-CZ") : "Datum neuvedeno"}${routeDepartureTime ? ` · ${String(routeDepartureTime.getHours()).padStart(2, "0")}:${String(routeDepartureTime.getMinutes()).padStart(2, "0")}` : ""}`} />
-          <ReviewRow label="Kapacita" value={`${routeSpaces || "0"} míst${routeMaxDeviationKm.trim() ? ` · odchylka ${routeMaxDeviationKm.trim()} km` : ""}`} />
+          <ReviewRow label="Kapacita" value={`${routeSpaces || "0"} ${Number(routeSpaces) === 1 ? "místo" : Number(routeSpaces) >= 2 && Number(routeSpaces) <= 4 ? "místa" : "míst"}${routeMaxDeviationKm.trim() ? ` · odchylka ${routeMaxDeviationKm.trim()} km` : ""}`} />
           <ReviewRow label="Vozidla" value={routeVehicleTypes.trim() || "Neuvedeno"} />
           <ReviewRow label="Cena" value={routePriceMode === "negotiable" ? "Cena dohodou" : routePrice.trim() ? `${routePrice.trim()} Kč` : "Neuvedeno"} />
           <TouchableOpacity style={styles.primary} onPress={createRoute} disabled={creatingRoute} accessibilityLabel="Vytvořit nabídku volné kapacity"><Text style={styles.primaryText}>{creatingRoute ? "Ukládám…" : "Vytvořit nabídku trasy"}</Text></TouchableOpacity>

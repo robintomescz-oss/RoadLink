@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
-import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { SafeAreaView } from "../../components/SafeAreaViewCompat";
 import { FieldError, FormBackHeader, FormSection, ReviewRow } from "../../components/form/FormParts";
 import { showDiscardDraftConfirmation } from "../../components/form/showDiscardDraftConfirmation";
@@ -24,6 +24,14 @@ import { navigateLegacy } from "../../navigation/navigationRef";
 import { useFormBackGuard } from "../../hooks/useBackHandlers";
 
 const INITIAL_LOADING_STATE: LoadingStateOption = "drive";
+const EMPTY_REQUEST_DRAFT: RequestDraft = {
+  pickupText: "",
+  destination: "",
+  pickupPublicLabel: "",
+  destinationPublicLabel: "",
+  vehicle: "Osobní automobil",
+  problem: "",
+};
 
 /**
  * screen === "request" z App.tsx.
@@ -116,8 +124,13 @@ export default function CreateRequestScreen() {
       setRequestErrors({});
       navigateLegacy("create");
     };
+    const discardAndLeave = () => {
+      draftRef.current = EMPTY_REQUEST_DRAFT;
+      setRequestDraft(EMPTY_REQUEST_DRAFT);
+      leave();
+    };
     if (!dirty || creatingRequest) leave();
-    else showDiscardDraftConfirmation(leave);
+    else showDiscardDraftConfirmation(discardAndLeave);
   }
 
   // Hardwarové tlačítko Zpět (Android) a horní ‹ Zpět sdílejí jednu cestu:
@@ -243,8 +256,8 @@ export default function CreateRequestScreen() {
       await loadJobs();
       await loadCustomerRequests();
 
-      setPickupText(trimmedPickupAddress);
-      draftRef.current = { ...draftRef.current, pickupText: trimmedPickupAddress };
+      draftRef.current = EMPTY_REQUEST_DRAFT;
+      setRequestDraft(EMPTY_REQUEST_DRAFT);
       setRequestInitialSnapshot(null);
       setRequestErrors({});
       navigateLegacy("requestSuccess");
@@ -302,7 +315,7 @@ export default function CreateRequestScreen() {
             <Text style={styles.secondaryText}>{requestedDate ? requestedDate.toLocaleDateString("cs-CZ") : "Vybrat datum"}</Text>
           </TouchableOpacity>
           {showDatePicker ? (
-            <DateTimePicker value={requestedDate || new Date()} mode="date" display="default" onChange={(event: DateTimePickerEvent, date?: Date) => { setShowDatePicker(false); if (event.type === "set" && date) { setRequestedDate(date); setRequestErrors((current) => ({ ...current, date: undefined })); } }} />
+            <DateTimePicker value={requestedDate || new Date()} mode="date" display="default" onValueChange={(_, date) => { setShowDatePicker(false); setRequestedDate(date); setRequestErrors((current) => ({ ...current, date: undefined })); }} onDismiss={() => setShowDatePicker(false)} />
           ) : null}
           {dateMode === "window" ? (
             <>
@@ -311,7 +324,7 @@ export default function CreateRequestScreen() {
                 <Text style={styles.secondaryText}>{requestedEndDate ? requestedEndDate.toLocaleDateString("cs-CZ") : "Vybrat datum"}</Text>
               </TouchableOpacity>
               {showEndDatePicker ? (
-                <DateTimePicker value={requestedEndDate || requestedDate || new Date()} mode="date" display="default" onChange={(event: DateTimePickerEvent, date?: Date) => { setShowEndDatePicker(false); if (event.type === "set" && date) { setRequestedEndDate(date); setRequestErrors((current) => ({ ...current, date: undefined })); } }} />
+                <DateTimePicker value={requestedEndDate || requestedDate || new Date()} mode="date" display="default" onValueChange={(_, date) => { setShowEndDatePicker(false); setRequestedEndDate(date); setRequestErrors((current) => ({ ...current, date: undefined })); }} onDismiss={() => setShowEndDatePicker(false)} />
               ) : null}
             </>
           ) : null}
