@@ -1,5 +1,5 @@
 import React from "react";
-import { Alert, Image, PixelRatio, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
+import { Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path, Circle } from "react-native-svg";
 import { StatusBar } from "expo-status-bar";
@@ -13,34 +13,37 @@ function Icon({ name, color = "#102A43", size = 40 }: { name: string; color?: st
 function HomeContent({ onTransport, bottomNav }: Props) {
   const insets = useSafeAreaInsets();
   const { width, height, fontScale } = useWindowDimensions();
-  const pixelRatio = PixelRatio.get();
   const [headerH, setHeaderH] = React.useState(0);
   const [bottomNavH, setBottomNavH] = React.useState(0);
   const fallbackBottomNavH = 88 + insets.bottom;
   const measuredBottomNavH = bottomNav ? (bottomNavH || fallbackBottomNavH) : 0;
-  const usableViewportH = height - insets.top - insets.bottom - measuredBottomNavH;
-  const density = usableViewportH < 540 || (fontScale >= 1.25 && usableViewportH < 600)
+  // measuredBottomNavH už obsahuje dolní safe-area inset. Druhé odečtení
+  // insets.bottom by krátké telefony chybně zařadilo do ještě menšího viewportu.
+  const usableViewportH = height - measuredBottomNavH;
+  const density = usableViewportH < 650 || (fontScale >= 1.25 && usableViewportH < 700)
     ? "compact"
     : usableViewportH > 720
     ? "tall"
     : "regular";
   const compact = density === "compact" || width < 380;
   const wide = width >= 400;
+  const inlineStatus = wide || (density === "compact" && width >= 350 && fontScale <= 1.1);
   const wordmarkSize = density === "compact" ? Math.max(38, Math.min(44, width * 0.12)) : density === "tall" ? 50 : 48;
   const naturalSceneH = (width * 895) / 1374;
   const sceneHeight = density === "compact"
-    ? Math.max(208, naturalSceneH - 20)
+    ? naturalSceneH
     : density === "tall"
     ? Math.min(naturalSceneH + 32, height * 0.36)
     : naturalSceneH;
-  const cardGap = density === "compact" ? 8 : density === "tall" ? 14 : 12;
-  const cardsMarginTop = density === "compact" ? 8 : density === "tall" ? 14 : 12;
-  const cardPaddingV = density === "compact" ? 10 : 14;
-  const primaryPaddingV = density === "compact" ? 12 : 16;
-  const tileSize = density === "compact" ? 50 : 56;
-  const iconSize = density === "compact" ? 34 : 38;
-  const scrollBottomClearance = measuredBottomNavH + 16;
-  void pixelRatio;
+  const cardGap = density === "compact" ? 7 : density === "tall" ? 14 : 12;
+  const cardsMarginTop = density === "compact" ? 7 : density === "tall" ? 14 : 12;
+  const cardPaddingV = density === "compact" ? 8 : 14;
+  const primaryPaddingV = density === "compact" ? 9 : 16;
+  const tileSize = density === "compact" ? 46 : 56;
+  const iconSize = density === "compact" ? 31 : 38;
+  // BottomNav je samostatný flex sibling, takže ScrollView už nad ním končí.
+  // Stačí malá rezerva pro pohodlné doscrollování poslední karty.
+  const scrollBottomClearance = 16 + insets.bottom;
   return <View style={s.root}>
     <StatusBar style="dark" />
     <ScrollView contentInsetAdjustmentBehavior="never" contentContainerStyle={{ paddingBottom: scrollBottomClearance }} showsVerticalScrollIndicator={false}>
@@ -48,37 +51,37 @@ function HomeContent({ onTransport, bottomNav }: Props) {
         <Text accessibilityLabel="RoadLink" style={[s.wordmark, { fontSize: wordmarkSize }]}>Road<Text style={s.link}>Link</Text></Text>
       </View>
       <Image source={require("../assets/global-home-scene.png")} style={[s.scene, { height: sceneHeight, marginTop: headerH ? -(headerH + (density === "compact" ? 8 : 4)) : -(insets.top + 56) }]} resizeMode="cover" />
-      <View style={[s.cards, { marginTop: cardsMarginTop, gap: cardGap }]}>
-        <TouchableOpacity style={[s.cardPrimary, { minHeight: density === "compact" ? 82 : 92, paddingVertical: primaryPaddingV }]} onPress={onTransport} accessibilityRole="button" accessibilityLabel="Trh přepravy">
+      <View style={[s.cards, { marginTop: cardsMarginTop, gap: cardGap, paddingHorizontal: density === "compact" ? 12 : 16 }]}>
+        <TouchableOpacity style={[s.cardPrimary, compact && s.cardCompact, { minHeight: density === "compact" ? 72 : 92, paddingVertical: primaryPaddingV }]} onPress={onTransport} accessibilityRole="button" accessibilityLabel="Trh přepravy">
           <View style={[s.tileBlue, { width: tileSize, height: tileSize }]}><Icon name="truck" size={iconSize} /></View>
           <View style={s.body}>
             <Text style={s.titlePrimary} allowFontScaling>Trh přepravy</Text>
-            <Text style={s.descPrimary} allowFontScaling>Prohlédněte si poptávky a nabídky volné kapacity.</Text>
+            <Text style={s.descPrimary} allowFontScaling>{density === "compact" ? "Poptávky a nabídky volné kapacity." : "Prohlédněte si poptávky a nabídky volné kapacity."}</Text>
           </View>
           <View style={s.actionBlue}><Text style={s.actionArrow}>›</Text></View>
         </TouchableOpacity>
-        <TouchableOpacity style={[s.card, { minHeight: density === "compact" ? 80 : 88, paddingVertical: cardPaddingV }]} onPress={() => Alert.alert("SOS", "SOS pomoc při poruše bude dostupná v další verzi.")} accessibilityRole="button" accessibilityLabel="SOS pomoc">
+        <TouchableOpacity style={[s.card, compact && s.cardCompact, { minHeight: density === "compact" ? 70 : 88, paddingVertical: cardPaddingV }]} onPress={() => Alert.alert("SOS", "SOS pomoc při poruše bude dostupná v další verzi.")} accessibilityRole="button" accessibilityLabel="SOS pomoc">
           <View style={[s.tile, s.redTile, { width: tileSize, height: tileSize }]}><Icon name="siren" size={iconSize} color="#D7263D" /></View>
           <View style={s.body}>
             <View style={s.titleRow}>
               <Text style={s.title} allowFontScaling>SOS pomoc</Text>
-              {wide ? <View style={s.pill}><Text style={s.pillText}>Připravujeme</Text></View> : null}
-              {wide ? <Text style={s.chev}>›</Text> : null}
+              {inlineStatus ? <View style={[s.pill, compact && s.pillCompact]}><Text style={s.pillText}>Připravujeme</Text></View> : null}
+              {inlineStatus ? <Text style={s.chev}>›</Text> : null}
             </View>
             <Text style={s.description} allowFontScaling>Pomoc při poruše nebo nehodě.</Text>
-            {!wide ? <View style={s.pillRowBelow}><View style={s.pill}><Text style={s.pillText}>Připravujeme</Text></View><Text style={s.chev}>›</Text></View> : null}
+            {!inlineStatus ? <View style={s.pillRowBelow}><View style={s.pill}><Text style={s.pillText}>Připravujeme</Text></View><Text style={s.chev}>›</Text></View> : null}
           </View>
         </TouchableOpacity>
-        <TouchableOpacity style={[s.card, { minHeight: density === "compact" ? 80 : 88, paddingVertical: cardPaddingV }]} onPress={() => Alert.alert("Servisy", "Seznam servisů bude dostupný v další verzi.")} accessibilityRole="button" accessibilityLabel="Servis vozidla">
+        <TouchableOpacity style={[s.card, compact && s.cardCompact, { minHeight: density === "compact" ? 70 : 88, paddingVertical: cardPaddingV }]} onPress={() => Alert.alert("Servisy", "Seznam servisů bude dostupný v další verzi.")} accessibilityRole="button" accessibilityLabel="Servis vozidla">
           <View style={[s.tile, { width: tileSize, height: tileSize }]}><Icon name="wrench" size={iconSize} /></View>
           <View style={s.body}>
             <View style={s.titleRow}>
               <Text style={s.title} allowFontScaling>Servis vozidla</Text>
-              {wide ? <View style={s.pill}><Text style={s.pillText}>Připravujeme</Text></View> : null}
-              {wide ? <Text style={s.chev}>›</Text> : null}
+              {inlineStatus ? <View style={[s.pill, compact && s.pillCompact]}><Text style={s.pillText}>Připravujeme</Text></View> : null}
+              {inlineStatus ? <Text style={s.chev}>›</Text> : null}
             </View>
-            <Text style={s.description} allowFontScaling>Najděte servis nebo připravte požadavek na opravu.</Text>
-            {!wide ? <View style={s.pillRowBelow}><View style={s.pill}><Text style={s.pillText}>Připravujeme</Text></View><Text style={s.chev}>›</Text></View> : null}
+            <Text style={s.description} allowFontScaling>{density === "compact" ? "Najděte servis pro své vozidlo." : "Najděte servis nebo připravte požadavek na opravu."}</Text>
+            {!inlineStatus ? <View style={s.pillRowBelow}><View style={s.pill}><Text style={s.pillText}>Připravujeme</Text></View><Text style={s.chev}>›</Text></View> : null}
           </View>
         </TouchableOpacity>
       </View>
@@ -96,6 +99,7 @@ const s = StyleSheet.create({
   cards: { paddingHorizontal: 16 },
   cardPrimary: { minHeight: 92, paddingVertical: 16, paddingHorizontal: 16, borderRadius: 20, backgroundColor: "#FFFFFF", flexDirection: "row", alignItems: "center", shadowColor: "#1A3A5A", shadowOpacity: 0.08, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 3, borderWidth: 1, borderColor: "rgba(15,42,67,0.04)" },
   card: { minHeight: 88, paddingVertical: 14, paddingHorizontal: 16, borderRadius: 20, backgroundColor: "#FFFFFF", flexDirection: "row", alignItems: "center", shadowColor: "#1A3A5A", shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 2, borderWidth: 1, borderColor: "rgba(15,42,67,0.03)" },
+  cardCompact: { paddingHorizontal: 12, borderRadius: 18 },
   tileBlue: { width: 56, height: 56, backgroundColor: "#E6EEFF", borderRadius: 14, alignItems: "center", justifyContent: "center", marginRight: 12 },
   tile: { width: 56, height: 56, backgroundColor: "#E6EEFF", borderRadius: 14, alignItems: "center", justifyContent: "center", marginRight: 12 }, redTile: { backgroundColor: "#FFECEF" },
   body: { flex: 1, minWidth: 0 },
@@ -107,6 +111,7 @@ const s = StyleSheet.create({
   actionBlue: { width: 42, height: 42, borderRadius: 21, backgroundColor: "#2062FF", alignItems: "center", justifyContent: "center", marginLeft: 10 },
   actionArrow: { color: "white", fontSize: 20, fontWeight: "600", marginTop: -1, includeFontPadding: false } as any,
   pill: { backgroundColor: "#E8EEF6", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16 },
+  pillCompact: { paddingHorizontal: 8, paddingVertical: 5 },
   pillText: { color: "#6B7A90", fontSize: 11, fontWeight: "600" },
   chev: { color: "#8A9BB3", fontSize: 16, fontWeight: "400", marginLeft: 2 },
   pillRowBelow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8, alignSelf: "flex-start" },
