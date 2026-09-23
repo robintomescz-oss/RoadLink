@@ -8,12 +8,18 @@ ROADLINK_TEST_CONTEXT.md
 # Freebuff agent workspace — logy, pid, runbooky (nepatří do checkpointu)
 .freebuff/
 
-# RoadLink agent workspace — ponech jen regresní skript (intencionální projektový soubor)
+# RoadLink agent workspace — track explicit project regression scripts, ignore other local artifacts
 .roadlink/*
 !.roadlink/transport-confirmation-regression.js
+!.roadlink/profile-vehicle-regression.js
+!.roadlink/navigation-payload-regression.js
+!.roadlink/form-creation-tests.js
+!.roadlink/public-market-regression.js
+!.roadlink/post-native-fix-regression.js
 
 # Runtime snímky obrazovky a dočasné soubory v rootu
 /screen-devlauncher.png
 /screen2.png
 /m25c.diff
 /ollama.ollama-0.0.8.vsix
+/supabase/.temp/

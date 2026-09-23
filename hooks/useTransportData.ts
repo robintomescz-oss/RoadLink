@@ -2,6 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { canonicalVehicleType } from "../lib/labels";
 import { coordinatesFromValues } from "../lib/geocode";
+import {
+  mapPublicMarketplaceRequest,
+  mapPublicMarketplaceRoute,
+  type PublicMarketplaceRequest,
+  type PublicMarketplaceRoute,
+} from "../lib/publicMarket";
 import type {
   AcceptedJob,
   CarrierRoute,
@@ -19,13 +25,20 @@ export function useTransportData({
   userId,
   screen,
   activeJobId,
+  transportTab,
 }: {
   userId: string | null;
   screen: string;
   activeJobId: string | null;
+  transportTab?: "all" | "requests" | "capacity" | "mine";
 }) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [jobsLoading, setJobsLoading] = useState(false);
+  const [jobsError, setJobsError] = useState<string | null>(null);
+  const [publicRequests, setPublicRequests] = useState<PublicMarketplaceRequest[]>([]);
+  const [publicRoutes, setPublicRoutes] = useState<PublicMarketplaceRoute[]>([]);
+  const [publicMarketLoading, setPublicMarketLoading] = useState(false);
+  const [publicMarketError, setPublicMarketError] = useState<string | null>(null);
   const [acceptedJobs, setAcceptedJobs] = useState<AcceptedJob[]>([]);
   const [acceptedJobsLoading, setAcceptedJobsLoading] = useState(false);
   const [customerRequests, setCustomerRequests] = useState<Job[]>([]);
@@ -73,8 +86,79 @@ export function useTransportData({
     };
   }
 
+  async function loadPublicMarketplace() {
+    setPublicMarketLoading(true);
+    setPublicMarketError(null);
+    const [requestsResult, routesResult] = await Promise.all([
+      supabase.rpc("get_public_marketplace_requests", { p_limit: 50, p_offset: 0 }),
+      supabase.rpc("get_public_marketplace_routes", { p_limit: 50, p_offset: 0 }),
+    ]);
+
+    const firstError = requestsResult.error || routesResult.error;
+    if (firstError) {
+      setPublicRequests([]);
+      setPublicRoutes([]);
+      setPublicMarketError(firstError.message);
+      setPublicMarketLoading(false);
+      return;
+    }
+
+    try {
+      setPublicRequests(((requestsResult.data || []) as Record<string, unknown>[]).map(mapPublicMarketplaceRequest));
+      setPublicRoutes(((routesResult.data || []) as Record<string, unknown>[]).map(mapPublicMarketplaceRoute));
+      setPublicMarketError(null);
+    } catch (error) {
+      setPublicRequests([]);
+      setPublicRoutes([]);
+      setPublicMarketError(error instanceof Error ? error.message : "Veřejný trh se nepodařilo načíst.");
+    } finally {
+      setPublicMarketLoading(false);
+    }
+  }
+
+  async function loadAuthorizedJobDetail(requestId: string) {
+    if (!userId) return null;
+    const { data, error } = await supabase
+      .from("tow_requests")
+      .select("*")
+      .eq("id", requestId)
+      .single();
+    if (error || !data) return null;
+    const mapped = mapTowRequestRow(data);
+    setJobs((current) => current.some((job) => job.id === mapped.id) ? current.map((job) => job.id === mapped.id ? mapped : job) : [mapped, ...current]);
+    return mapped;
+  }
+
+  async function loadAuthorizedRouteDetail(routeId: string) {
+    if (!userId) return null;
+    const { data, error } = await supabase
+      .from("carrier_routes")
+      .select("*")
+      .eq("id", routeId)
+      .single();
+    if (error || !data) return null;
+    const mapped: CarrierRoute = {
+      id: data.id,
+      driverId: data.driver_id,
+      fromAddress: data.from_address || "Neuvedeno",
+      toAddress: data.to_address || "Neuvedeno",
+      departureAt: data.departure_at || "Neuvedeno",
+      availableSpaces: data.available_spaces ?? 0,
+      maxDeviationKm: data.max_deviation_km ?? null,
+      vehicleTypes: Array.isArray(data.vehicle_types)
+        ? data.vehicle_types.map((value: string) => canonicalVehicleType(value)).join(", ")
+        : canonicalVehicleType(data.vehicle_types || "Neuvedeno"),
+      price: data.price ?? null,
+      description: data.description || "",
+      status: data.status || "open",
+    };
+    setRoutes((current) => current.some((route) => route.id === mapped.id) ? current.map((route) => route.id === mapped.id ? mapped : route) : [mapped, ...current]);
+    return mapped;
+  }
+
   async function loadJobs() {
     setJobsLoading(true);
+    setJobsError(null);
     const { data, error } = await supabase
       .from("tow_requests")
       .select("*")
@@ -82,7 +166,7 @@ export function useTransportData({
       .order("created_at", { ascending: false });
 
     if (error) {
-      console.error("Load jobs:", error.message);
+      setJobsError(error.message);
       setJobsLoading(false);
       return;
     }
@@ -90,6 +174,7 @@ export function useTransportData({
     const mapped: Job[] = (data || []).map(mapTowRequestRow);
 
     setJobs(mapped);
+    setJobsError(null);
     setJobsLoading(false);
   }
 
@@ -180,20 +265,26 @@ export function useTransportData({
     return mapped;
   }
 
-  async function loadRoutes() {
-    if (!userId) return;
+  // scope: "mine" = vlastní trasy řidiče, "market" = všechny otevřené trasy.
+  // V nové navigaci currentScreen="transport" + transportTab určuje scope:
+  //   transportTab==="mine" → vlastní trasy, jinak → trh (market).
+  // Starý screen==="driverHome" je zachován pro zpětnou kompatibilitu s App.tsx,
+  // který je stále entry pointem do dokonceálého přepojení na AppNavigator.
+  async function loadRoutes(
+    scope: "mine" | "market" = (screen === "driverHome" || (screen === "transport" && transportTab === "mine")) ? "mine" : "market"
+  ) {
+    if (!userId && scope === "mine") return;
 
     setRoutesLoading(true);
     setRoutesError(false);
     let query = supabase.from("carrier_routes").select("*");
-    query = screen === "driverHome"
+    query = scope === "mine"
       ? query.eq("driver_id", userId).in("status", ["open", "full", "in_progress"])
       : query.eq("status", "open");
     const { data, error } = await query.order("departure_at", { ascending: true });
     setRoutesLoading(false);
 
     if (error) {
-      console.error("Load routes:", error.message);
       setRoutesError(true);
       setRoutes([]);
       return;
@@ -342,6 +433,10 @@ export function useTransportData({
 
   function resetTransportData() {
     setJobs([]);
+    setPublicRequests([]);
+    setPublicRoutes([]);
+    setPublicMarketError(null);
+    setPublicMarketLoading(false);
     setAcceptedJobs([]);
     setCustomerRequests([]);
     setOfferCounts({});
@@ -378,6 +473,11 @@ export function useTransportData({
     jobs,
     setJobs,
     jobsLoading,
+    jobsError,
+    publicRequests,
+    publicRoutes,
+    publicMarketLoading,
+    publicMarketError,
     acceptedJobs,
     setAcceptedJobs,
     acceptedJobsLoading,
@@ -398,6 +498,9 @@ export function useTransportData({
     activeJob,
     activeAcceptedJob,
     activeRoute,
+    loadPublicMarketplace,
+    loadAuthorizedJobDetail,
+    loadAuthorizedRouteDetail,
     loadJobs,
     loadAcceptedJobs,
     loadCustomerRequests,
