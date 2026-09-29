@@ -17,6 +17,7 @@ import {
 } from "../../lib/labels";
 import { useAppContext } from "../../contexts/AppContext";
 import { navigateLegacy } from "../../navigation/navigationRef";
+import { useHardwareBackTo } from "../../hooks/useBackHandlers";
 import type { Job, CarrierRoute, AcceptedJob } from "../../lib/types";
 import type { PublicMarketplaceRequest, PublicMarketplaceRoute } from "../../lib/publicMarket";
 import {
@@ -37,6 +38,8 @@ function formatPublicDate(value: string) {
 }
 
 export default function TransportRoute() {
+  // Hlavní sekce: hardware Back se vrací na Přehled místo ukončení aplikace.
+  useHardwareBackTo("home");
   const {
     userId,
     setRequestViewMode,

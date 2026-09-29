@@ -3,6 +3,7 @@ import { Alert, Linking } from "react-native";
 import OfferProviderDetailsScreen from "../OfferProviderDetailsScreen";
 import { useAppContext } from "../../contexts/AppContext";
 import { navigateLegacy } from "../../navigation/navigationRef";
+import { useHardwareBackAction } from "../../hooks/useBackHandlers";
 import { supabase } from "../../lib/supabase";
 
 async function openContactUrl(url: string, failureMessage: string) {
@@ -30,6 +31,10 @@ export default function ProviderProfileRoute() {
   const { activeJob, offers, loadCustomerRequests, loadOffers, setJobs } = transportState;
   const profileOffer = offers.find((offer) => offer.id === selectedOfferId) || null;
   const [selectingProvider, setSelectingProvider] = useState(false);
+
+  // Zpět vede na detail poptávky jen s platným kontextem; jinak bezpečně na trh přepravy.
+  const goBack = () => navigateLegacy(activeJob ? "job" : "transport");
+  useHardwareBackAction(goBack);
 
   async function selectProvider() {
     if (!profileOffer || selectingProvider || !activeJob) return;
@@ -69,7 +74,7 @@ export default function ProviderProfileRoute() {
       error={providerProfileError}
       canSelectProvider={Boolean(activeJob && activeJob.status === "open")}
       selectingProvider={selectingProvider}
-      onBack={() => navigateLegacy("job")}
+      onBack={goBack}
       onCallProvider={(phone) => openContactUrl(`tel:${phone}`, "Telefon se nepodařilo otevřít.")}
       onEmailProvider={(email) => openContactUrl(`mailto:${email}`, "E-mailovou aplikaci se nepodařilo otevřít.")}
       onSelectProvider={confirmSelectProvider}

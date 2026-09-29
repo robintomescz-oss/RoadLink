@@ -2,6 +2,8 @@ import { spawnSync } from "node:child_process";
 
 const regressionScripts = [
   ".roadlink/address-routing-regression.js",
+  ".roadlink/back-handler-regression.js",
+  ".roadlink/route-metrics-regression.js",
   ".roadlink/form-creation-tests.js",
   ".roadlink/navigation-payload-regression.js",
   ".roadlink/post-native-fix-regression.js",

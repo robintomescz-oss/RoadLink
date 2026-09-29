@@ -4,12 +4,16 @@ import { SafeAreaView } from "../../components/SafeAreaViewCompat";
 import { styles } from "../../lib/appStyles";
 import { useAppContext } from "../../contexts/AppContext";
 import { navigateLegacy } from "../../navigation/navigationRef";
+import { useHardwareBackTo } from "../../hooks/useBackHandlers";
 import type { RootScreenProps } from "../../navigation/types";
 
 export default function SignupScreen({ navigation }: RootScreenProps<"signup">) {
   const {
     authState: { registerUser },
   } = useAppContext();
+
+  // Hardware Back při registraci vede zpět na úvod místo ukončení aplikace.
+  useHardwareBackTo("home");
 
   // Lokální stav registračního formuláře (dřív v useAuth / App).
   const [registrationFirstName, setRegistrationFirstName] = useState("");

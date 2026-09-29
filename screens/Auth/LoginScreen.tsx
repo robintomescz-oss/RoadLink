@@ -4,12 +4,16 @@ import { SafeAreaView } from "../../components/SafeAreaViewCompat";
 import { styles } from "../../lib/appStyles";
 import { useAppContext } from "../../contexts/AppContext";
 import { navigateLegacy } from "../../navigation/navigationRef";
+import { useHardwareBackTo } from "../../hooks/useBackHandlers";
 import type { RootScreenProps } from "../../navigation/types";
 
 export default function LoginScreen({ navigation }: RootScreenProps<"login">) {
   const {
     authState: { loginEmail, setLoginEmail, loginUser },
   } = useAppContext();
+
+  // Hardware Back na přihlášení vede zpět na úvod místo ukončení aplikace.
+  useHardwareBackTo("home");
 
   // Lokální stav formuláře. E-mail zůstává v kontextu (přežije odhlášení).
   const [loginPassword, setLoginPassword] = useState("");

@@ -40,6 +40,10 @@ export type PublicMarketplaceForbiddenField =
   | "from_lng"
   | "to_lat"
   | "to_lng"
+  | "origin_place_id"
+  | "destination_place_id"
+  | "route_distance_meters"
+  | "route_duration_seconds"
   | "problem_description"
   | "description"
   | "offer"
@@ -61,6 +65,10 @@ export const PUBLIC_MARKETPLACE_FORBIDDEN_FIELDS: PublicMarketplaceForbiddenFiel
   "from_lng",
   "to_lat",
   "to_lng",
+  "origin_place_id",
+  "destination_place_id",
+  "route_distance_meters",
+  "route_duration_seconds",
   "problem_description",
   "description",
   "offer",

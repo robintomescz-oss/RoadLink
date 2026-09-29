@@ -32,9 +32,17 @@ Text z inputu není platnou lokalitou, dokud uživatel nevybere návrh a neprob�
 3. Routes API `computeRoutes` počítá vzdálenost, dobu a polyline jedné trasy.
 4. Routes API `computeRouteMatrix` se použije jen pro omezený počet kandidátů, ne pro celý marketplace.
 
+### Omezení čerpání Google API (povinné před nasazením)
+
+Edge Function `google-routes` ani napojení metrik do formulářů **nesmí být nasazeny do produkce**, dokud nebude rozhodnuto o ochraně proti nadměrnému čerpání Google Routes API — tedy o rate limitu na uživatele/IP, denní kvótě a rozpočtovém upozornění. Bez tohoto rozhodnutí by každé otevření formuláře mohlo volat placené API bez omezení.
+
 ## Uložení
 
 Do `tow_requests` se doplní place ID obou konců a vypočtená délka/doba požadované trasy. Do `carrier_routes` se doplní place ID, délka, doba a interní encoded polyline. Stávající adresní a souřadnicové sloupce zůstávají kvůli kompatibilitě.
+
+Interní encoded polyline se v první migraci (`0015_verified_route_metrics.sql`) záměrně ještě neukládá: matching v1 umí vzdálenost i dobu ověřit znovu z place ID a geometrii trasy dnes žádný čtenář nepoužívá. Uložit ji lze v samostatné migraci, až pro ni vznikne konkrétní konzument.
+
+Metriky jsou buď vyplněné všechny, nebo žádná — částečně vyplněná čtveřice je v databázi zakázaná pojmenovaným table-level CHECK constraintem.
 
 Migrace musí být nejprve připravena a testována, nikoliv automaticky aplikována na připojenou databázi.
 
