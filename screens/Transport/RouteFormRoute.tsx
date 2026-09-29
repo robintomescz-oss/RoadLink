@@ -2,10 +2,10 @@ import React, { useEffect, useRef, useState } from "react";
 import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { supabase } from "../../lib/supabase";
-import { geocodeAddress } from "../../lib/geocode";
 import { canonicalVehicleType } from "../../lib/labels";
-import { capacitySnapshot, resolvePrivateAddress, type CapacityErrorKey, validateCapacityForm } from "../../lib/createFormLogic";
+import { capacitySnapshot, type CapacityErrorKey, validateCapacityForm } from "../../lib/createFormLogic";
 import { FormBackHeader, FormSection, FieldError, ReviewRow } from "../../components/form/FormParts";
+import { VerifiedLocationInput } from "../../components/form/VerifiedLocationInput";
 import { showDiscardDraftConfirmation } from "../../components/form/showDiscardDraftConfirmation";
 import { validatePublicLocationLabel } from "../../lib/publicMarket";
 import { SafeAreaView } from "../../components/SafeAreaViewCompat";
@@ -13,6 +13,7 @@ import { useAppContext } from "../../contexts/AppContext";
 import { navigateLegacy } from "../../navigation/navigationRef";
 import { styles } from "../../lib/appStyles";
 import { useFormBackGuard } from "../../hooks/useBackHandlers";
+import type { VerifiedLocation } from "../../lib/verifiedLocation";
 
 export default function RouteFormRoute() {
   const { userId, transportState } = useAppContext();
@@ -21,6 +22,8 @@ export default function RouteFormRoute() {
   const [routeTo, setRouteTo] = useState("");
   const [routeFromPublicLabel, setRouteFromPublicLabel] = useState("");
   const [routeToPublicLabel, setRouteToPublicLabel] = useState("");
+  const [fromLocation, setFromLocation] = useState<VerifiedLocation | null>(null);
+  const [toLocation, setToLocation] = useState<VerifiedLocation | null>(null);
   const [routeDepartureDate, setRouteDepartureDate] = useState<Date | null>(null);
   const [routeDepartureTime, setRouteDepartureTime] = useState<Date | null>(null);
   const [routeSpaces, setRouteSpaces] = useState("1");
@@ -33,8 +36,6 @@ export default function RouteFormRoute() {
   const [creatingRoute, setCreatingRoute] = useState(false);
   const [showRouteDatePicker, setShowRouteDatePicker] = useState(false);
   const [showRouteTimePicker, setShowRouteTimePicker] = useState(false);
-  // Volitelné upřesnění přesných míst — ve výchozím stavu sbalené (soukromé).
-  const [showPrecisePlaces, setShowPrecisePlaces] = useState(false);
   const routeScrollRef = useRef<ScrollView | null>(null);
   const initialSnapshotRef = useRef<string | null>(null);
 
@@ -71,7 +72,10 @@ export default function RouteFormRoute() {
     if (!userId) return;
     const validation = validateCapacityForm({ routeFrom, routeTo, fromPublicLabel: routeFromPublicLabel, toPublicLabel: routeToPublicLabel, routeDepartureDate, routeDepartureTime, routeSpaces, routeMaxDeviationKm, routeVehicleTypes, routePriceMode, routePrice });
     setRouteErrors(validation.errors);
-    if (!validation.valid) {
+    if (!fromLocation || !toLocation) {
+      setRouteErrors((current) => ({ ...current, route: "Vyberte obě ověřená místa z nabídky." }));
+    }
+    if (!validation.valid || !fromLocation || !toLocation) {
       routeScrollRef.current?.scrollTo({ y: 0, animated: true });
       return;
     }
@@ -93,12 +97,11 @@ export default function RouteFormRoute() {
         setRouteErrors((current) => ({ ...current, publicPlace: (validatedFromPublic.valid ? validatedToPublic.error : validatedFromPublic.error) ?? "Zadejte veřejné město/obec." }));
         return;
       }
-      // Soukromá přesná místa: vyplněná hodnota, nebo bezpečný fallback =
-      // zadané veřejné město/obec (DB sloupce a geocoding zůstávají beze změny).
-      const fromAddress = resolvePrivateAddress(validatedFromPublic.value, routeFrom);
-      const toAddress = resolvePrivateAddress(validatedToPublic.value, routeTo);
+      const fromAddress = fromLocation.formattedAddress;
+      const toAddress = toLocation.formattedAddress;
       const vehicleType = canonicalVehicleType(routeVehicleTypes);
-      const [fromCoordinates, toCoordinates] = await Promise.all([geocodeAddress(fromAddress), geocodeAddress(toAddress)]);
+      const fromCoordinates = { latitude: fromLocation.latitude, longitude: fromLocation.longitude };
+      const toCoordinates = { latitude: toLocation.latitude, longitude: toLocation.longitude };
       const departureAt = new Date(routeDepartureDate!);
       departureAt.setHours(routeDepartureTime!.getHours(), routeDepartureTime!.getMinutes(), 0, 0);
       const { error } = await supabase.from("carrier_routes").insert({
@@ -144,24 +147,9 @@ export default function RouteFormRoute() {
         <Text style={styles.formIntroTitle}>Nová volná kapacita</Text>
         <Text style={styles.formIntroText}>Nabídněte volné místo na trase, kterou už plánujete jet.</Text>
         <FormSection title="Trasa">
-          <Text style={styles.label}>Odkud – město/obec</Text>
-          <Text style={styles.publicHintText}>Tento údaj bude viditelný veřejně.</Text>
-          <TextInput style={styles.compactInput} value={routeFromPublicLabel} onChangeText={(value) => { setRouteFromPublicLabel(value); setRouteErrors((current) => ({ ...current, publicPlace: undefined, route: undefined })); }} placeholder="Např. Praha" maxLength={80} />
-          <Text style={styles.label}>Kam – město/obec</Text>
-          <Text style={styles.publicHintText}>Tento údaj bude viditelný veřejně.</Text>
-          <TextInput style={styles.compactInput} value={routeToPublicLabel} onChangeText={(value) => { setRouteToPublicLabel(value); setRouteErrors((current) => ({ ...current, publicPlace: undefined, route: undefined })); }} placeholder="Např. Brno" maxLength={80} />
-          <TouchableOpacity style={styles.expandToggle} onPress={() => setShowPrecisePlaces((current) => !current)} accessibilityRole="button" accessibilityState={{ expanded: showPrecisePlaces }} accessibilityLabel="Upřesnit přesné místo">
-            <Text style={styles.expandToggleText}>{showPrecisePlaces ? "− Upřesnit přesné místo" : "+ Upřesnit přesné místo"}</Text>
-          </TouchableOpacity>
-          {showPrecisePlaces ? (
-            <>
-              <Text style={styles.label}>Přesné místo nakládky (soukromé)</Text>
-              <TextInput style={styles.compactInput} value={routeFrom} onChangeText={(value) => { setRouteFrom(value); setRouteErrors((current) => ({ ...current, route: undefined })); }} placeholder="Místo odjezdu – ulice, číslo popisné" />
-              <Text style={styles.label}>Přesné místo vykládky (soukromé)</Text>
-              <TextInput style={styles.compactInput} value={routeTo} onChangeText={(value) => { setRouteTo(value); setRouteErrors((current) => ({ ...current, route: undefined })); }} placeholder="Cíl trasy – ulice, číslo popisné" />
-              <Text style={styles.privateHintText}>Přesné místo je soukromé a zobrazí se pouze oprávněnému účastníkovi přepravy.</Text>
-            </>
-          ) : null}
+          <Text style={styles.publicHintText}>Vyberte existující místo z nabídky. Veřejně se zobrazí pouze město nebo oblast; přesná adresa zůstane soukromá.</Text>
+          <VerifiedLocationInput label="Místo odjezdu" placeholder="Začněte psát adresu nebo obec" value={fromLocation} onChange={(location) => { setFromLocation(location); setRouteFrom(location?.formattedAddress ?? ""); setRouteFromPublicLabel(location?.publicLabel ?? ""); setRouteErrors((current) => ({ ...current, publicPlace: undefined, route: undefined })); }} onError={(message) => setRouteErrors((current) => ({ ...current, route: message }))} />
+          <VerifiedLocationInput label="Cíl trasy" placeholder="Začněte psát adresu nebo obec" value={toLocation} onChange={(location) => { setToLocation(location); setRouteTo(location?.formattedAddress ?? ""); setRouteToPublicLabel(location?.publicLabel ?? ""); setRouteErrors((current) => ({ ...current, publicPlace: undefined, route: undefined })); }} onError={(message) => setRouteErrors((current) => ({ ...current, route: message }))} />
           <FieldError message={routeErrors.route} />
           <FieldError message={routeErrors.publicPlace} />
         </FormSection>

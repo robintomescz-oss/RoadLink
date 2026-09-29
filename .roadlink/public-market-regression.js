@@ -104,13 +104,13 @@ const requestFormSource = read('screens/Transport/CreateRequestScreen.tsx');
 assert(requestFormSource.includes('pickup_public_label: validatedPickupPublic.value'), 'request payload contains pickup_public_label');
 assert(requestFormSource.includes('destination_public_label: validatedDestinationPublic.value'), 'request payload contains destination_public_label');
 assert(requestFormSource.includes('pickup_address: trimmedPickupAddress') && requestFormSource.includes('destination_address: trimmedDestination'), 'request payload preserves private precise addresses');
-assert(requestFormSource.includes('Tento údaj bude viditelný veřejně.'), 'request form explains public visibility');
+assert(requestFormSource.includes('Veřejně se zobrazí pouze město nebo oblast'), 'request form explains public visibility');
 
 const routeFormSource = read('screens/Transport/RouteFormRoute.tsx');
 assert(routeFormSource.includes('from_public_label: validatedFromPublic.value'), 'route payload contains from_public_label');
 assert(routeFormSource.includes('to_public_label: validatedToPublic.value'), 'route payload contains to_public_label');
 assert(routeFormSource.includes('from_address: fromAddress') && routeFormSource.includes('to_address: toAddress'), 'route payload preserves private precise places');
-assert(routeFormSource.includes('Tento údaj bude viditelný veřejně.'), 'route form explains public visibility');
+assert(routeFormSource.includes('Veřejně se zobrazí pouze město nebo oblast'), 'route form explains public visibility');
 
 const forwardSql = read('supabase/migrations/0014_public_marketplace_feeds.sql');
 assert(!/select\s+\*/i.test(forwardSql), 'forward migration has no SELECT *');
