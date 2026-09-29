@@ -1,0 +1,4 @@
+project_id = "roadlink"
+
+[functions.google-places]
+verify_jwt = true
