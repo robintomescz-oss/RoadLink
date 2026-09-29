@@ -1,0 +1,12 @@
+.env
+.env.*
+.expo/
+.freebuff/
+.roadlink/
+node_modules/
+dist/
+legacy/
+screen*.png
+*.diff
+*.vsix
+supabase/.temp/

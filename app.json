@@ -2,7 +2,9 @@
   "expo": {
     "name": "RoadLink",
     "slug": "roadlink",
+    "owner": "roadlinks-team",
     "version": "0.3.0",
+    "icon": "./assets/roadlink-app-icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "assetBundlePatterns": [
@@ -18,13 +20,24 @@
       "@react-native-community/datetimepicker"
     ],
     "android": {
+      "package": "cz.roadlink.mobile",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/roadlink-app-icon.png",
+        "backgroundColor": "#F0F7FF"
+      },
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION"
       ]
     },
     "ios": {
-      "supportsTablet": true
+      "bundleIdentifier": "cz.roadlink.mobile",
+      "supportsTablet": false
+    },
+    "extra": {
+      "eas": {
+        "projectId": "819821a2-8c75-4d07-85bd-0a246e46eb31"
+      }
     }
   }
 }
