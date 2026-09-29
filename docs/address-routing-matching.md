@@ -34,7 +34,17 @@ Text z inputu není platnou lokalitou, dokud uživatel nevybere návrh a neprob�
 
 ### Omezení čerpání Google API (povinné před nasazením)
 
-Edge Function `google-routes` ani napojení metrik do formulářů **nesmí být nasazeny do produkce**, dokud nebude rozhodnuto o ochraně proti nadměrnému čerpání Google Routes API — tedy o rate limitu na uživatele/IP, denní kvótě a rozpočtovém upozornění. Bez tohoto rozhodnutí by každé otevření formuláře mohlo volat placené API bez omezení.
+Edge Function `google-routes` **není připravena k produkčnímu nasazení**, dokud na straně Google Cloudu nebudou nastavené kvóty a rozpočtová ochrana.
+
+Aplikační rate limit (`0016_google_routes_rate_limit.sql`; 10 přijatých pokusů za minutu a 100 za kalendářní den UTC na ověřeného uživatele) řeší zneužití jedním účtem, ale **není náhradou za Google Cloud kvótu** — nechrání před součtem všech účtů, před chybou v klientovi ani před útokem z mnoha účtů.
+
+Před nasazením je proto nutné:
+
+- nastavit v Google Cloud **denní kvótu** pro Compute Routes;
+- nastavit **rozpočtové upozornění** (billing budget alert) na projekt;
+- omezit serverový API klíč pouze na API, která funkce skutečně používá (Places API (New), Routes API), odděleně pro preview a produkci.
+
+Doporučená počáteční testovací kvóta: **nejvýše 500 požadavků Compute Routes za den pro celý projekt**, pokud současná Google konfigurace nebo očekávané náklady nevyžadují méně. Google Cloud nastavení se v tomto kroku nemění — je to ruční krok před nasazením.
 
 ## Uložení
 

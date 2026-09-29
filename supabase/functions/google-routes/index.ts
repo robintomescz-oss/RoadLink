@@ -14,12 +14,23 @@
  *   * Funkce vyžaduje platný JWT (supabase/config.toml → verify_jwt = true).
  *   * Neplatné JSON tělo je chyba klienta (400 invalid_request) — nikdy se
  *     nesmí mapovat na 502 upstream_unavailable a nikdy se neloguje.
+ *   * Pořadí kontrol je závazné: metoda a JSON → ověření JWT a uživatele →
+ *     validace place ID → atomické spotřebování rate limitu → Google Routes.
+ *     Selže-li cokoli před posledním krokem, Google se nikdy nezavolá
+ *     (fail-closed; žádné fail-open).
+ *   * Identita uživatele se bere výhradně z ověřeného tokenu, nikdy z těla.
+ *   * Lokální limit RoadLinku a Google 429 se v serverové diagnostice rozlišují
+ *     (jiný `source` v logu); klient může zobrazit stejné bezpečné UX.
  *
  * CORS/OPTIONS: existující `google-places` OPTIONS neobsluhuje (jen POST, jinak 405),
  * proto `google-routes` drží stejný vzor a žádné CORS hlavičky nepřidává.
  *
- * POZOR – NESMÍ BÝT NASAZENA DO PRODUKCE, dokud nebude rozhodnuto o rate limitu
- * (nebo jiné ochraně proti nadměrnému čerpání placeného Google Routes API).
+ * Produkční nasazení je stále blokované, i když aplikační rate limit už je
+ * navržený (migrace 0016 + rateLimit.ts). Chybí totiž:
+ *   (a) Google Cloud denní kvóta pro Compute Routes,
+ *   (b) rozpočtové upozornění na projekt,
+ *   (c) integrační ověření migrace 0016 (souběh nad živou databází).
+ * Do té doby funkce zůstává nenasazená.
  *
  * Funkce se v tomto kroku NEDEPLOYUJE — jen se připravuje.
  */
@@ -36,6 +47,14 @@ import {
   type RouteMetrics,
   type RouteRequestInput,
 } from "./routeRequest.ts";
+import { AUTH_FAILURE, parseBearerToken } from "./requestAuth.ts";
+import type { SafeFailure } from "./requestAuth.ts";
+import { resolveUserId } from "./userIdentity.ts";
+import {
+  RATE_LIMITED,
+  RATE_LIMIT_UNAVAILABLE,
+  consumeGoogleRoutesRateLimit,
+} from "./rateLimit.ts";
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
 
@@ -78,7 +97,8 @@ async function computeRoutes(input: RouteRequestInput): Promise<ComputeRoutesOut
   if (!response.ok) {
     const failure = sanitizeRouteError(response.status);
     // Logujeme jen status a bezpečný kód, nikdy tělo odpovědi ani vstup.
-    console.error("Google Routes request failed", { status: response.status, code: failure.code });
+    // `source` rozlišuje Google upstream od lokálního limitu RoadLinku.
+    console.error("Google Routes request failed", { source: "google_upstream", status: response.status, code: failure.code });
     return { ok: false, ...failure };
   }
 
@@ -103,10 +123,58 @@ Deno.serve(async (request) => {
     );
   }
 
+  const accessToken = parseBearerToken(request.headers.get("authorization"));
+  if (!accessToken) {
+    return jsonResponse({ error: { code: AUTH_FAILURE.code, message: AUTH_FAILURE.message } }, AUTH_FAILURE.status);
+  }
+
+  // Ověření u Supabase Auth: identita se nikdy nebere z těla požadavku.
+  // Ověřujeme ji i proto, aby se Google nevolal pro zrušené nebo smazané účty.
+  const identity = await resolveUserId(accessToken);
+  if (!identity.ok) {
+    const failure: SafeFailure = identity.failure;
+    // Rozlišíme „špatné přihlášení“ od výpadku Auth služby. Logujeme jen
+    // bezpečný důvod, nikdy token, user ID ani původní chybu Auth.
+    console.error("google-routes caller not verified", {
+      source: "supabase_auth",
+      reason: failure.code === "auth_unavailable" ? "unavailable" : "unauthorized",
+    });
+    // Ani limiter, ani Google se v žádném z těchto stavů nesmí zavolat.
+    return jsonResponse({ error: { code: failure.code, message: failure.message } }, failure.status);
+  }
+
   try {
     const validation = validateRouteRequest(parsedBody.body);
     if (!validation.ok) {
       return jsonResponse({ error: { code: validation.code, message: validation.message } }, validation.status);
+    }
+
+    // Limit se spotřebovává až po ověření identity a vstupu. Uživatel se
+    // do RPC neposílá — identitu si databáze odvodí z téhož JWT (auth.uid()).
+    const decision = await consumeGoogleRoutesRateLimit(accessToken);
+    if (!decision.ok) {
+      // Fail-closed: bez rozhodnutí o limitu se Google nesmí zavolat.
+      console.error("google-routes rate limiter unavailable", { source: "roadlink_rate_limit", reason: "unavailable" });
+      return jsonResponse(
+        { error: { code: RATE_LIMIT_UNAVAILABLE.code, message: RATE_LIMIT_UNAVAILABLE.message } },
+        RATE_LIMIT_UNAVAILABLE.status,
+      );
+    }
+    if (!decision.allowed) {
+      console.error("google-routes local rate limit reached", {
+        source: "roadlink_rate_limit",
+        retryAfterSeconds: decision.retryAfterSeconds,
+      });
+      return jsonResponse(
+        {
+          error: {
+            code: RATE_LIMITED.code,
+            message: RATE_LIMITED.message,
+            retryAfterSeconds: decision.retryAfterSeconds,
+          },
+        },
+        RATE_LIMITED.status,
+      );
     }
 
     const outcome = await computeRoutes(validation.value);

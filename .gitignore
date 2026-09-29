@@ -19,6 +19,7 @@ ROADLINK_TEST_CONTEXT.md
 !.roadlink/address-routing-regression.js
 !.roadlink/back-handler-regression.js
 !.roadlink/route-metrics-regression.js
+!.roadlink/rate-limit-regression.js
 
 # Runtime snímky obrazovky a dočasné soubory v rootu
 /screen-devlauncher.png

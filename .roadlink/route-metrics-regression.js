@@ -52,33 +52,136 @@ function loadTsModule(relativePath, stubs = {}) {
   return module.exports;
 }
 
-/** Načte Edge Function `google-routes` s podstrčeným Deno, fetch a console. */
-function loadEdgeEntry({ fetchImpl }) {
+/** Testovací placeholdery pro prostředí — žádná z hodnot není skutečný klíč. */
+const STUB_GOOGLE_MAPS = 'unit-test-placeholder';
+const STUB_SUPABASE_URL = 'https://unit-test.supabase.co';
+const STUB_SUPABASE_ROLE = 'unit-test-role-placeholder';
+const DENO_ENV = {
+  GOOGLE_MAPS_SERVER_API_KEY: STUB_GOOGLE_MAPS,
+  SUPABASE_URL: STUB_SUPABASE_URL,
+  SUPABASE_ANON_KEY: STUB_SUPABASE_ROLE,
+};
+
+const TEST_USER_ID = '00000000-0000-0000-0000-0000000000aa';
+const TEST_BEARER_VALUE = 'unit-test-bearer-value';
+const AUTHORIZATION = `Bearer ${TEST_BEARER_VALUE}`;
+
+const okRoutesResponse = () => new Response(
+  JSON.stringify({ routes: [{ distanceMeters: 15000, duration: '900s' }] }),
+  { status: 200, headers: { 'content-type': 'application/json' } },
+);
+
+/** Požadavek s platnou autentizací; přes `headers` jde ověřit i 401. */
+function postRequest(body, headers = {}) {
+  return new Request('https://example.test/google-routes', {
+    method: 'POST',
+    headers: { authorization: AUTHORIZATION, ...headers },
+    body,
+  });
+}
+
+/**
+ * Načte Edge Function `google-routes` s podstrčeným Deno, fetch a console.
+ * Moduly requestAuth/rateLimit/userIdentity se načítají skutečné — podstrčený
+ * je jen Supabase klient, takže se testuje opravdová logika, ne její kopie.
+ */
+function loadEdgeEntry({ fetchImpl = async () => okRoutesResponse(), getUser, rpc, envOverrides } = {}) {
   const logs = [];
+  const calls = { identity: [], rateLimit: [], fetch: [] };
+
   const deno = {
     serve: (handler) => { deno.handler = handler; },
-    env: { get: (name) => (name === 'GOOGLE_MAPS_SERVER_API_KEY' ? 'unit-test-placeholder' : undefined) },
+    env: {
+      get: (name) => (envOverrides && Object.prototype.hasOwnProperty.call(envOverrides, name)
+        ? envOverrides[name]
+        : DENO_ENV[name]),
+    },
   };
   const capturingConsole = {
     log: (...args) => logs.push(args),
     warn: (...args) => logs.push(args),
     error: (...args) => logs.push(args),
   };
+  const supabaseStub = {
+    createClient: () => ({
+      auth: {
+        getUser: async (token) => (getUser
+          ? getUser(token)
+          : { data: { user: { id: TEST_USER_ID } }, error: null }),
+      },
+      rpc: async (name) => (rpc
+        ? rpc(name)
+        : { data: [{ allowed: true, retry_after_seconds: 0 }], error: null }),
+    }),
+  };
+  const sharedStubs = {
+    'npm:@supabase/supabase-js@2': supabaseStub,
+    Deno: deno,
+    console: capturingConsole,
+  };
+
   const routeRequestModule = loadTsModule('supabase/functions/google-routes/routeRequest.ts');
+  const requestAuthModule = loadTsModule('supabase/functions/google-routes/requestAuth.ts');
+  const rateLimitModule = loadTsModule('supabase/functions/google-routes/rateLimit.ts', sharedStubs);
+  const userIdentityModule = loadTsModule('supabase/functions/google-routes/userIdentity.ts', sharedStubs);
+
+  const rateLimitProxy = {
+    ...rateLimitModule,
+    consumeGoogleRoutesRateLimit: async (token) => {
+      calls.rateLimit.push(token);
+      return rateLimitModule.consumeGoogleRoutesRateLimit(token);
+    },
+  };
+  const userIdentityProxy = {
+    ...userIdentityModule,
+    resolveUserId: async (token) => {
+      calls.identity.push(token);
+      return userIdentityModule.resolveUserId(token);
+    },
+  };
+
+  const fetchSpy = async (url, init) => {
+    calls.fetch.push({ url, init });
+    return fetchImpl(url, init);
+  };
+
   loadTsModule('supabase/functions/google-routes/index.ts', {
     './routeRequest.ts': routeRequestModule,
     './routeRequest': routeRequestModule,
+    './requestAuth.ts': requestAuthModule,
+    './requestAuth': requestAuthModule,
+    './rateLimit.ts': rateLimitProxy,
+    './rateLimit': rateLimitProxy,
+    './userIdentity.ts': userIdentityProxy,
+    './userIdentity': userIdentityProxy,
     Deno: deno,
-    fetch: fetchImpl,
+    fetch: fetchSpy,
     console: capturingConsole,
   });
-  return { handler: deno.handler, logs };
+
+  return { handler: deno.handler, logs, calls, rateLimitModule, userIdentityModule, requestAuthModule };
 }
 
 const edge = loadTsModule('supabase/functions/google-routes/routeRequest.ts');
+const requestAuth = loadTsModule('supabase/functions/google-routes/requestAuth.ts');
 const client = loadTsModule('lib/routeMetrics.ts', {
   './supabase': { supabase: { functions: { invoke: async () => ({ data: null, error: null }) } } },
 });
+
+// ── 0. Autentizační pomůcky (čisté) ─────────────────────────────────────────
+assert(requestAuth.AUTH_FAILURE.status === 401 && requestAuth.AUTH_FAILURE.code === 'unauthorized', 'the shared auth failure is 401 unauthorized');
+assert(requestAuth.parseBearerToken('Bearer abc.def-ghi') === 'abc.def-ghi', 'a bearer token is extracted from the header');
+assert(requestAuth.parseBearerToken('bearer abc') === 'abc', 'the bearer scheme is case-insensitive');
+assert(requestAuth.parseBearerToken('Bearer    abc') === 'abc', 'extra spaces after the scheme are tolerated');
+assert(requestAuth.parseBearerToken('Bearer') === null, 'a header without a token is rejected');
+assert(requestAuth.parseBearerToken('Bearer ') === null, 'an empty token is rejected');
+assert(requestAuth.parseBearerToken('Bearer abc def') === null, 'a token with whitespace inside is rejected');
+assert(requestAuth.parseBearerToken('Token abc') === null, 'a non-bearer scheme is rejected');
+assert(requestAuth.parseBearerToken('abc') === null, 'a bare token without a scheme is rejected');
+assert(requestAuth.parseBearerToken(undefined) === null, 'a missing header is rejected');
+assert(requestAuth.parseBearerToken(null) === null, 'a null header is rejected');
+assert(requestAuth.parseBearerToken(`Bearer ${'a'.repeat(4097)}`) === null, 'an over-long token is rejected');
+assert(requestAuth.parseBearerToken(`Bearer ${'a'.repeat(4096)}`) === `Bearer ${'a'.repeat(4096)}`.slice(7), 'a token at the length limit is accepted');
 
 // ── 1. Validace place ID ────────────────────────────────────────────────────
 assert(edge.normalizePlaceId('ChIJN1t_tDeuEmsRUsoyG83frY4') === 'ChIJN1t_tDeuEmsRUsoyG83frY4', 'valid Google place ID is accepted');
@@ -175,13 +278,26 @@ assert(client.parseRouteMetricsResponse({ error: { code: 'DROP TABLE' } }).code 
 assert(client.parseRouteMetricsResponse(null).ok === false, 'client handles an empty payload');
 assert(client.ROUTE_METRICS_FUNCTION === 'google-routes', 'client calls the protected google-routes function');
 
-const descriptions = ['invalid_request', 'no_route', 'rate_limited', 'upstream_unavailable', 'unknown']
-  .map((code) => client.describeRouteMetricsError(code));
+const KNOWN_ERROR_CODES = ['invalid_request', 'unauthorized', 'auth_unavailable', 'no_route', 'rate_limited', 'rate_limit_unavailable', 'upstream_unavailable'];
+const descriptions = [...KNOWN_ERROR_CODES, 'unknown'].map((code) => client.describeRouteMetricsError(code));
 assert(descriptions.every((text) => typeof text === 'string' && text.length > 10), 'every error code has a user-facing description');
-assert(descriptions.every((text) => !/google|api|status|http/i.test(text)), 'user-facing texts never mention the provider or transport details');
-const protocolDescriptions = ['invalid_request', 'no_route', 'rate_limited', 'upstream_unavailable'].map((code) => client.describeRouteMetricsError(code));
-assert(new Set(protocolDescriptions).size === 4, 'the four protocol error codes have distinct user-facing descriptions');
+assert(descriptions.every((text) => !/google|api|status|http|jwt|bearer/i.test(text)), 'user-facing texts never mention the provider, transport or token details');
+const protocolDescriptions = KNOWN_ERROR_CODES.map((code) => client.describeRouteMetricsError(code));
+assert(new Set(protocolDescriptions).size === KNOWN_ERROR_CODES.length, 'the seven protocol error codes have distinct user-facing descriptions');
+const authUnavailableText = client.describeRouteMetricsError('auth_unavailable');
+assert(authUnavailableText === 'Ověření přihlášení je dočasně nedostupné. Zkuste to prosím znovu.', 'the auth_unavailable text explains the outage in Czech');
+assert(!/odhlaste|přihlaste se|znovu se přihlaste/i.test(authUnavailableText), 'the auth_unavailable text never pushes the user to sign in again');
 assert(client.describeRouteMetricsError('unknown') === client.describeRouteMetricsError('upstream_unavailable'), 'unknown codes fall back to the generic description');
+
+assert(client.parseRouteMetricsResponse({ error: { code: 'unauthorized' } }).code === 'unauthorized', 'client surfaces the unauthorized code');
+assert(client.parseRouteMetricsResponse({ error: { code: 'rate_limit_unavailable' } }).code === 'rate_limit_unavailable', 'client surfaces the rate_limit_unavailable code');
+assert(client.parseRouteMetricsResponse({ error: { code: 'auth_unavailable' } }).code === 'auth_unavailable', 'client surfaces the auth_unavailable code');
+assert(client.parseRouteMetricsResponse({ error: { code: 'rate_limited', retryAfterSeconds: 30 } }).retryAfterSeconds === 30, 'client surfaces a sane retry delay');
+assert(client.parseRouteMetricsResponse({ error: { code: 'rate_limited', retryAfterSeconds: '30' } }).retryAfterSeconds === 30, 'client accepts a numeric string retry delay');
+assert(client.parseRouteMetricsResponse({ error: { code: 'rate_limited', retryAfterSeconds: -5 } }).retryAfterSeconds === undefined, 'client drops a negative retry delay');
+assert(client.parseRouteMetricsResponse({ error: { code: 'rate_limited', retryAfterSeconds: 'abc' } }).retryAfterSeconds === undefined, 'client drops an unparsable retry delay');
+assert(client.parseRouteMetricsResponse({ error: { code: 'rate_limited', retryAfterSeconds: 10 ** 9 } }).retryAfterSeconds === 86400, 'client clamps an absurd retry delay');
+assert(client.parseRouteMetricsResponse({ error: { code: 'rate_limited' } }).retryAfterSeconds === undefined, 'client omits the retry delay when the server sends none');
 
 // ── 7. Edge Function: klíč, logy, timeout (zdrojová kontrola) ───────────────
 const edgeEntry = read('supabase/functions/google-routes/index.ts');
@@ -198,6 +314,26 @@ assert(edgeEntry.includes('AbortSignal.timeout(ROUTES_TIMEOUT_MS)'), 'routes cal
 assert(edgeEntry.includes('request.method !== "POST"'), 'routes function only accepts POST');
 assert(!/console\.(log|error)\([^)]*(apiKey|placeId|body|address)/i.test(edgeEntry), 'routes function never logs the key, place IDs, bodies or addresses');
 assert(edgeEntry.includes('sanitizeRouteError') && edgeEntry.includes('normalizeRouteMetrics'), 'routes function uses the tested pure logic');
+const orderedChecks = [
+  ['readJsonBody(request)', 'method and JSON body'],
+  ['parseBearerToken(', 'authorization header'],
+  ['resolveUserId(', 'server-side user verification'],
+  ['validateRouteRequest(', 'place ID validation'],
+  ['consumeGoogleRoutesRateLimit(', 'atomic rate limit'],
+  ['await computeRoutes(', 'Google Routes call'],
+];
+let previousIndex = -1;
+let orderOk = true;
+for (const [needle] of orderedChecks) {
+  const index = edgeEntry.indexOf(needle);
+  if (index <= previousIndex) orderOk = false;
+  previousIndex = index;
+}
+assert(orderOk, `edge function runs the checks in the required order (${orderedChecks.map(([, label]) => label).join(' -> ')})`);
+assert(edgeEntry.includes('from "./requestAuth.ts"') && edgeEntry.includes('from "./userIdentity.ts"') && edgeEntry.includes('from "./rateLimit.ts"'), 'edge function wires the auth and rate limit modules');
+assert(edgeEntry.includes('if (!identity.ok)') && edgeEntry.includes('if (!accessToken)'), 'edge function rejects callers without a verified identity');
+assert(edgeEntry.includes('if (!decision.ok)') && edgeEntry.includes('if (!decision.allowed)'), 'edge function distinguishes a failing limiter from an exhausted limit');
+assert(edgeEntry.includes('source: "roadlink_rate_limit"') && edgeEntry.includes('source: "google_upstream"'), 'local and upstream rate limits are logged with distinct sources');
 assert(config.includes('[functions.google-routes]'), 'google-routes is registered in supabase/config.toml');
 assert(/\[functions\.google-routes\][\s\S]*?verify_jwt = true/.test(config), 'google-routes requires an authenticated JWT');
 assert(placesSource.includes('places:autocomplete') && placesSource.includes('GOOGLE_MAPS_SERVER_API_KEY'), 'existing google-places function is unchanged');
@@ -269,10 +405,6 @@ assert(!read('screens/Transport/RouteFormRoute.tsx').includes('route_distance_me
 // Sekce 11 je asynchronní, proto běží v tomto obalu (CommonJS s require neumí
 // top-level await). Synchronní sekce 12 se spouští před ní.
 async function runHandlerChecks() {
-const okRoutesResponse = () => new Response(
-  JSON.stringify({ routes: [{ distanceMeters: 15000, duration: '900s' }] }),
-  { status: 200, headers: { 'content-type': 'application/json' } },
-);
 const validBody = JSON.stringify({ originPlaceId: 'ChIJa', destinationPlaceId: 'ChIJb' });
 
 // 11a. Platný požadavek
@@ -283,13 +415,13 @@ const validBody = JSON.stringify({ originPlaceId: 'ChIJa', destinationPlaceId: '
     fetchImpl: async (url, init) => { calledUrl = url; calledInit = init; return okRoutesResponse(); },
   });
   assert(typeof handler === 'function', 'google-routes registers a Deno request handler');
-  const response = await handler(new Request('https://example.test/google-routes', { method: 'POST', body: validBody }));
+  const response = await handler(postRequest(validBody));
   assert(response.status === 200, 'a valid request returns HTTP 200');
   const payload = await response.json();
   assert(JSON.stringify(payload) === JSON.stringify({ route: { distanceMeters: 15000, durationSeconds: 900 } }), 'a valid request returns only normalized metrics');
   assert(!JSON.stringify(payload).includes('ChIJ'), 'response carries no place IDs');
   assert(calledUrl === edge.ROUTES_COMPUTE_URL, 'handler calls the fixed Google endpoint (client cannot choose it)');
-  assert(calledInit.headers['X-Goog-Api-Key'] === 'unit-test-placeholder', 'handler sends the server-side key');
+  assert(calledInit.headers['X-Goog-Api-Key'] === STUB_GOOGLE_MAPS, 'handler sends the server-side key');
   assert(calledInit.headers['X-Goog-FieldMask'] === edge.ROUTES_FIELD_MASK, 'handler sends the fixed field mask');
   assert(!JSON.stringify(logs).includes('unit-test-placeholder'), 'logs never contain the server key');
   assert(!JSON.stringify(logs).includes('ChIJ'), 'logs never contain place IDs');
@@ -302,7 +434,7 @@ const validBody = JSON.stringify({ originPlaceId: 'ChIJa', destinationPlaceId: '
   const { handler, logs } = loadEdgeEntry({
     fetchImpl: async () => { fetchCalled = true; return okRoutesResponse(); },
   });
-  const response = await handler(new Request('https://example.test/google-routes', { method: 'POST', body: clientInput }));
+  const response = await handler(postRequest(clientInput));
   assert(response.status === 400, 'malformed JSON returns HTTP 400');
   const payload = await response.json();
   assert(payload.error && payload.error.code === 'invalid_request', 'malformed JSON maps to invalid_request');
@@ -316,10 +448,7 @@ const validBody = JSON.stringify({ originPlaceId: 'ChIJa', destinationPlaceId: '
 // 11c. Neplatný obsah (validní JSON, neplatná place ID) → 400
 {
   const { handler } = loadEdgeEntry({ fetchImpl: async () => okRoutesResponse() });
-  const response = await handler(new Request('https://example.test/google-routes', {
-    method: 'POST',
-    body: JSON.stringify({ originPlaceId: 'has space', destinationPlaceId: 'ChIJb' }),
-  }));
+  const response = await handler(postRequest(JSON.stringify({ originPlaceId: 'has space', destinationPlaceId: 'ChIJb' })));
   assert(response.status === 400, 'invalid place IDs in a valid JSON body return HTTP 400');
   const payload = await response.json();
   assert(payload.error.code === 'invalid_request', 'invalid place IDs map to invalid_request');
@@ -328,7 +457,10 @@ const validBody = JSON.stringify({ originPlaceId: 'ChIJa', destinationPlaceId: '
 // 11d. OPTIONS a ostatní metody → 405 (shodné s google-places)
 for (const method of ['OPTIONS', 'GET', 'PUT', 'DELETE']) {
   const { handler } = loadEdgeEntry({ fetchImpl: async () => okRoutesResponse() });
-  const response = await handler(new Request('https://example.test/google-routes', { method }));
+  const response = await handler(new Request('https://example.test/google-routes', {
+    method,
+    headers: { authorization: AUTHORIZATION },
+  }));
   assert(response.status === 405, `${method} is rejected with HTTP 405 (same pattern as google-places)`);
 }
 assert(!/['"]OPTIONS['"]/.test(placesSource), 'google-places handles no OPTIONS branch (parity reference)');
@@ -340,7 +472,7 @@ assert(placesSource.includes('if (request.method !== "POST")') && edgeEntry.incl
   const { handler, logs } = loadEdgeEntry({
     fetchImpl: async () => new Response('{"error":{"message":"secret upstream detail"}}', { status: 500 }),
   });
-  const response = await handler(new Request('https://example.test/google-routes', { method: 'POST', body: validBody }));
+  const response = await handler(postRequest(validBody));
   assert(response.status === 502, 'Google 5xx maps to HTTP 502');
   const payload = await response.json();
   assert(payload.error.code === 'upstream_unavailable', 'Google 5xx maps to upstream_unavailable');
@@ -351,7 +483,7 @@ assert(placesSource.includes('if (request.method !== "POST")') && edgeEntry.incl
   const { handler } = loadEdgeEntry({
     fetchImpl: async () => new Response(JSON.stringify({ routes: [] }), { status: 200 }),
   });
-  const response = await handler(new Request('https://example.test/google-routes', { method: 'POST', body: validBody }));
+  const response = await handler(postRequest(validBody));
   assert(response.status === 404, 'a response without routes maps to HTTP 404');
   assert((await response.json()).error.code === 'no_route', 'a response without routes maps to no_route');
 }
@@ -359,7 +491,7 @@ assert(placesSource.includes('if (request.method !== "POST")') && edgeEntry.incl
   const { handler, logs } = loadEdgeEntry({
     fetchImpl: async () => { const error = new Error('timeout'); error.name = 'TimeoutError'; throw error; },
   });
-  const response = await handler(new Request('https://example.test/google-routes', { method: 'POST', body: validBody }));
+  const response = await handler(postRequest(validBody));
   assert(response.status === 502, 'a timed-out Google call maps to HTTP 502');
   assert((await response.json()).error.code === 'upstream_unavailable', 'a timed-out Google call maps to upstream_unavailable');
   assert(!JSON.stringify(logs).includes('ChIJ'), 'timeout logs contain no place IDs');
@@ -368,8 +500,220 @@ assert(placesSource.includes('if (request.method !== "POST")') && edgeEntry.incl
   const { handler } = loadEdgeEntry({
     fetchImpl: async () => new Response('{"error":"quota"}', { status: 429 }),
   });
-  const response = await handler(new Request('https://example.test/google-routes', { method: 'POST', body: validBody }));
+  const response = await handler(postRequest(validBody));
   assert(response.status === 429 && (await response.json()).error.code === 'rate_limited', 'Google 429 maps to rate_limited');
+}
+
+// 11f. Autentizace: Google se nesmí zavolat bez ověřené identity
+{
+  const { handler, logs, calls } = loadEdgeEntry();
+  const response = await handler(new Request('https://example.test/google-routes', { method: 'POST', body: validBody }));
+  assert(response.status === 401, 'a request without an Authorization header returns HTTP 401');
+  assert((await response.json()).error.code === 'unauthorized', 'a missing token maps to unauthorized');
+  assert(calls.fetch.length === 0, 'Google is never called without authorization');
+  assert(!JSON.stringify(logs).includes('Bearer'), 'a rejected request never logs the authorization header');
+}
+{
+  const { handler, calls } = loadEdgeEntry();
+  const response = await handler(postRequest(validBody, { authorization: 'Basic dW5pdDp0ZXN0' }));
+  assert(response.status === 401, 'a non-Bearer authorization scheme returns HTTP 401');
+  assert(calls.fetch.length === 0, 'Google is never called for a non-Bearer scheme');
+}
+{
+  const { handler, calls } = loadEdgeEntry();
+  const response = await handler(postRequest(validBody, { authorization: 'Bearer    ' }));
+  assert(response.status === 401, 'an empty bearer token returns HTTP 401');
+  assert(calls.fetch.length === 0, 'Google is never called for an empty bearer token');
+}
+// Neplatný, expirovaný a zrušený token = problém s přihlášením → 401 unauthorized
+{
+  const { handler, calls, logs } = loadEdgeEntry({
+    getUser: async () => ({ data: { user: null }, error: { status: 401, message: 'invalid JWT: signature is invalid' } }),
+  });
+  const response = await handler(postRequest(validBody));
+  assert(response.status === 401, 'an invalid token returns HTTP 401');
+  const payload = await response.json();
+  assert(payload.error.code === 'unauthorized', 'an invalid token maps to unauthorized');
+  assert(!JSON.stringify(payload).includes('signature is invalid'), 'the Auth error message is never forwarded to the client');
+  assert(calls.fetch.length === 0, 'Google is never called for an invalid token');
+  assert(calls.rateLimit.length === 0, 'the rate limiter is never consulted for an invalid token');
+  const serialized = JSON.stringify(logs);
+  assert(!serialized.includes(TEST_BEARER_VALUE), 'an invalid token is never logged');
+  assert(!serialized.includes('signature is invalid'), 'the Auth error detail is never logged');
+}
+{
+  const { handler, calls, logs } = loadEdgeEntry({
+    getUser: async () => ({ data: { user: null }, error: { status: 401, message: 'JWT expired' } }),
+  });
+  const response = await handler(postRequest(validBody));
+  assert(response.status === 401, 'an expired token returns HTTP 401');
+  assert((await response.json()).error.code === 'unauthorized', 'an expired token maps to unauthorized');
+  assert(calls.rateLimit.length === 0 && calls.fetch.length === 0, 'an expired token never reaches the limiter or Google');
+  assert(!JSON.stringify(logs).includes('JWT expired'), 'an expired token is never logged verbatim');
+}
+{
+  const { handler, calls } = loadEdgeEntry({
+    getUser: async () => ({ data: { user: null }, error: { status: 403, message: 'User from sub claim in JWT does not exist' } }),
+  });
+  const response = await handler(postRequest(validBody));
+  assert(response.status === 401, 'a revoked token returns HTTP 401');
+  assert((await response.json()).error.code === 'unauthorized', 'a revoked token maps to unauthorized');
+  assert(calls.fetch.length === 0 && calls.rateLimit.length === 0, 'a revoked token never reaches the limiter or Google');
+}
+{
+  const { handler, calls } = loadEdgeEntry({ getUser: async () => ({ data: { user: {} }, error: null }) });
+  const response = await handler(postRequest(validBody));
+  assert(response.status === 401, 'a user object without an id is rejected');
+  assert(calls.fetch.length === 0, 'Google is never called for a user without an id');
+}
+
+// Výpadek Auth služby = nedostupnost → 503 auth_unavailable
+{
+  const { handler, calls, logs } = loadEdgeEntry({
+    getUser: async () => ({ data: { user: null }, error: { status: 500, message: 'Internal server error' } }),
+  });
+  const response = await handler(postRequest(validBody));
+  assert(response.status === 503, 'an Auth 500 returns HTTP 503');
+  const payload = await response.json();
+  assert(payload.error.code === 'auth_unavailable', 'an Auth 500 maps to auth_unavailable');
+  assert(!JSON.stringify(payload).includes('Internal server error'), 'an Auth 500 detail is never forwarded to the client');
+  assert(calls.fetch.length === 0 && calls.rateLimit.length === 0, 'an Auth outage never reaches the limiter or Google');
+  assert(!JSON.stringify(logs).includes('Internal server error'), 'an Auth 500 detail is never logged');
+  assert(JSON.stringify(logs).includes('supabase_auth'), 'an Auth outage is logged with a distinct source');
+}
+{
+  const { handler, calls } = loadEdgeEntry({
+    getUser: async () => ({ data: { user: null }, error: { status: 503, message: 'Service Unavailable' } }),
+  });
+  const response = await handler(postRequest(validBody));
+  assert(response.status === 503, 'an Auth 503 returns HTTP 503');
+  assert((await response.json()).error.code === 'auth_unavailable', 'an Auth 503 maps to auth_unavailable');
+  assert(calls.fetch.length === 0, 'Google is never called when Auth is unavailable');
+}
+{
+  const { handler, calls, logs } = loadEdgeEntry({
+    getUser: async () => { throw new Error('auth upstream exploded'); },
+  });
+  const response = await handler(postRequest(validBody));
+  assert(response.status === 503, 'an Auth network exception returns HTTP 503');
+  assert((await response.json()).error.code === 'auth_unavailable', 'an Auth network exception maps to auth_unavailable');
+  assert(calls.fetch.length === 0 && calls.rateLimit.length === 0, 'an Auth network exception never reaches the limiter or Google');
+  const serialized = JSON.stringify(logs);
+  assert(!serialized.includes(TEST_BEARER_VALUE), 'an Auth network exception never logs the access token');
+  assert(!serialized.includes('auth upstream exploded'), 'an Auth network exception never logs the upstream message');
+}
+{
+  const { handler, calls } = loadEdgeEntry({
+    getUser: async () => { const error = new Error('timeout'); error.name = 'TimeoutError'; throw error; },
+  });
+  const response = await handler(postRequest(validBody));
+  assert(response.status === 503, 'an Auth timeout returns HTTP 503');
+  assert((await response.json()).error.code === 'auth_unavailable', 'an Auth timeout maps to auth_unavailable');
+  assert(calls.fetch.length === 0 && calls.rateLimit.length === 0, 'an Auth timeout never reaches the limiter or Google');
+}
+{
+  const { handler, calls } = loadEdgeEntry({
+    getUser: async () => ({ data: { user: null }, error: { message: 'invalid claim: missing sub claim' } }),
+  });
+  const response = await handler(postRequest(validBody));
+  assert(response.status === 503, 'an ambiguous Auth error fails closed as HTTP 503');
+  assert((await response.json()).error.code === 'auth_unavailable', 'an ambiguous Auth error maps to auth_unavailable');
+  assert(calls.fetch.length === 0 && calls.rateLimit.length === 0, 'an ambiguous Auth error never reaches the limiter or Google');
+}
+{
+  const { handler, calls } = loadEdgeEntry({ envOverrides: { SUPABASE_URL: undefined } });
+  const response = await handler(postRequest(validBody));
+  assert(response.status === 503, 'missing Auth configuration returns HTTP 503, not 401');
+  assert((await response.json()).error.code === 'auth_unavailable', 'missing Auth configuration maps to auth_unavailable');
+  assert(calls.fetch.length === 0 && calls.rateLimit.length === 0, 'missing Auth configuration never reaches the limiter or Google');
+}
+{
+  const forgedBody = JSON.stringify({
+    originPlaceId: 'ChIJa',
+    destinationPlaceId: 'ChIJb',
+    userId: 'forged-user-id',
+    user_id: 'forged-user-id',
+    uid: 'forged-user-id',
+  });
+  const { handler, calls } = loadEdgeEntry();
+  const response = await handler(postRequest(forgedBody));
+  assert(response.status === 200, 'a forged user id in the body does not block a valid request');
+  assert(calls.identity.length === 1 && calls.identity[0] === TEST_BEARER_VALUE, 'identity is resolved from the bearer token only');
+  assert(calls.rateLimit.length === 1 && calls.rateLimit[0] === TEST_BEARER_VALUE, 'the rate limiter receives the token, never a body user id');
+  assert(!JSON.stringify(calls).includes('forged-user-id'), 'a forged body user id never reaches identity or rate limit');
+}
+
+// 11g. Rate limit: pořadí kontrol, fail-closed a rozlišená diagnostika
+{
+  const { handler, calls } = loadEdgeEntry();
+  const response = await handler(postRequest(validBody));
+  assert(response.status === 200, 'an allowed request reaches Google');
+  assert(calls.rateLimit.length === 1, 'the rate limiter is consulted exactly once per request');
+  assert(calls.fetch.length === 1, 'an allowed request calls Google exactly once');
+}
+{
+  const { handler, calls } = loadEdgeEntry();
+  const response = await handler(postRequest(JSON.stringify({ originPlaceId: 'bad place', destinationPlaceId: 'ChIJb' })));
+  assert(response.status === 400, 'invalid place IDs still return HTTP 400');
+  assert(calls.rateLimit.length === 0, 'an invalid request never consumes a rate limit slot');
+  assert(calls.fetch.length === 0, 'an invalid request never reaches Google');
+}
+{
+  const { handler, calls } = loadEdgeEntry({ rpc: async () => ({ data: [{ allowed: false, retry_after_seconds: 17 }], error: null }) });
+  const response = await handler(postRequest(validBody));
+  assert(response.status === 429, 'an exhausted local limit returns HTTP 429');
+  const payload = await response.json();
+  assert(payload.error.code === 'rate_limited', 'an exhausted local limit maps to rate_limited');
+  assert(payload.error.retryAfterSeconds === 17, 'the local limit returns the retry delay computed by the database');
+  assert(calls.fetch.length === 0, 'Google is never called when the local limit is exhausted');
+}
+{
+  const { handler } = loadEdgeEntry({ rpc: async () => ({ data: [{ allowed: false, retry_after_seconds: 10 ** 9 }], error: null }) });
+  const response = await handler(postRequest(validBody));
+  assert((await response.json()).error.retryAfterSeconds === 86400, 'an absurd retry delay from the database is clamped');
+}
+{
+  const { handler } = loadEdgeEntry({ rpc: async () => ({ data: [{ allowed: false, retry_after_seconds: -3 }], error: null }) });
+  const response = await handler(postRequest(validBody));
+  assert((await response.json()).error.retryAfterSeconds === 60, 'an invalid retry delay falls back to the safe default');
+}
+{
+  const { handler, calls, logs } = loadEdgeEntry({ rpc: async () => ({ error: { message: 'rpc exploded with detail' } }) });
+  const response = await handler(postRequest(validBody));
+  assert(response.status === 503, 'a failing rate limiter returns HTTP 503');
+  assert((await response.json()).error.code === 'rate_limit_unavailable', 'a failing rate limiter maps to rate_limit_unavailable');
+  assert(calls.fetch.length === 0, 'Google is never called when the rate limiter fails (fail closed)');
+  assert(JSON.stringify(logs).includes('roadlink_rate_limit'), 'a limiter failure is logged with a distinct source');
+  assert(!JSON.stringify(logs).includes('rpc exploded with detail'), 'a limiter failure never leaks the database message');
+}
+{
+  const { handler, calls } = loadEdgeEntry({ rpc: async () => ({ data: null, error: null }) });
+  const response = await handler(postRequest(validBody));
+  assert(response.status === 503, 'an unexpected limiter payload fails closed');
+  assert(calls.fetch.length === 0, 'Google is never called on an unexpected limiter payload');
+}
+{
+  const { handler, calls } = loadEdgeEntry({ rpc: async () => { throw new Error('limiter network down'); } });
+  const response = await handler(postRequest(validBody));
+  assert(response.status === 503, 'a thrown limiter error fails closed');
+  assert(calls.fetch.length === 0, 'Google is never called when the limiter throws');
+}
+{
+  const { handler, logs } = loadEdgeEntry({ fetchImpl: async () => new Response('quota exceeded', { status: 429 }) });
+  const response = await handler(postRequest(validBody));
+  assert(response.status === 429, 'a Google 429 still returns HTTP 429');
+  const payload = await response.json();
+  assert(payload.error.code === 'rate_limited', 'a Google 429 maps to rate_limited for the client');
+  assert(payload.error.retryAfterSeconds === undefined, 'a Google 429 carries no RoadLink retry delay');
+  const serialized = JSON.stringify(logs);
+  assert(serialized.includes('google_upstream') && !serialized.includes('roadlink_rate_limit'), 'a Google 429 is logged as upstream, not as the local limit');
+  assert(!serialized.includes('quota exceeded'), 'the Google error body is never logged');
+}
+{
+  const { handler, logs } = loadEdgeEntry({ rpc: async () => ({ data: [{ allowed: false, retry_after_seconds: 5 }], error: null }) });
+  await handler(postRequest(validBody));
+  const serialized = JSON.stringify(logs);
+  assert(!serialized.includes(TEST_BEARER_VALUE) && !serialized.includes('ChIJ') && !serialized.includes(TEST_USER_ID), 'no log line contains a token, place ID or user id');
 }
 
 }

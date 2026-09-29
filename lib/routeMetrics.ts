@@ -23,22 +23,31 @@ export type RouteMetrics = {
 
 export type RouteMetricsErrorCode =
   | "invalid_request"
+  | "unauthorized"
+  | "auth_unavailable"
   | "no_route"
   | "rate_limited"
+  | "rate_limit_unavailable"
   | "upstream_unavailable"
   | "unknown";
 
 export type RouteMetricsResult =
   | { ok: true; metrics: RouteMetrics }
-  | { ok: false; code: RouteMetricsErrorCode; message: string };
+  | { ok: false; code: RouteMetricsErrorCode; message: string; retryAfterSeconds?: number };
 
 const ERROR_CODES: RouteMetricsErrorCode[] = [
   "invalid_request",
+  "unauthorized",
+  "auth_unavailable",
   "no_route",
   "rate_limited",
+  "rate_limit_unavailable",
   "upstream_unavailable",
   "unknown",
 ];
+
+/** Stejný strop jako na serveru — delší čekání klientovi nikdy nezobrazujeme. */
+export const MAX_RETRY_AFTER_SECONDS = 86400;
 
 function normalizeSeconds(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value) && value >= 0) return Math.round(value);
@@ -50,13 +59,35 @@ export function describeRouteMetricsError(code: RouteMetricsErrorCode): string {
   switch (code) {
     case "invalid_request":
       return "Vybrané místo se nepodařilo ověřit. Zvolte prosím adresu znovu.";
+    case "unauthorized":
+      return "Přihlaste se prosím znovu a zkuste to.";
+    case "auth_unavailable":
+      // Přihlášení uživatele je v pořádku — nenabádáme k odhlášení.
+      return "Ověření přihlášení je dočasně nedostupné. Zkuste to prosím znovu.";
     case "no_route":
       return "Pro tato dvě místa se nepodařilo najít trasu.";
     case "rate_limited":
       return "Služba tras je právě vytížená. Zkuste to prosím za chvíli.";
+    case "rate_limit_unavailable":
+      return "Ochranu proti přetížení služby tras se teď nepodařilo ověřit.";
     default:
       return "Vzdálenost a dobu trasy se teď nepodařilo zjistit.";
   }
+}
+
+/**
+ * Normalizuje `retryAfterSeconds` z odpovědi. Serveru se nevěří naslepo:
+ * nečíselné, nulové i záporné hodnoty se zahazují, příliš velké se zastřihnou.
+ */
+export function normalizeRetryAfterSeconds(value: unknown): number | undefined {
+  const numeric =
+    typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+  if (!Number.isFinite(numeric)) return undefined;
+
+  const rounded = Math.ceil(numeric);
+  if (rounded < 1) return undefined;
+
+  return Math.min(rounded, MAX_RETRY_AFTER_SECONDS);
 }
 
 function errorCodeFrom(value: unknown): RouteMetricsErrorCode {
@@ -79,7 +110,13 @@ export function parseRouteMetricsResponse(payload: unknown): RouteMetricsResult 
       ? (record.error as Record<string, unknown>)
       : null;
     const code = errorCodeFrom(error?.code);
-    return { ok: false, code, message: describeRouteMetricsError(code) };
+    const retryAfterSeconds = normalizeRetryAfterSeconds(error?.retryAfterSeconds);
+    return {
+      ok: false,
+      code,
+      message: describeRouteMetricsError(code),
+      ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
+    };
   }
 
   const route = typeof record.route === "object" && record.route !== null
