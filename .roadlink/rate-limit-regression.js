@@ -363,6 +363,30 @@ assert(new RegExp(`DAY_LIMIT = ${sqlDayLimit}`).test(harness), 'the harness docu
 assert(!/for \([^)]*DAY_LIMIT|Array\.from\([^)]*DAY_LIMIT[^)]*\)[^;]*callRateLimit/s.test(harness), 'the harness never loops the daily limit with live calls');
 assert(harness.includes('se živě netestuje') || /netestuje/i.test(harness), 'the harness states the daily limit is verified statically');
 
+// 10g-2. Denní limit (61–86 400) se pouze DETEKUJE, nesmí spustit další síťové volání.
+//       Burst proběhl už před vyhodnocením; ve větvi daily je jen process.exit.
+const dailyBranchAt = harness.indexOf('dailyRetries.length > 0');
+assert(dailyBranchAt >= 0, 'the harness has a dedicated daily-limit branch');
+const dailyBranchTail = harness.slice(dailyBranchAt, dailyBranchAt + 900);
+const dailyNetworkCalls = (dailyBranchTail.match(/callRateLimit|fetch\(|sleep\(/g) || []).length;
+assert(
+  dailyNetworkCalls === 0,
+  `the daily-limit branch starts no further network call (found ${dailyNetworkCalls})`,
+);
+assert(
+  /dailyRetries\.length > 0[\s\S]{0,900}?process\.exit\(ERROR_PRECONDITION_UNMET\)/.test(harness),
+  'the daily-limit branch exits with the dedicated precondition code instead of running more calls',
+);
+// Detector nesmí v denním stavu vypisovat hodnotu, účet ani část odpovědi serveru.
+assert(
+  !/Retry hodnoty: minutový rozsah/.test(harness),
+  'the daily-limit branch logs no retry_after_seconds counts derived from the server response',
+);
+assert(
+  !/PODMÍNKA NESPLNĚNA[^\n]*\$\{/.test(harness),
+  'the daily-limit message interpolates no server-derived or credential value',
+);
+
 // 10h. Citlivé runtime proměnné se nikdy nelogují.
 assert(/process\.env\.ROADLINK_SUPABASE_URL/.test(harness), 'the harness reads the project URL from runtime env');
 assert(/process\.env\.ROADLINK_TEST_ACCESS_TOKEN/.test(harness), 'the harness reads a short-lived access token from runtime env');

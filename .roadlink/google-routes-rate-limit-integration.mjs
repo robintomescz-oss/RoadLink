@@ -240,6 +240,9 @@ async function runBurst() {
   check(allowed <= MINUTE_LIMIT, `povolených volání nepřekročilo limit (${allowed} <= ${MINUTE_LIMIT})`);
 
   // 4. Odmítnutá volání musí vrátit bezpečný retry_after_seconds.
+  //    1–60 s = očekávaný minutový limit (normální průběh testu)
+  //    61–86 400 s = denní limit testovacího účtu = BLOKUJÍCÍ PŘEDPOKLAD, ne chyba
+  //    mimo rozsah / nečíselné = SKUTEČNÁ chyba implementace
   const rejectedDecisions = parsed.filter((decision) => decision.allowed === false);
   const retryClassifications = rejectedDecisions.map((decision) => ({
     retryAfterSeconds: decision.retryAfterSeconds,
@@ -249,9 +252,6 @@ async function runBurst() {
   const dailyRetries = retryClassifications.filter(
     (entry) => entry.classification.kind === RETRY_AFTER_KIND.DAILY,
   );
-  const minuteRetries = retryClassifications.filter(
-    (entry) => entry.classification.kind === RETRY_AFTER_KIND.MINUTE,
-  );
 
   check(
     rejected === 0 || invalidRetries.length === 0,
@@ -259,12 +259,13 @@ async function runBurst() {
   );
 
   if (dailyRetries.length > 0 && invalidRetries.length === 0) {
+    // Denní limit testovacího účtu NENÍ chyba limiteru. Vypisujeme pouze
+    // obecné hlášení: žádná hodnota retry_after_seconds, žádný token,
+    // žádné user ID a žádná část odpovědi serveru. Žádné další síťové
+    // volání se nespouští — burst už proběhl, rozhodnutí se jen vyhodnotí.
     console.warn(
-      "PODMÍNKA NESPLNĚNA: testovací účet pravděpodobně narazil na denní limit. " +
-        "Minutový live test nelze bezpečně vyhodnotit bez čerstvého testovacího předpokladu.",
-    );
-    console.warn(
-      `Retry hodnoty: minutový rozsah ${minuteRetries.length}, denní rozsah ${dailyRetries.length}.`,
+      "PODMÍNKA NESPLNĚNA: nejsou splněné předpoklady pro minutový test — " +
+        "testovací účet je na denním limitu. Minutový limit se živě nevyhodnocuje.",
     );
     process.exit(ERROR_PRECONDITION_UNMET);
   }
