@@ -60,8 +60,8 @@ const rateLimit = loadTsModule('supabase/functions/google-routes/rateLimit.ts', 
 const migrationFiles = fs.readdirSync(path.join(root, 'supabase/migrations'))
   .filter((name) => /^\d{4}_.*\.sql$/.test(name))
   .sort();
-const lastMigration = migrationFiles[migrationFiles.length - 1];
-assert(lastMigration === '0016_google_routes_rate_limit.sql', 'migration 0016 is the newest forward-only migration');
+assert(migrationFiles.includes('0016_google_routes_rate_limit.sql'), 'migration 0016 remains in forward migration history');
+assert(migrationFiles.indexOf('0016_google_routes_rate_limit.sql') < migrationFiles.indexOf('0017_matching_candidate_preselection.sql'), 'matching migration follows the rate-limit migration');
 const previousNumbers = migrationFiles.map((name) => Number(name.slice(0, 4)));
 assert(previousNumbers.every((value, index) => index === 0 || value === previousNumbers[index - 1] + 1), 'migration numbering stays gapless');
 

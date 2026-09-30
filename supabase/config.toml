@@ -5,3 +5,6 @@ verify_jwt = true
 
 [functions.google-routes]
 verify_jwt = true
+
+[functions.google-route-matches]
+verify_jwt = true

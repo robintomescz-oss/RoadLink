@@ -102,6 +102,16 @@ Migrace musí být nejprve připravena a testována, nikoliv automaticky aplikov
 - Matching nikdy sám nevytváří nabídku ani nemění stav poptávky nebo trasy.
 - Serverový předvýběr, volání Google a databázové RPC budou připraveny v samostatném kroku a před výslovným schválením se neaplikují ani nenasazují.
 
+#### Serverový návrh (zatím neaplikovaný)
+
+- Migrace `0017_matching_candidate_preselection.sql` vytváří interní RPC přístupné pouze `service_role`; `anon` ani `authenticated` je nesmí volat přímo.
+- Edge Function `google-route-matches` přijímá pouze ID trasy, ověří uživatele a do interního RPC předá jeho ověřené ID. RPC vrátí kandidáty jen tehdy, když uživatel danou otevřenou trasu vlastní.
+- Předvýběr je omezen na pět kandidátů a filtruje otevřený stav, termín, podporovaný typ vozidla, dostupnou kapacitu a úplné ověřené metriky.
+- Pro každého kandidáta se počítá pevná trasa `začátek trasy → vyzvednutí → vyložení → konec trasy`; klient nemůže změnit pořadí waypointů, URL ani field mask.
+- Každé jednotlivé Google volání spotřebuje vlastní slot existujícího serverového limiteru. Selhání limiteru je fail-closed.
+- Klient dostane jen ID poptávky, skóre, kilometry/minuty zajížďky a bezpečné důvody. Place ID, adresy, souřadnice, Google odpověď ani identita se nevracejí.
+- Migrace 0017 ani funkce `google-route-matches` se v této etapě neaplikují a nenasazují.
+
 ### D. Ověření před testováním
 
 - jednotkové testy mapování a skóre;
