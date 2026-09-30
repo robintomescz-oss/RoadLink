@@ -83,4 +83,20 @@ assert(metrics.score > 0);
 assert(metrics.reasons.some((reason) => reason.includes("+18 km")));
 assert(!Object.keys(metrics).some((key) => /place|address|lat|lng/i.test(key)));
 
+const routeMatchesClient = loadTs("lib/routeMatches.ts", {
+  "./supabase": { supabase: { functions: { invoke: async () => ({ data: null, error: null }) } } },
+});
+const parsedMatch = routeMatchesClient.parseRouteMatch(metrics);
+assert(parsedMatch, "mobile accepts the safe matching response");
+assert.strictEqual(routeMatchesClient.routeMatchSummary(parsedMatch), "Skóre 72 · +18 km / 25 min");
+assert.strictEqual(routeMatchesClient.parseRouteMatch({ ...metrics, reasons: ["x".repeat(101)] }), null, "oversized server reason is rejected");
+assert.strictEqual(routeMatchesClient.parseRouteMatch({ ...metrics, requestId: null }), null, "missing request id is rejected");
+
+const routeDetail = read("screens/Transport/RouteDetailRoute.tsx");
+assert(/activeRoute\.driverId === userId[\s\S]*DOPORUČENÉ SHODY/.test(routeDetail), "matching UI is shown only in the owner branch");
+assert(/fetchRouteMatches\(activeRouteId\)/.test(routeDetail));
+assert(/Nabídka se nikdy neodešle automaticky/.test(routeDetail));
+assert(/loadAuthorizedJobDetail\(match\.requestId\)/.test(routeDetail));
+assert(!/submitInterest\(match\.requestId\)/.test(routeDetail), "opening a match performs no mutation");
+
 console.log("ALL MATCHING SERVER DRAFT CHECKS PASSED");
