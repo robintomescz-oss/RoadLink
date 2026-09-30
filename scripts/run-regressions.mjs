@@ -5,6 +5,7 @@ const regressionScripts = [
   ".roadlink/back-handler-regression.js",
   ".roadlink/route-metrics-regression.js",
   ".roadlink/route-preview-regression.js",
+  ".roadlink/matching-v1-regression.js",
   ".roadlink/rate-limit-regression.js",
   ".roadlink/form-creation-tests.js",
   ".roadlink/navigation-payload-regression.js",

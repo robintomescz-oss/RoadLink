@@ -90,6 +90,18 @@ Migrace musí být nejprve připravena a testována, nikoliv automaticky aplikov
 - deterministické skóre a důvody shody;
 - obrazovky doporučených poptávek a volných kapacit.
 
+#### Potvrzený kontrakt Matching v1
+
+- Hodnotí se pouze otevřená poptávka proti otevřené volné kapacitě.
+- Odjezd trasy musí ležet včetně krajních dnů uvnitř požadovaného termínu.
+- Typ vozidla musí být mezi podporovanými typy trasy a zbývající kapacita musí pokrýt požadovaný počet míst (v1 standardně jedno).
+- `max_deviation_km = NULL` znamená nulovou povolenou zajížďku, nikoli neomezenou zajížďku.
+- Server dodá pouze normalizovanou zajížďku v metrech a sekundách; čistá funkce `lib/matchingLogic.ts` provede finální kontrolu, skórování a seřazení.
+- Skóre je deterministické: zvýhodňuje přesný termín, vhodné vozidlo a rezervu kapacity; penalizuje kilometry a minuty zajížďky. Při shodě rozhoduje menší zajížďka a stabilně ID trasy.
+- Výstup obsahuje jen ID, skóre, zajížďku a bezpečné důvody shody. Neobsahuje identitu, přesné adresy, souřadnice ani place ID.
+- Matching nikdy sám nevytváří nabídku ani nemění stav poptávky nebo trasy.
+- Serverový předvýběr, volání Google a databázové RPC budou připraveny v samostatném kroku a před výslovným schválením se neaplikují ani nenasazují.
+
 ### D. Ověření před testováním
 
 - jednotkové testy mapování a skóre;
