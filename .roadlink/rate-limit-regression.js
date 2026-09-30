@@ -285,4 +285,92 @@ assert(/není náhradou za Google Cloud kvótu/.test(docs), 'the docs state the 
 assert(/500 požadavků Compute Routes za den/.test(docs), 'the docs recommend an initial 500 requests/day test quota');
 assert(/Places API \(New\), Routes API\)/.test(docs) || /API klíč/.test(docs), 'the docs require a key restricted to the needed Google APIs');
 
+// ── 10. Statické brány pro živý integrační harness ─────────────────────────
+// Harness sám nic nevolá, dokud se nespustí ručně, proto ho chráníme staticky:
+// nesmí se spustit z běžného runneru, bez potvrzovacího přepínače nesmí volat
+// síť, nesmí obsahovat secrets, nesmí sahat na bucket tabulku ani Edge Function
+// a denní limit nesmí vyčerpávat živými voláními.
+const HARNESS_PATH = '.roadlink/google-routes-rate-limit-integration.mjs';
+const HARNESS_RPC = 'consume_google_routes_rate_limit';
+const harness = read(HARNESS_PATH);
+
+function readHarnessClassificationFixtures() {
+  const script = [
+    "import { classifyRetryAfterSeconds, RETRY_AFTER_KIND, ERROR_PRECONDITION_UNMET } from './.roadlink/google-routes-rate-limit-integration.mjs';",
+    "const inputs = [1, 60, 61, 86400, 0, -1, 'abc', 86401];",
+    "const classified = inputs.map((value) => ({ value, result: classifyRetryAfterSeconds(value) }));",
+    "console.log(JSON.stringify({ kinds: RETRY_AFTER_KIND, preconditionExit: ERROR_PRECONDITION_UNMET, classified }));",
+  ].join('\n');
+  return JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script], { cwd: root, encoding: 'utf8' }));
+}
+
+const harnessRetryFixtures = readHarnessClassificationFixtures();
+const harnessClass = new Map(harnessRetryFixtures.classified.map((entry) => [String(entry.value), entry.result]));
+assert(harnessRetryFixtures.preconditionExit === 4, 'the harness exposes a distinct nonzero exit code for unmet minute-test preconditions');
+assert(harnessClass.get('1').kind === 'minute' && harnessClass.get('1').valid === true, 'retry_after_seconds=1 is a valid minute retry');
+assert(harnessClass.get('60').kind === 'minute' && harnessClass.get('60').valid === true, 'retry_after_seconds=60 is a valid minute retry');
+assert(harnessClass.get('61').kind === 'daily' && harnessClass.get('61').valid === true, 'retry_after_seconds=61 is a valid daily-limit precondition blocker');
+assert(harnessClass.get('86400').kind === 'daily' && harnessClass.get('86400').valid === true, 'retry_after_seconds=86400 is a valid daily-limit precondition blocker');
+assert(harnessClass.get('0').kind === 'invalid' && harnessClass.get('0').valid === false, 'retry_after_seconds=0 is an implementation failure');
+assert(harnessClass.get('-1').kind === 'invalid' && harnessClass.get('-1').valid === false, 'negative retry_after_seconds is an implementation failure');
+assert(harnessClass.get('abc').kind === 'invalid' && harnessClass.get('abc').valid === false, 'non-numeric retry_after_seconds is an implementation failure');
+assert(harnessClass.get('86401').kind === 'invalid' && harnessClass.get('86401').valid === false, 'retry_after_seconds above one day is an implementation failure');
+
+// 10a. Nespouští se automaticky z regresního runneru.
+const runner = read('scripts/run-regressions.mjs');
+assert(!runner.includes('google-routes-rate-limit-integration'), 'the live harness is never wired into the regression runner');
+
+// 10b. Bez potvrzovacího přepínače nesmí sáhnout na síť.
+assert(harness.includes('--confirm-live-rate-limit-test'), 'the harness requires an explicit confirmation flag');
+assert(/if \(!confirmed\)/.test(harness), 'the harness has a hard guard for the confirmation flag');
+const guardAt = harness.indexOf('if (!confirmed)');
+const fetchDefinitionAt = harness.indexOf('fetch(');
+const mainStartAt = harness.indexOf('async function main()');
+const directMainCallAt = harness.indexOf('main().catch');
+assert(
+  guardAt >= 0 && fetchDefinitionAt >= 0 && mainStartAt >= 0 && directMainCallAt > guardAt && directMainCallAt > mainStartAt,
+  'the live main path sits behind the confirmation guard',
+);
+assert((harness.match(/fetch\(/g) || []).length === 1, 'the harness has exactly one network call site');
+
+// 10c. Žádné hardcoded secrets, URL projektu, JWT ani privilegované role.
+assert(!/https?:\/\/[a-z0-9]+\.supabase\.co/i.test(harness), 'the harness hardcodes no Supabase project URL');
+assert(!/googleapis\.com/i.test(harness), 'the harness never targets a Google endpoint');
+assert(!/eyJ[A-Za-z0-9_-]{10,}/.test(harness), 'the harness embeds no JWT literal');
+assert(!/[^\s@]+@[^\s@]+\.[^\s@]+/.test(harness), 'the harness embeds no e-mail address');
+assert(!/service[_-]?role/i.test(harness), 'the harness never mentions a privileged Supabase role key');
+assert(!/process\.env\.\w*(PASSWORD|SECRET_KEY)/i.test(harness), 'the harness reads no password or secret-key env var');
+
+// 10d. Žádné mutace ani přímý přístup k interní tabulce.
+for (const forbidden of [/\binsert\b/i, /\bupdate\b/i, /\bdelete\b/i, /\btruncate\b/i]) {
+  assert(!forbidden.test(harness), `the harness contains no mutation keyword (${forbidden.source})`);
+}
+assert(!/google_routes_rate_limit_buckets/.test(harness), 'the harness never touches the internal bucket table');
+assert(!/rest\/v1\/(?!rpc)/.test(harness), 'the harness only talks to the RPC endpoint, never to a table endpoint');
+assert((harness.match(/\/rpc\//g) || []).length === 1, 'the harness uses a single RPC endpoint');
+
+// 10e. Nikdy nevolá Edge Function `google-routes` ani jinou funkci.
+assert(!/functions\/v1|functions\.invoke|\/functions\//.test(harness), 'the harness never invokes an Edge Function');
+assert(harness.includes(HARNESS_RPC), `the harness calls only the approved RPC (${HARNESS_RPC})`);
+
+// 10f. Souběh přes Promise.all a rozumný počet volání.
+assert(/Promise\.all/.test(harness), 'the harness fires its burst with Promise.all');
+assert(/CONCURRENT_CALLS = 12/.test(harness), 'the harness sends 12 concurrent calls');
+assert(new RegExp(`MINUTE_LIMIT = ${sqlMinuteLimit}`).test(harness), 'the harness asserts the same minute limit as the migration');
+assert(new RegExp(`DAY_LIMIT = ${sqlDayLimit}`).test(harness), 'the harness documents the same daily limit as the migration');
+
+// 10g. Denní limit se nikdy nevyčerpává živými voláními.
+assert(!/for \([^)]*DAY_LIMIT|Array\.from\([^)]*DAY_LIMIT[^)]*\)[^;]*callRateLimit/s.test(harness), 'the harness never loops the daily limit with live calls');
+assert(harness.includes('se živě netestuje') || /netestuje/i.test(harness), 'the harness states the daily limit is verified statically');
+
+// 10h. Citlivé runtime proměnné se nikdy nelogují.
+assert(/process\.env\.ROADLINK_SUPABASE_URL/.test(harness), 'the harness reads the project URL from runtime env');
+assert(/process\.env\.ROADLINK_TEST_ACCESS_TOKEN/.test(harness), 'the harness reads a short-lived access token from runtime env');
+assert(!/console\.(log|error|warn)\([^)]*\b(accessToken|anonKey|supabaseUrl)\b/.test(harness), 'the harness never logs token, key or URL variables');
+assert(!/console\.(log|error|warn)\([^)]*\$\{accessToken\}/.test(harness), 'the harness never interpolates the access token into a log line');
+
+// 10i. Skript je trackovatelný (allowlist v .gitignore).
+const gitignore = read('.gitignore');
+assert(gitignore.includes('!.roadlink/google-routes-rate-limit-integration.mjs'), 'the harness is explicitly allowlisted for tracking');
+
 console.log('\nALL GOOGLE ROUTES RATE LIMIT REGRESSION TESTS PASSED');

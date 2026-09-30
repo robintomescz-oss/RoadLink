@@ -98,6 +98,23 @@ Migrace musí být nejprve připravena a testována, nikoliv automaticky aplikov
 - nativní end-to-end test se dvěma fiktivními účty;
 - kontrola, že anonymní marketplace nikdy nevrací place ID, přesnou adresu, souřadnice ani polyline.
 
+## Runbook: nasazení rate limitu a funkce pro výpočet trasy (ruční kroky)
+
+Tyto kroky se provádějí ručně a v tomto pořadí. Dokud nejsou hotové, funkce pro výpočet trasy se NENASADZUJE. Žádný z nich se nespouští automaticky a v přípravném kroku se reálně neprovádí ani jeden.
+
+1. **Ručně ověřit Google Cloud**: denní kvótu pro Compute Routes, rozpočtové upozornění a API klíč omezený jen na potřebná API — zvlášť pro preview a produkci.
+2. **Aplikovat migraci `0015_verified_route_metrics.sql`** (idempotentní; přidává jen nullable sloupce a all-or-none CHECKy).
+3. **Aplikovat migraci `0016_google_routes_rate_limit.sql`** (interní bucket tabulka + RPC `consume_google_routes_rate_limit`).
+4. **Read-only ověřit schéma a oprávnění**: sloupce a CHECKy z 0015; RLS a žádné policy na bucket tabulce; žádná přímá práva pro `public`/`anon`/`authenticated`; execute na RPC jen pro `authenticated`.
+5. **Počkat na začátek čerstvé minuty** (minutové okno limitu je pevné a počítá se od `date_trunc('minute', now())`).
+6. **Spustit integrační RPC harness** [.roadlink/google-routes-rate-limit-integration.mjs](.roadlink/google-routes-rate-limit-integration.mjs) s krátkodobým access tokenem jednoho testovacího uživatele a přepínačem `--confirm-live-rate-limit-test`.
+7. **Ověřit, že povolených volání nebylo více než 10** a že odmítnutá volání vrátila bezpečný `retry_after_seconds`. Hodnota `1–60` odpovídá minutovému omezení. Hodnota `61–86 400` znamená, že testovací účet pravděpodobně narazil na denní limit; v takovém případě harness bezpečně skončí samostatným nenulovým kódem pro nesplněnou podmínku minutového testu a denní limit se nevyčerpává živými voláními. Denní limit 100 zůstává ověřený staticky, ne živým vyčerpáním.
+8. **Teprve nyní nasadit Edge Function** pro výpočet trasy (`supabase functions deploy`).
+9. **Provést jedno kontrolované testovací volání** Edge Function s platným přihlášením a ověřit, že vrací jen normalizovanou vzdálenost a dobu.
+10. **Teprve následně zapojovat formuláře** — ukládat ověřené metriky trasy do poptávek a volných kapacit.
+
+Bezpečnostní poznámky k harnessu: skript bez přepínače `--confirm-live-rate-limit-test` neprovede žádné síťové volání; volá výhradně RPC limiteru, nikdy Edge Function ani Google API; nepoužívá privilegovaný klíč; nečte ani nemění bucket tabulku a nikdy ji neresetuje; token ani ID uživatele nikdy nevypisuje.
+
 ## Podmínky zahájení integrace
 
 - Google Cloud projekt s aktivním billingem;
