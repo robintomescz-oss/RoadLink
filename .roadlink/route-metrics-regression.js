@@ -390,16 +390,16 @@ function walk(dir) {
   for (const entry of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) {
     const rel = `${dir}/${entry.name}`;
     if (entry.isDirectory()) walk(rel);
-    else if (/\.tsx?$/.test(entry.name) && /routeMetrics|google-routes/.test(read(rel)) && rel !== 'lib/routeMetrics.ts') wiredFiles.push(rel);
+    else if (/\.(ts|tsx)$/.test(entry.name) && /routeMetrics|google-routes/.test(read(rel)) && rel !== 'lib/routeMetrics.ts') wiredFiles.push(rel);
   }
 }
 walk('screens');
 walk('components');
 walk('hooks');
 walk('contexts');
-assert(wiredFiles.length === 0, 'route metrics client is not wired into any screen, component, hook or context yet');
-assert(!read('screens/Transport/CreateRequestScreen.tsx').includes('route_distance_meters'), 'request form payload is unchanged (no route metrics yet)');
-assert(!read('screens/Transport/RouteFormRoute.tsx').includes('route_distance_meters'), 'capacity form payload is unchanged (no route metrics yet)');
+assert(wiredFiles.length >= 2, `route metrics client is wired into at least two files: ${wiredFiles.join(', ')}`);
+assert(wiredFiles.some(f => f.endsWith('screens/Transport/CreateRequestScreen.tsx')), 'request form wiring missing');
+assert(wiredFiles.some(f => f.endsWith('screens/Transport/RouteFormRoute.tsx')), 'capacity form wiring missing');
 
 // ── 11. Edge Function handler: HTTP chování (Deno a fetch podstrčené) ───────
 // Sekce 11 je asynchronní, proto běží v tomto obalu (CommonJS s require neumí

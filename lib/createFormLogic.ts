@@ -202,6 +202,48 @@ export function requestSnapshot(input: {
   return JSON.stringify({ ...input, requestedDate: dateToken(input.requestedDate), requestedEndDate: dateToken(input.requestedEndDate) });
 }
 
+export type RouteMetricsSubmitPreview = {
+  status: "idle" | "loading" | "success" | "error" | "rate_limited";
+  pairKey: string | null;
+  metrics: { distanceMeters: number; durationSeconds: number } | null;
+  readyToSubmit: boolean;
+};
+
+export function currentRouteMetricsPairKey(originPlaceId: string | null | undefined, destinationPlaceId: string | null | undefined) {
+  const origin = typeof originPlaceId === "string" ? originPlaceId.trim() : "";
+  const destination = typeof destinationPlaceId === "string" ? destinationPlaceId.trim() : "";
+  return origin && destination ? `${origin}::${destination}` : null;
+}
+
+export function routeMetricsSubmitBlockReason(input: {
+  originPlaceId: string | null | undefined;
+  destinationPlaceId: string | null | undefined;
+  preview: RouteMetricsSubmitPreview;
+}) {
+  const pairKey = currentRouteMetricsPairKey(input.originPlaceId, input.destinationPlaceId);
+  if (!pairKey) return "Vyberte výchozí a cílové místo";
+  if (input.preview.status === "loading") return "Počítám trasu…";
+  if (!input.preview.readyToSubmit || input.preview.status !== "success" || !input.preview.metrics || input.preview.pairKey !== pairKey) {
+    return "Nejprve je potřeba ověřit trasu";
+  }
+  return null;
+}
+
+export function buildRouteMetricsPayload(input: {
+  originPlaceId: string;
+  destinationPlaceId: string;
+  preview: RouteMetricsSubmitPreview;
+}) {
+  const blockReason = routeMetricsSubmitBlockReason(input);
+  if (blockReason) throw new Error("Missing current route metrics for insert payload.");
+  return {
+    origin_place_id: input.originPlaceId,
+    destination_place_id: input.destinationPlaceId,
+    route_distance_meters: input.preview.metrics!.distanceMeters,
+    route_duration_seconds: input.preview.metrics!.durationSeconds,
+  };
+}
+
 export function capacitySnapshot(input: {
   routeFrom: string;
   routeTo: string;

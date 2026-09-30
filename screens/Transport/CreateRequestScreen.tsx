@@ -3,6 +3,7 @@ import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from "reac
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { SafeAreaView } from "../../components/SafeAreaViewCompat";
 import { FieldError, FormBackHeader, FormSection, ReviewRow } from "../../components/form/FormParts";
+import { RouteMetricsPreviewCard } from "../../components/form/RouteMetricsPreviewCard";
 import { showDiscardDraftConfirmation } from "../../components/form/showDiscardDraftConfirmation";
 import { VerifiedLocationInput } from "../../components/form/VerifiedLocationInput";
 import { useAppContext, type RequestDraft } from "../../contexts/AppContext";
@@ -17,12 +18,15 @@ import {
   loadingOptionToFields,
   requestSnapshot,
   validateRequestForm,
+  buildRouteMetricsPayload,
+  routeMetricsSubmitBlockReason,
   type LoadingStateOption,
   type RequestErrorKey,
 } from "../../lib/createFormLogic";
 import { validatePublicLocationLabel } from "../../lib/publicMarket";
 import { navigateLegacy } from "../../navigation/navigationRef";
 import { useFormBackGuard } from "../../hooks/useBackHandlers";
+import { useRouteMetricsPreview } from "../../hooks/useRouteMetricsPreview";
 
 const INITIAL_LOADING_STATE: LoadingStateOption = "drive";
 const EMPTY_REQUEST_DRAFT: RequestDraft = {
@@ -87,6 +91,15 @@ export default function CreateRequestScreen() {
   const [creatingRequest, setCreatingRequest] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
+  const routePreview = useRouteMetricsPreview({
+    originPlaceId: pickupLocation?.placeId ?? null,
+    destinationPlaceId: destinationLocation?.placeId ?? null,
+  });
+  const requestRouteBlockReason = routeMetricsSubmitBlockReason({
+    originPlaceId: pickupLocation?.placeId ?? null,
+    destinationPlaceId: destinationLocation?.placeId ?? null,
+    preview: routePreview,
+  });
 
   // Při zavření formuláře (jakýmkoli způsobem) vrátíme poslední hodnoty do kontextu.
   const draftRef = useRef<RequestDraft>({ pickupText, destination, pickupPublicLabel, destinationPublicLabel, vehicle, problem });
@@ -168,6 +181,11 @@ export default function CreateRequestScreen() {
       requestScrollRef.current?.scrollTo({ y: 0, animated: true });
       return;
     }
+    if (requestRouteBlockReason) {
+      setRequestErrors((current) => ({ ...current, route: requestRouteBlockReason }));
+      requestScrollRef.current?.scrollTo({ y: 0, animated: true });
+      return;
+    }
 
     const loadingMapping = loadingOptionToFields(loadingStateOption || "unknown");
     let endDate: Date = requestedDate!;
@@ -190,6 +208,11 @@ export default function CreateRequestScreen() {
       const trimmedDestination = destinationLocation.formattedAddress;
       const pickupCoordinates = { latitude: pickupLocation.latitude, longitude: pickupLocation.longitude };
       const destinationCoordinates = { latitude: destinationLocation.latitude, longitude: destinationLocation.longitude };
+      const routeMetricsPayload = buildRouteMetricsPayload({
+        originPlaceId: pickupLocation.placeId,
+        destinationPlaceId: destinationLocation.placeId,
+        preview: routePreview,
+      });
 
       const { data, error } = await supabase
         .from("tow_requests")
@@ -212,6 +235,7 @@ export default function CreateRequestScreen() {
           time_preference: "specific",
           vehicle_mobility: loadingMapping.vehicle_mobility,
           can_drive_onto_trailer: loadingMapping.can_drive_onto_trailer,
+          ...routeMetricsPayload,
           status: "open",
         })
         .select()
@@ -279,6 +303,7 @@ export default function CreateRequestScreen() {
           <Text style={styles.publicHintText}>Vyberte existující místo z nabídky. Veřejně se zobrazí pouze město nebo oblast; přesná adresa zůstane soukromá.</Text>
           <VerifiedLocationInput label="Místo nakládky" placeholder="Začněte psát adresu nebo obec" value={pickupLocation} onChange={(location) => { setPickupLocation(location); setPickupText(location?.formattedAddress ?? ""); setPickupPublicLabel(location?.publicLabel ?? ""); setRequestErrors((current) => ({ ...current, publicPlace: undefined, route: undefined })); }} onError={(message) => setRequestErrors((current) => ({ ...current, route: message }))} />
           <VerifiedLocationInput label="Místo vykládky" placeholder="Začněte psát adresu nebo obec" value={destinationLocation} onChange={(location) => { setDestinationLocation(location); setDestination(location?.formattedAddress ?? ""); setDestinationPublicLabel(location?.publicLabel ?? ""); setRequestErrors((current) => ({ ...current, publicPlace: undefined, route: undefined })); }} onError={(message) => setRequestErrors((current) => ({ ...current, route: message }))} />
+          <RouteMetricsPreviewCard originLabel={pickupPublicLabel} destinationLabel={destinationPublicLabel} preview={routePreview} />
           <FieldError message={requestErrors.route} />
           <FieldError message={requestErrors.publicPlace} />
           <TouchableOpacity style={styles.inlineSecondary} onPress={requestLocation} accessibilityLabel="Použít aktuální polohu">
@@ -348,7 +373,8 @@ export default function CreateRequestScreen() {
           <ReviewRow label="Termín" value={dateMode === "window" ? `${requestedDate ? requestedDate.toLocaleDateString("cs-CZ") : "Od neuvedeno"} – ${requestedEndDate ? requestedEndDate.toLocaleDateString("cs-CZ") : "Do neuvedeno"}` : requestedDate ? requestedDate.toLocaleDateString("cs-CZ") : "Datum neuvedeno"} />
           <ReviewRow label="Vozidlo" value={`${vehicle}${requestVehicleModel.trim() ? ` · ${requestVehicleModel.trim()}` : ""}`} />
           <ReviewRow label="Nakládka" value={loadingLabel} />
-          <TouchableOpacity style={styles.primary} disabled={creatingRequest} onPress={createJob} accessibilityLabel="Odeslat poptávku">
+          <FieldError message={requestRouteBlockReason ?? undefined} />
+          <TouchableOpacity style={[styles.primary, (creatingRequest || Boolean(requestRouteBlockReason)) && styles.primaryDisabled]} disabled={creatingRequest || Boolean(requestRouteBlockReason)} onPress={createJob} accessibilityLabel="Odeslat poptávku">
             <Text style={styles.primaryText}>{creatingRequest ? "Odesílám…" : "Odeslat poptávku"}</Text>
           </TouchableOpacity>
         </FormSection>
