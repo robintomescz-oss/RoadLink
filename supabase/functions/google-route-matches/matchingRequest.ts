@@ -5,6 +5,15 @@ export const MATCHING_FIELD_MASK = "routes.distanceMeters,routes.duration";
 export const MATCHING_TIMEOUT_MS = 8000;
 export const MAX_MATCH_CANDIDATES = 5;
 
+/**
+ * Výchozí maximální odchylka v kilometrech, když přepravce nenastavil vlastní.
+ *
+ * Bez této hodnoty by chybějící `max_deviation_km` znamenal práh 0 m, tedy
+ * odfiltrování každé poptávky s nenulovou zajížďkou. 20 km odpovídá běžnému
+ * náběhu odběratele a je to výchozí hodnota, ne nové pravidlo pro uživatele.
+ */
+export const DEFAULT_MAX_DEVIATION_KM = 20;
+
 export type MatchingCandidate = {
   route_id: string;
   route_origin_place_id: string;
@@ -66,6 +75,32 @@ export function buildMatchingRouteBody(candidate: MatchingCandidate) {
     languageCode: "cs",
     regionCode: "cz",
   };
+}
+
+/**
+ * Vrátí efektivní práh odchylky v kilometrech.
+ *
+ * Kladná, vyplněná hodnota se použije tak, jak ji přepravce zadal. Chybějící
+ * hodnota (`null`) nebo záporná/nekonečná padá na `DEFAULT_MAX_DEVIATION_KM`,
+ * aby se nezměnila v práh 0 m, který by odfiltroval všechny kandidáty.
+ */
+export function resolveMaxDeviationKm(candidate: MatchingCandidate): number {
+  const value = candidate?.max_deviation_km;
+  if (value === null || value === undefined) return DEFAULT_MAX_DEVIATION_KM;
+  if (!Number.isFinite(value) || value < 0) return DEFAULT_MAX_DEVIATION_KM;
+  return value;
+}
+
+/**
+ * Rozhodne, zda vypočtená zajížďka spadá do povolené odchylky.
+ * Porovnává se vzdálenost, ne čas — časová odchylka závisí na dopravě.
+ */
+export function isWithinDeviation(
+  metrics: { detourDistanceMeters: number } | null,
+  candidate: MatchingCandidate,
+): boolean {
+  if (!metrics) return false;
+  return metrics.detourDistanceMeters <= resolveMaxDeviationKm(candidate) * 1000;
 }
 
 export function normalizeMatchingMetrics(payload: unknown, candidate: MatchingCandidate) {

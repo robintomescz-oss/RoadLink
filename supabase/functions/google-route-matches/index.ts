@@ -8,6 +8,7 @@ import {
   MATCHING_TIMEOUT_MS,
   MAX_MATCH_CANDIDATES,
   buildMatchingRouteBody,
+  isWithinDeviation,
   normalizeCandidate,
   normalizeMatchingMetrics,
   validateMatchingRequest,
@@ -65,8 +66,7 @@ Deno.serve(async (request) => {
         continue;
       }
       const metrics = normalizeMatchingMetrics(await response.json(), candidate);
-      const maxMeters = Math.max(0, candidate.max_deviation_km || 0) * 1000;
-      if (metrics && metrics.detourDistanceMeters <= maxMeters) matches.push(metrics);
+      if (isWithinDeviation(metrics, candidate) && metrics) matches.push(metrics);
     } catch {
       console.error("matching route calculation failed", { source: "google_upstream", reason: "unavailable" });
       incomplete = true;

@@ -29,7 +29,6 @@ export default function RouteFormRoute() {
   const [routeDepartureDate, setRouteDepartureDate] = useState<Date | null>(null);
   const [routeDepartureTime, setRouteDepartureTime] = useState<Date | null>(null);
   const [routeSpaces, setRouteSpaces] = useState("1");
-  const [routeMaxDeviationKm, setRouteMaxDeviationKm] = useState("");
   const [routeVehicleTypes, setRouteVehicleTypes] = useState("Osobní automobil");
   const [routePrice, setRoutePrice] = useState("");
   const [routePriceMode, setRoutePriceMode] = useState<"fixed" | "negotiable">("fixed");
@@ -51,7 +50,7 @@ export default function RouteFormRoute() {
   });
 
   function currentRouteSnapshot() {
-    return capacitySnapshot({ routeFrom, routeTo, fromPublicLabel: routeFromPublicLabel, toPublicLabel: routeToPublicLabel, routeDepartureDate, routeDepartureTime, routeSpaces, routeMaxDeviationKm, routeVehicleTypes, routePrice, routePriceMode, routeDescription });
+    return capacitySnapshot({ routeFrom, routeTo, fromPublicLabel: routeFromPublicLabel, toPublicLabel: routeToPublicLabel, routeDepartureDate, routeDepartureTime, routeSpaces, routeVehicleTypes, routePrice, routePriceMode, routeDescription });
   }
 
   useEffect(() => {
@@ -81,7 +80,7 @@ export default function RouteFormRoute() {
 
   async function createRoute() {
     if (!userId) return;
-    const validation = validateCapacityForm({ routeFrom, routeTo, fromPublicLabel: routeFromPublicLabel, toPublicLabel: routeToPublicLabel, routeDepartureDate, routeDepartureTime, routeSpaces, routeMaxDeviationKm, routeVehicleTypes, routePriceMode, routePrice });
+    const validation = validateCapacityForm({ routeFrom, routeTo, fromPublicLabel: routeFromPublicLabel, toPublicLabel: routeToPublicLabel, routeDepartureDate, routeDepartureTime, routeSpaces, routeVehicleTypes, routePriceMode, routePrice });
     setRouteErrors(validation.errors);
     if (!fromLocation || !toLocation) {
       setRouteErrors((current) => ({ ...current, route: "Vyberte obě ověřená místa z nabídky." }));
@@ -97,8 +96,6 @@ export default function RouteFormRoute() {
     }
     if (creatingRoute) return;
 
-    const deviationText = routeMaxDeviationKm.trim();
-    const maxDeviationKm = deviationText === "" ? null : Number(deviationText);
     const availableSpaces = Number(routeSpaces);
     const price = routePrice.trim() === "" ? null : Number(routePrice);
 
@@ -124,7 +121,10 @@ export default function RouteFormRoute() {
         preview: routePreview,
       });
       const departureAt = new Date(routeDepartureDate!);
-      departureAt.setHours(routeDepartureTime!.getHours(), routeDepartureTime!.getMinutes(), 0, 0);
+      // Čas je volitelný: bez zadaného času odjíždí nabídka od půlnoci daného dne.
+      const hours = routeDepartureTime ? routeDepartureTime.getHours() : 0;
+      const minutes = routeDepartureTime ? routeDepartureTime.getMinutes() : 0;
+      departureAt.setHours(hours, minutes, 0, 0);
       const { error } = await supabase.from("carrier_routes").insert({
         driver_id: userId,
         from_address: fromAddress,
@@ -137,7 +137,6 @@ export default function RouteFormRoute() {
         to_lng: toCoordinates?.longitude ?? null,
         departure_at: departureAt.toISOString(),
         available_spaces: availableSpaces,
-        max_deviation_km: maxDeviationKm,
         vehicle_types: [vehicleType],
         price: routePriceMode === "negotiable" ? null : price,
         description: routeDescription,
@@ -152,7 +151,6 @@ export default function RouteFormRoute() {
       await loadRoutes();
       setRouteDepartureDate(null);
       setRouteDepartureTime(null);
-      setRouteMaxDeviationKm("");
       Alert.alert("Trasa vytvořena", "Vaše nabídka volné trasy byla uložena.");
       setRouteErrors({});
       initialSnapshotRef.current = null;
@@ -180,7 +178,7 @@ export default function RouteFormRoute() {
           <Text style={styles.label}>Datum odjezdu</Text>
           <TouchableOpacity style={styles.inlineSecondary} onPress={() => setShowRouteDatePicker(true)}><Text style={styles.secondaryText}>{routeDepartureDate ? routeDepartureDate.toLocaleDateString("cs-CZ") : "Vybrat datum"}</Text></TouchableOpacity>
           {showRouteDatePicker ? <DateTimePicker value={routeDepartureDate || new Date()} mode="date" display="default" onValueChange={(_, date) => { setShowRouteDatePicker(false); setRouteDepartureDate(date); setRouteErrors((current) => ({ ...current, departure: undefined })); }} onDismiss={() => setShowRouteDatePicker(false)} /> : null}
-          <Text style={styles.label}>Přibližný čas odjezdu</Text>
+          <Text style={styles.label}>Přibližný čas odjezdu · volitelný</Text>
           <TouchableOpacity style={styles.inlineSecondary} onPress={() => setShowRouteTimePicker(true)}><Text style={styles.secondaryText}>{routeDepartureTime ? `${String(routeDepartureTime.getHours()).padStart(2, "0")}:${String(routeDepartureTime.getMinutes()).padStart(2, "0")}` : "Vybrat čas"}</Text></TouchableOpacity>
           {showRouteTimePicker ? <DateTimePicker value={routeDepartureTime || new Date()} mode="time" display="default" onValueChange={(_, date) => { setShowRouteTimePicker(false); setRouteDepartureTime(date); setRouteErrors((current) => ({ ...current, departure: undefined })); }} onDismiss={() => setShowRouteTimePicker(false)} /> : null}
           <FieldError message={routeErrors.departure} />
@@ -188,8 +186,6 @@ export default function RouteFormRoute() {
         <FormSection title="Kapacita">
           <Text style={styles.label}>Počet volných míst</Text>
           <TextInput style={styles.compactInput} value={routeSpaces} onChangeText={(value) => { setRouteSpaces(value); setRouteErrors((current) => ({ ...current, capacity: undefined })); }} placeholder="Počet míst" keyboardType="numeric" />
-          <Text style={styles.label}>Maximální odchylka od trasy · volitelné km</Text>
-          <TextInput style={styles.compactInput} value={routeMaxDeviationKm} onChangeText={(value) => { setRouteMaxDeviationKm(value); setRouteErrors((current) => ({ ...current, capacity: undefined })); }} placeholder="Odchylka v km" keyboardType="numeric" accessibilityLabel="Maximální odchylka od trasy v km" />
           <FieldError message={routeErrors.capacity} />
         </FormSection>
         <FormSection title="Přijímaná vozidla">
@@ -210,7 +206,7 @@ export default function RouteFormRoute() {
         <FormSection title="Kontrola a odeslání">
           <ReviewRow label="Trasa" value={`${routeFromPublicLabel.trim() || "Odkud neuvedeno"} → ${routeToPublicLabel.trim() || "Kam neuvedeno"}`} />
           <ReviewRow label="Odjezd" value={`${routeDepartureDate ? routeDepartureDate.toLocaleDateString("cs-CZ") : "Datum neuvedeno"}${routeDepartureTime ? ` · ${String(routeDepartureTime.getHours()).padStart(2, "0")}:${String(routeDepartureTime.getMinutes()).padStart(2, "0")}` : ""}`} />
-          <ReviewRow label="Kapacita" value={`${routeSpaces || "0"} ${Number(routeSpaces) === 1 ? "místo" : Number(routeSpaces) >= 2 && Number(routeSpaces) <= 4 ? "místa" : "míst"}${routeMaxDeviationKm.trim() ? ` · odchylka ${routeMaxDeviationKm.trim()} km` : ""}`} />
+          <ReviewRow label="Kapacita" value={`${routeSpaces || "0"} ${Number(routeSpaces) === 1 ? "místo" : Number(routeSpaces) >= 2 && Number(routeSpaces) <= 4 ? "místa" : "míst"}`} />
           <ReviewRow label="Vozidla" value={routeVehicleTypes.trim() || "Neuvedeno"} />
           <ReviewRow label="Cena" value={routePriceMode === "negotiable" ? "Cena dohodou" : routePrice.trim() ? `${routePrice.trim()} Kč` : "Neuvedeno"} />
           <FieldError message={capacityRouteBlockReason ?? undefined} />

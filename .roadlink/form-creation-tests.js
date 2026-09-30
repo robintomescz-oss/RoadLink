@@ -77,9 +77,14 @@ const validCapacity = {
 };
 assert.strictEqual(validateCapacityForm(validCapacity).valid, true);
 assert.strictEqual(validateCapacityForm({ ...validCapacity, routeTo: '' }).firstInvalid, 'route');
-assert.strictEqual(validateCapacityForm({ ...validCapacity, routeDepartureTime: null }).firstInvalid, 'departure');
+assert.strictEqual(validateCapacityForm({ ...validCapacity, routeDepartureDate: null }).firstInvalid, 'departure');
+// Čas odjezdu je volitelný: datum stačí, chybějící čas nesmí blokovat odeslání.
+assert.strictEqual(
+  validateCapacityForm({ ...validCapacity, routeDepartureTime: null }).valid,
+  true,
+  'a missing departure time is allowed when the date is set',
+);
 assert.strictEqual(validateCapacityForm({ ...validCapacity, routeSpaces: '0' }).firstInvalid, 'capacity');
-assert.strictEqual(validateCapacityForm({ ...validCapacity, routeMaxDeviationKm: '-1' }).firstInvalid, 'capacity');
 assert.strictEqual(validateCapacityForm({ ...validCapacity, routeVehicleTypes: '' }).firstInvalid, 'vehicle');
 assert.strictEqual(validateCapacityForm({ ...validCapacity, routePrice: '' }).firstInvalid, 'price');
 assert.strictEqual(validateCapacityForm({ ...validCapacity, routePriceMode: 'negotiable', routePrice: '' }).valid, true);
@@ -89,7 +94,7 @@ const reqSnap = requestSnapshot({ pickupText: '', destination: '', vehicle: 'Oso
 assert.strictEqual(reqSnap, requestSnapshot({ pickupText: '', destination: '', vehicle: 'Osobní automobil', problem: 'Porucha', requestedDate: null, requestedEndDate: null, dateMode: 'concrete', loadingState: 'drive', requestVehicleModel: '' }));
 assert.notStrictEqual(reqSnap, requestSnapshot({ pickupText: 'Praha', destination: '', vehicle: 'Osobní automobil', problem: 'Porucha', requestedDate: null, requestedEndDate: null, dateMode: 'concrete', loadingState: 'drive', requestVehicleModel: '' }));
 
-const capSnap = capacitySnapshot({ routeFrom: '', routeTo: '', routeDepartureDate: null, routeDepartureTime: null, routeSpaces: '1', routeMaxDeviationKm: '', routeVehicleTypes: 'Osobní automobil', routePrice: '', routePriceMode: 'fixed', routeDescription: '' });
-assert.notStrictEqual(capSnap, capacitySnapshot({ routeFrom: '', routeTo: 'Brno', routeDepartureDate: null, routeDepartureTime: null, routeSpaces: '1', routeMaxDeviationKm: '', routeVehicleTypes: 'Osobní automobil', routePrice: '', routePriceMode: 'fixed', routeDescription: '' }));
+const capSnap = capacitySnapshot({ routeFrom: '', routeTo: '', routeDepartureDate: null, routeDepartureTime: null, routeSpaces: '1', routeVehicleTypes: 'Osobní automobil', routePrice: '', routePriceMode: 'fixed', routeDescription: '' });
+assert.notStrictEqual(capSnap, capacitySnapshot({ routeFrom: '', routeTo: 'Brno', routeDepartureDate: null, routeDepartureTime: null, routeSpaces: '1', routeVehicleTypes: 'Osobní automobil', routePrice: '', routePriceMode: 'fixed', routeDescription: '' }));
 
 console.log('FORM TESTS PASSED');

@@ -72,6 +72,53 @@ const candidate = requestLogic.normalizeCandidate({
 });
 assert(candidate);
 assert.strictEqual(candidate.max_deviation_km, 20, "Postgres numeric text is normalized");
+
+// Nevyplněná maximální odchylka se nesmí chovat jako 0 km (odfiltruje vše),
+// ale použije výchozí toleranci +/- DEFAULT_MAX_DEVIATION_KM.
+const noDeviationCandidate = requestLogic.normalizeCandidate({
+  route_id: "route-1",
+  route_origin_place_id: "route-origin",
+  route_destination_place_id: "route-destination",
+  route_distance_meters: 200000,
+  route_duration_seconds: 7200,
+  max_deviation_km: null,
+  request_id: "request-1",
+  request_origin_place_id: "request-origin",
+  request_destination_place_id: "request-destination",
+});
+assert(noDeviationCandidate);
+assert.strictEqual(
+  requestLogic.resolveMaxDeviationKm(noDeviationCandidate),
+  requestLogic.DEFAULT_MAX_DEVIATION_KM,
+  "a missing max_deviation_km falls back to the default tolerance",
+);
+assert.strictEqual(
+  requestLogic.resolveMaxDeviationKm(candidate),
+  20,
+  "an explicit max_deviation_km overrides the default",
+);
+assert.strictEqual(requestLogic.DEFAULT_MAX_DEVIATION_KM, 20, "default tolerance is 20 km");
+// Práh musí tolerovat odchylku i tehdy, když trasa nemá kam se "vrátit" (0 m základ).
+assert.strictEqual(
+  requestLogic.isWithinDeviation({ detourDistanceMeters: 19999 }, candidate),
+  true,
+  "19 999 m under the explicit 20 km limit is a match",
+);
+assert.strictEqual(
+  requestLogic.isWithinDeviation({ detourDistanceMeters: 20001 }, candidate),
+  false,
+  "20 001 m over the explicit 20 km limit is not a match",
+);
+assert.strictEqual(
+  requestLogic.isWithinDeviation({ detourDistanceMeters: 19999 }, noDeviationCandidate),
+  true,
+  "default tolerance accepts a detour below 20 km",
+);
+assert.strictEqual(
+  requestLogic.isWithinDeviation({ detourDistanceMeters: 25000 }, noDeviationCandidate),
+  false,
+  "default tolerance still rejects a detour above 20 km",
+);
 assert.deepStrictEqual(requestLogic.buildMatchingRouteBody(candidate).intermediates, [
   { placeId: "request-origin" },
   { placeId: "request-destination" },

@@ -79,7 +79,6 @@ export type CapacityValidationInput = {
   routeDepartureDate: Date | null;
   routeDepartureTime: Date | null;
   routeSpaces: string;
-  routeMaxDeviationKm: string;
   routeVehicleTypes: string;
   routePriceMode: "fixed" | "negotiable";
   routePrice: string;
@@ -135,8 +134,6 @@ export function validateRequestForm(input: RequestValidationInput): ValidationRe
 
 export function validateCapacityForm(input: CapacityValidationInput): ValidationResult<CapacityErrorKey> {
   const errors: Partial<Record<CapacityErrorKey, string>> = {};
-  const deviationText = input.routeMaxDeviationKm.trim();
-  const maxDeviationKm = deviationText === "" ? null : Number(deviationText);
   const availableSpaces = Number(input.routeSpaces);
   const price = input.routePrice.trim() === "" ? null : Number(input.routePrice);
 
@@ -153,11 +150,10 @@ export function validateCapacityForm(input: CapacityValidationInput): Validation
     else if (!toPublic.valid) errors.publicPlace = toPublic.error ?? "Zadejte veřejné město/obec pro Kam.";
   }
 
-  if (!input.routeDepartureDate || !input.routeDepartureTime) errors.departure = "Vyberte prosím datum i čas odjezdu.";
+  // Datum odjezdu je povinné, přesný čas už ne — přepravce může jet ráno
+  // i odpoledne a zbytek dopočítá nabídka shody i uživatel v kalendáři.
+  if (!input.routeDepartureDate) errors.departure = "Vyberte prosím datum odjezdu.";
   if (!Number.isFinite(availableSpaces) || availableSpaces <= 0) errors.capacity = "Zadejte platný kladný počet volných míst.";
-  else if (maxDeviationKm !== null && (!/^\d+$/.test(deviationText) || !Number.isSafeInteger(maxDeviationKm) || maxDeviationKm < 0 || maxDeviationKm > 2147483647)) {
-    errors.capacity = "Zadejte celé nezáporné číslo v km (nejvýše 2147483647), nebo pole ponechte prázdné.";
-  }
 
   if (!input.routeVehicleTypes.trim()) errors.vehicle = "Zadejte prosím typ přijímaného vozidla.";
   if (input.routePriceMode === "fixed" && (price === null || !Number.isFinite(price) || price < 0)) {
@@ -252,7 +248,6 @@ export function capacitySnapshot(input: {
   routeDepartureDate: Date | null;
   routeDepartureTime: Date | null;
   routeSpaces: string;
-  routeMaxDeviationKm: string;
   routeVehicleTypes: string;
   routePrice: string;
   routePriceMode: "fixed" | "negotiable";
