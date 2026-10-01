@@ -8,6 +8,7 @@ import {
 export function useRouteMetricsPreview(input: {
   originPlaceId: string | null | undefined;
   destinationPlaceId: string | null | undefined;
+  viaPlaceIds?: readonly string[] | null;
 }) {
   const mountedRef = useRef(false);
   const controllerRef = useRef<ReturnType<typeof createRouteMetricsPreviewController> | null>(null);
@@ -35,9 +36,12 @@ export function useRouteMetricsPreview(input: {
     };
   }, []);
 
+  // Přepočítá se i při změně průjezdních bodů. `via` je nové pole při každém
+  // renderu, proto se porovnává jeho obsah, ne reference objektu.
+  const viaKey = (input.viaPlaceIds ?? []).join(",");
   useEffect(() => {
-    controllerRef.current?.update(input);
-  }, [input.originPlaceId, input.destinationPlaceId]);
+    controllerRef.current?.update({ ...input, viaPlaceIds: viaKey ? viaKey.split(",") : [] });
+  }, [input.originPlaceId, input.destinationPlaceId, viaKey]);
 
   return {
     ...snapshot,

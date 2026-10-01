@@ -26,6 +26,8 @@ const {
   validateCapacityForm,
   requestSnapshot,
   capacitySnapshot,
+  normalizeViaPlaces,
+  MAX_VIA_PLACES,
 } = mod.exports;
 
 function date(iso) { return new Date(iso); }
@@ -96,5 +98,55 @@ assert.notStrictEqual(reqSnap, requestSnapshot({ pickupText: 'Praha', destinatio
 
 const capSnap = capacitySnapshot({ routeFrom: '', routeTo: '', routeDepartureDate: null, routeDepartureTime: null, routeSpaces: '1', routeVehicleTypes: 'Osobní automobil', routePrice: '', routePriceMode: 'fixed', routeDescription: '' });
 assert.notStrictEqual(capSnap, capacitySnapshot({ routeFrom: '', routeTo: 'Brno', routeDepartureDate: null, routeDepartureTime: null, routeSpaces: '1', routeVehicleTypes: 'Osobní automobil', routePrice: '', routePriceMode: 'fixed', routeDescription: '' }));
+
+// ── Průjezdní body (via) ──────────────────────────────────────────────────
+assert.strictEqual(MAX_VIA_PLACES, 3, 'the via limit is three points');
+
+const viaNone = normalizeViaPlaces({ viaPlaces: [] });
+assert.deepStrictEqual(viaNone, [], 'no via points is valid and normalizes to an empty list');
+
+const viaOne = normalizeViaPlaces({ viaPlaces: [{ placeId: ' ChIJplzen ', publicLabel: ' Plzeň-město ' }] });
+assert.deepStrictEqual(viaOne, [{ placeId: 'ChIJplzen', publicLabel: 'Plzeň-město' }], 'a single via point is trimmed and kept');
+
+const viaThree = normalizeViaPlaces({
+  viaPlaces: [
+    { placeId: 'a1', publicLabel: 'A' },
+    { placeId: 'b2', publicLabel: 'B' },
+    { placeId: 'c3', publicLabel: 'C' },
+  ],
+});
+assert.strictEqual(viaThree.length, 3, 'three via points are allowed');
+
+assert.strictEqual(
+  normalizeViaPlaces({
+    viaPlaces: [{ placeId: 'a1', publicLabel: 'A' }, { placeId: 'b2', publicLabel: 'B' }, { placeId: 'c3', publicLabel: 'C' }, { placeId: 'd4', publicLabel: 'D' }],
+  }),
+  null,
+  'four via points are rejected',
+);
+assert.strictEqual(normalizeViaPlaces({ viaPlaces: [{ placeId: '', publicLabel: 'X' }] }), null, 'a via point without a place ID is rejected');
+assert.strictEqual(normalizeViaPlaces({ viaPlaces: [{ placeId: 'a1', publicLabel: '  ' }] }), null, 'a via point without a public label is rejected');
+assert.strictEqual(
+  normalizeViaPlaces({ viaPlaces: [{ placeId: 'dup', publicLabel: 'A' }, { placeId: 'dup', publicLabel: 'B' }] }),
+  null,
+  'a duplicated via point is rejected',
+);
+assert.strictEqual(
+  normalizeViaPlaces({ viaPlaces: [{ placeId: 'ChIJfrom', publicLabel: 'A' }], originPlaceId: 'ChIJfrom' }),
+  null,
+  'a via point identical to the origin is rejected',
+);
+assert.strictEqual(
+  normalizeViaPlaces({ viaPlaces: [{ placeId: 'ChIJto', publicLabel: 'A' }], destinationPlaceId: 'ChIJto' }),
+  null,
+  'a via point identical to the destination is rejected',
+);
+
+// Cizí místa pro průjezd se neodmítají.
+assert.deepStrictEqual(
+  normalizeViaPlaces({ viaPlaces: [{ placeId: 'x', publicLabel: 'A' }], originPlaceId: 'other', destinationPlaceId: 'another' }),
+  [{ placeId: 'x', publicLabel: 'A' }],
+  'a via point distinct from origin and destination is kept',
+);
 
 console.log('FORM TESTS PASSED');

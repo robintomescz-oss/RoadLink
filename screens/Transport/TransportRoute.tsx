@@ -25,6 +25,7 @@ import {
   filterPublicRoutes,
   publicCardAuthTarget,
   publicLabelOrFallback,
+  publicRouteLabel,
 } from "../../lib/publicMarket";
 
 /** Strip + lowercase for transport filter matching (text + diacritics tolerant). */
@@ -293,7 +294,11 @@ export default function TransportRoute() {
             key={route.public_id}
             kind="capacity"
             badge="VOLNÁ KAPACITA"
-            route={`${publicLabelOrFallback(route.origin_label)} → ${publicLabelOrFallback(route.destination_label)}`}
+            route={publicRouteLabel({
+              origin_label: route.origin_label,
+              destination_label: route.destination_label,
+              via_labels: route.via_labels,
+            })}
             vehicle={
               route.vehicle_types && route.vehicle_types.length > 0
                 ? route.vehicle_types.map(canonicalVehicleType).join(", ")
@@ -314,7 +319,11 @@ export default function TransportRoute() {
             ]}
             status={null}
             actionLabel={userId ? "Detail trasy" : "Přihlásit se"}
-            accessibilityLabel={`Volná kapacita ${publicLabelOrFallback(route.origin_label)} → ${publicLabelOrFallback(route.destination_label)}`}
+            accessibilityLabel={`Volná kapacita ${publicRouteLabel({
+              origin_label: route.origin_label,
+              destination_label: route.destination_label,
+              via_labels: route.via_labels,
+            })}`}
             onPress={() => {
               void openPublicRouteDetail(route);
             }}

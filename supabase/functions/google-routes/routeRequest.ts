@@ -19,12 +19,20 @@ export const ROUTES_TIMEOUT_MS = 8000;
 
 export const MAX_PLACE_ID_LENGTH = 255;
 
+/**
+ * Kolik průjezdních bodů smí trasa obsahovat (např. "Cheb → Praha přes Plzeň").
+ * Odpovídá check constraintu `carrier_routes_via_place_ids_len` v databázi.
+ */
+export const MAX_VIA_PLACES = 3;
+
 /** Stejná validace place ID jako v google-places — place ID je neprůhledný token. */
 const PLACE_ID_RE = /^[A-Za-z0-9_.-]+$/;
 
 export type RouteRequestInput = {
   originPlaceId: string;
   destinationPlaceId: string;
+  /** Průjezdní body v pořadí, ve kterém je přepravce zadal. */
+  viaPlaceIds?: string[];
 };
 
 export type RouteMetrics = {
@@ -65,6 +73,36 @@ export function normalizePlaceId(value: unknown): string | null {
   return placeId;
 }
 
+/**
+ * Ověří a normalizuje průjezdní body.
+ *
+ * Vrací `null` (odmítnutí), pokud je vstup rozbitý, překročí limit, obsahuje
+ * neplatné place ID, duplikát, nebo bod shodný s odjezdem/cílem. Prázdné pole
+ * znamená přímou trasu, a proto je legitimní.
+ */
+function normalizeViaPlaceIds(value: unknown, originPlaceId: string, destinationPlaceId: string): string[] | null {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) return null;
+
+  // Prázdné pole odpovídá trase bez průjezdu; neplníme ho ničím.
+  if (value.length === 0) return [];
+
+  if (value.length > MAX_VIA_PLACES) return null;
+
+  const normalized: string[] = [];
+  for (const entry of value) {
+    const placeId = normalizePlaceId(entry);
+    if (!placeId) return null;
+    // Průjezdní bod shodný s odjezdem, cílem nebo jiným průjezdním bodem
+    // by dal zbytečně dlouhou trasu bez smyslu.
+    if (placeId === originPlaceId || placeId === destinationPlaceId) return null;
+    if (normalized.includes(placeId)) return null;
+    normalized.push(placeId);
+  }
+
+  return normalized;
+}
+
 /** Ověří tělo požadavku. Chyby jsou obecné — nikdy neopakují vstup klienta. */
 export function validateRouteRequest(body: unknown): RouteRequestValidation {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
@@ -83,12 +121,19 @@ export function validateRouteRequest(body: unknown): RouteRequestValidation {
     return { ok: false, status: 400, code: "invalid_request", message: "Origin and destination must differ" };
   }
 
-  return { ok: true, value: { originPlaceId, destinationPlaceId } };
+  const viaPlaceIds = normalizeViaPlaceIds(record.viaPlaceIds, originPlaceId, destinationPlaceId);
+  if (viaPlaceIds === null) {
+    return { ok: false, status: 400, code: "invalid_request", message: "Via points must be distinct valid place IDs" };
+  }
+
+  return { ok: true, value: { originPlaceId, destinationPlaceId, viaPlaceIds } };
 }
 
 /** Pevné tělo pro Compute Routes. Žádná pole od klienta se nepřeposílají. */
 export function buildComputeRoutesBody(input: RouteRequestInput) {
-  return {
+  const viaPlaceIds = input.viaPlaceIds ?? [];
+
+  const body: Record<string, unknown> = {
     origin: { placeId: input.originPlaceId },
     destination: { placeId: input.destinationPlaceId },
     travelMode: "DRIVE",
@@ -97,6 +142,16 @@ export function buildComputeRoutesBody(input: RouteRequestInput) {
     languageCode: "cs",
     regionCode: "cz",
   };
+
+  // Přímá trasa neposílá `intermediates` vůbec — prázdné pole by Google
+  // zbytečně zpracovával a klient by nemohl pozorovat rozdíl.
+  if (viaPlaceIds.length > 0) {
+    body.intermediates = viaPlaceIds.map((placeId) => ({ placeId }));
+    // Přepravce si pořadí průjezdu zvolil sám; optimalizace by je mohla přeházt.
+    body.optimizeWaypointOrder = false;
+  }
+
+  return body;
 }
 
 /** Google vrací dobu jako řetězec "1234s"; číslo bereme jen jako záložní variantu. */

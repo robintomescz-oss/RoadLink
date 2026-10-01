@@ -22,6 +22,7 @@ function loadTs(file, stubs = {}) {
 }
 
 const migration = read("supabase/migrations/0017_matching_candidate_preselection.sql");
+const viaGuardMigration = read("supabase/migrations/20261001090000_matching_excludes_via_routes.sql");
 const index = read("supabase/functions/google-route-matches/index.ts");
 const config = read("supabase/config.toml");
 const requestLogic = loadTs("supabase/functions/google-route-matches/matchingRequest.ts", {
@@ -45,6 +46,9 @@ assert(/revoke all[\s\S]*from authenticated/i.test(migration));
 assert(/grant execute[\s\S]*to service_role/i.test(migration));
 assert(!/grant execute[\s\S]*to (anon|authenticated)/i.test(migration));
 assert(!/\b(delete|truncate|drop table|update|insert into)\b/i.test(migration), "draft migration mutates no business data");
+assert(/coalesce\(cardinality\(cr\.via_place_ids\), 0\) = 0/i.test(viaGuardMigration), "matching v1 excludes routes with via points instead of calculating a misleading detour");
+assert(/security definer/i.test(viaGuardMigration) && /set search_path = ''/i.test(viaGuardMigration), "via guard keeps the internal RPC hardening");
+assert(!/\b(delete|truncate|drop table|update|insert into)\b/i.test(viaGuardMigration), "via guard mutates no business data");
 
 assert(/\[functions\.google-route-matches\][\s\S]*verify_jwt = true/.test(config));
 assert(/resolveUserId\(token\)/.test(index));
@@ -143,6 +147,7 @@ const routeDetail = read("screens/Transport/RouteDetailRoute.tsx");
 assert(/activeRoute\.driverId === userId[\s\S]*DOPORUČENÉ SHODY/.test(routeDetail), "matching UI is shown only in the owner branch");
 assert(/fetchRouteMatches\(activeRouteId\)/.test(routeDetail));
 assert(/Nabídka se nikdy neodešle automaticky/.test(routeDetail));
+assert(/Automatické shody zatím fungují jen pro přímé trasy bez průjezdních bodů/.test(routeDetail), "owner sees a clear matching limitation for a via route");
 assert(/loadAuthorizedJobDetail\(match\.requestId\)/.test(routeDetail));
 assert(!/submitInterest\(match\.requestId\)/.test(routeDetail), "opening a match performs no mutation");
 
