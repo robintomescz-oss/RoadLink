@@ -9,6 +9,7 @@ const regressionScripts = [
   ".roadlink/matching-server-regression.js",
   ".roadlink/rate-limit-regression.js",
   ".roadlink/google-auth-regression.js",
+  ".roadlink/sos-regression.js",
   ".roadlink/form-creation-tests.js",
   ".roadlink/navigation-payload-regression.js",
   ".roadlink/post-native-fix-regression.js",

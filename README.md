@@ -9,7 +9,8 @@ Mobilní tržiště pro poptávky a nabídky přepravy vozidel. Aplikace je post
 - poptávky, nabídky dopravců, volné trasy a průběh přepravy;
 - profil dopravce a vozový park;
 - responzivní domovská obrazovka a formuláře;
-- SOS, servis vozidla a notifikace jsou zatím připravované funkce.
+- SOS „Emergency Wizard“ – průvodce pro poruchu nebo nehodu (tmavý režim, tísňová čísla dostupná na všech krocích, funguje bez registrace a offline; viz `docs/sos-emergency-wizard.md`);
+- servis vozidla a notifikace jsou zatím připravované funkce.
 
 ## Lokální spuštění
 

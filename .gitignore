@@ -21,6 +21,7 @@ scripts/adb-e2e-runner.mjs
 !.roadlink/post-native-fix-regression.js
 !.roadlink/address-routing-regression.js
 !.roadlink/google-auth-regression.js
+!.roadlink/sos-regression.js
 !.roadlink/back-handler-regression.js
 !.roadlink/route-metrics-regression.js
 !.roadlink/rate-limit-regression.js
