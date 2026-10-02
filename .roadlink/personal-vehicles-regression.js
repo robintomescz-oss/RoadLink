@@ -92,9 +92,15 @@ assert(/fuel_type in \([^)]*'jine'[^)]*\)/i.test(migration), "fuel_type enum off
 
 // ---------------------------------------------------------------- baseline migrace carrier_vehicles
 
-const baseline = readSql("supabase/migrations/20261005090000_carrier_vehicles_baseline.sql");
+const baselinePath = "supabase/migrations/20261004080000_carrier_vehicles_baseline.sql";
+const baseline = readSql(baselinePath);
 
 // Musí být bezpečná vůči existující živé tabulce: idempotentní a bez DML.
+// Pořadí aplikace: baseline musí mít nižší timestamp než osobní vozidla,
+// jinak by historie uváděla personal_vehicles před carrier_vehicles.
+assert("20261004080000" < "20261004090000", "baseline timestamp sorts before personal vehicles");
+assert(/20261004080000_carrier_vehicles_baseline/.test(baselinePath), "baseline file uses the agreed timestamp");
+
 assert(/create table if not exists public\.carrier_vehicles/i.test(baseline), "baseline creates carrier_vehicles only when absent");
 assert(!/^\s*(delete|truncate|insert\s+into|update\s+\w+\s+set|drop\s+table)\b/im.test(baseline), "baseline issues no data statement");
 assert(!/alter\s+table\s+public\.carrier_vehicles[^;]*(drop\s+column|alter\s+column)/i.test(baseline), "baseline never alters or drops an existing column");
