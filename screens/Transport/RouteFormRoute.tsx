@@ -207,6 +207,10 @@ export default function RouteFormRoute() {
           ))}
           {viaPlaces.length < MAX_VIA_PLACES ? (
             <VerifiedLocationInput
+              // Vstup si drží text ve vlastním stavu a `value` je tu stále null,
+              // takže po výběru (i po Odebrat) by v něm zůstala adresa předchozího
+              // bodu. Změna klíče podle počtu bodů vynutí čistou instanci.
+              key={`via-${viaPlaces.length}`}
               label={viaPlaces.length === 0 ? "Průjezdní bod · volitelný" : "Další průjezdní bod · volitelný"}
               placeholder="Např. Plzeň"
               value={null}

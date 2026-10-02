@@ -171,6 +171,9 @@ assert((routeFormSource.match(/<VerifiedLocationInput/g) || []).length >= 2, 'ro
 assert((routeFormSource.match(/<VerifiedLocationInput/g) || []).length <= 3, 'route form exposes at most one via-point input');
 assert(routeFormSource.includes('Průjezdní bod · volitelný'), 'route form offers an optional via point');
 assert(routeFormSource.includes('Odebrat průjezdní bod'), 'a chosen via point can be removed again');
+// Vstup průjezdního bodu drží text ve vlastním stavu a value je stále null, takže
+// bez změny klíče by v něm po výběru (i po Odebrat) zůstala předchozí adresa.
+assert(/key=\{`via-\$\{viaPlaces\.length\}`\}/.test(routeFormSource), 'via input remounts clean after each pick and remove');
 assert(!requestFormSource.includes('Upřesnit přesné místo') && !routeFormSource.includes('Upřesnit přesné místo'), 'forms no longer duplicate public and private address entry');
 assert(requestFormSource.includes('přesná adresa zůstane soukromá') && routeFormSource.includes('přesná adresa zůstane soukromá'), 'both forms explain address privacy');
 assert(requestFormSource.includes('pickupLocation.formattedAddress') && routeFormSource.includes('fromLocation.formattedAddress'), 'private addresses come from verified selections');
