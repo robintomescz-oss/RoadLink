@@ -7,14 +7,14 @@ import { NavIcon, type NavIconName } from "./NavIcons";
  * Spodní navigace. Logika navigace (přepnutí tabu, ochrana profilu)
  * zůstává volající straně přes onItemPress — chování beze změny.
  *
- * SOS bylo z navigace záměrně odstraněno (rozhodnutí uživatele) —
- * SOS zůstává dostupné přes kartu na Global Home; obrazovka SOS
- * a její handler zůstávají zachovány.
+ * SOS je výrazné červené tlačítko dostupné z každé obrazovky (požadavek
+ * uživatele). Nikdy nevyžaduje přihlášení.
  *
- * Struktura: Přehled · [centrální vytvoření] · Moje · Profil
+ * Struktura: Přehled · SOS · [centrální vytvoření] · Moje · Profil
  */
 const NAV_ITEMS: Array<{ key: string; label: string; icon: NavIconName | null }> = [
   { key: "overview", label: "Přehled", icon: "dashboard" },
+  { key: "sos", label: "SOS", icon: "sos" },
   { key: "create", label: "Vytvořit", icon: null },
   { key: "mine", label: "Moje", icon: "mine" },
   { key: "profile", label: "Profil", icon: "person" },
@@ -29,6 +29,28 @@ export function BottomNav({ screen, activeKey, onItemPress }: { screen: string; 
         {NAV_ITEMS.map((item) => {
           const isActive = (activeKey || screen) === item.key;
           const isCreate = item.icon === null;
+
+          if (item.key === "sos") {
+            const sosActive = (activeKey || screen) === "sos" || screen === "sos";
+            return (
+              <TouchableOpacity
+                key={item.key}
+                style={styles.bottomNavItem}
+                onPress={() => onItemPress(item.key)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: sosActive }}
+                accessibilityLabel="SOS pomoc"
+                accessibilityHint="Otevře průvodce pro poruchu nebo nehodu. Tísňové volání nevyžaduje přihlášení."
+              >
+                <View style={styles.bottomNavSosButton}>
+                  <Text style={styles.bottomNavSosText}>SOS</Text>
+                </View>
+                <Text numberOfLines={1} style={styles.bottomNavCreateLabel}>
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          }
 
           if (isCreate) {
             return (

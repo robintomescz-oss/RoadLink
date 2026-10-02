@@ -13,6 +13,7 @@ export default function HomeRoute() {
         setTransportTab("all");
         navigateLegacy("transport");
       }}
+      onSos={() => navigateLegacy("sos")}
       bottomNav={<AppBottomNav />}
     />
   );

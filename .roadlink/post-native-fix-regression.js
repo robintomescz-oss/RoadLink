@@ -102,9 +102,9 @@ assert(jobDetailSource.includes('useHardwareBackAction(goBack)'), 'JobDetailRout
 assert(routeDetailSource.includes('useHardwareBackAction(backToCapacity)'), 'RouteDetailRoute hardware back mirrors header back');
 const offerFormSource = read('screens/Transport/OfferFormRoute.tsx');
 assert(offerFormSource.includes('useHardwareBackAction(goBack)'), 'OfferFormRoute hardware back returns to request detail');
-assert(!offerFormSource.includes('onChange='), 'OfferFormRoute does not use deprecated DateTimePicker onChange');
-assert(!requestFormSource.includes('onChange='), 'request form does not use deprecated DateTimePicker onChange');
-assert(!routeFormSource.includes('onChange='), 'route form does not use deprecated DateTimePicker onChange');
+assert(!/<DateTimePicker[^>]*\bonChange=/.test(offerFormSource), 'OfferFormRoute does not use deprecated DateTimePicker onChange');
+assert(!/<DateTimePicker[^>]*\bonChange=/.test(requestFormSource), 'request form does not use deprecated DateTimePicker onChange');
+assert(!/<DateTimePicker[^>]*\bonChange=/.test(routeFormSource), 'route form does not use deprecated DateTimePicker onChange');
 assert(!jobDetailSource.includes('label="Najede na vlek"'), 'request detail does not duplicate loading capability');
 assert(profileSource.includes('useHardwareBackTo("home")'), 'ProfileRoute hardware back returns to home');
 assert(vehiclesSource.includes('useHardwareBackTo("profile")'), 'VehiclesRoute hardware back returns to profile');
@@ -123,15 +123,17 @@ assert(createFormLogic.resolvePrivateAddress('Praha', '  ') === 'Praha', 'collap
 assert(createFormLogic.resolvePrivateAddress('Praha', 'Ulice 5, Praha 1') === 'Ulice 5, Praha 1', 'expanded precise place is used as private address');
 assert(createFormLogic.resolvePrivateAddress('Praha', 'Ulice 5') !== undefined, 'private address never overwrites public label contract');
 
-// Payload formulářů: veřejný label + soukromá adresa (fallback nebo přesné místo).
+// Payload formulářů: veřejný label + soukromá ověřená adresa a souřadnice.
 assert(requestFormSource.includes('pickup_public_label: validatedPickupPublic.value'), 'request payload contains pickup_public_label');
 assert(requestFormSource.includes('destination_public_label: validatedDestinationPublic.value'), 'request payload contains destination_public_label');
-assert(requestFormSource.includes('resolvePrivateAddress(validatedPickupPublic.value, pickupText)'), 'request payload private address falls back to public label when collapsed');
-assert(requestFormSource.includes('resolvePrivateAddress(validatedDestinationPublic.value, destination)'), 'request payload private destination falls back to public label when collapsed');
+assert(requestFormSource.includes('pickupLocation.formattedAddress'), 'request payload uses verified private pickup address');
+assert(requestFormSource.includes('destinationLocation.formattedAddress'), 'request payload uses verified private destination address');
+assert(requestFormSource.includes('pickupLocation.latitude') && requestFormSource.includes('destinationLocation.latitude'), 'request payload uses verified coordinates');
 assert(routeFormSource.includes('from_public_label: validatedFromPublic.value'), 'route payload contains from_public_label');
 assert(routeFormSource.includes('to_public_label: validatedToPublic.value'), 'route payload contains to_public_label');
-assert(routeFormSource.includes('resolvePrivateAddress(validatedFromPublic.value, routeFrom)'), 'route payload private address falls back to public label when collapsed');
-assert(routeFormSource.includes('resolvePrivateAddress(validatedToPublic.value, routeTo)'), 'route payload private address falls back to public label when collapsed');
+assert(routeFormSource.includes('fromLocation.formattedAddress'), 'route payload uses verified private origin address');
+assert(routeFormSource.includes('toLocation.formattedAddress'), 'route payload uses verified private destination address');
+assert(routeFormSource.includes('fromLocation.latitude') && routeFormSource.includes('toLocation.latitude'), 'route payload uses verified coordinates');
 
 // Validace: město/obec je povinné, přesné místo volitelné.
 const validCollapsed = {
@@ -161,13 +163,17 @@ const validCapacityCollapsed = {
 };
 assert(createFormLogic.validateCapacityForm(validCapacityCollapsed).valid === true, 'capacity form validates with collapsed precise places (public labels only)');
 
-// UI: veřejná pole výchozí, soukromá až po rozbalení, vysvětlení soukromí.
-assert(requestFormSource.includes('Odkud – město/obec') && requestFormSource.includes('Kam – město/obec'), 'request form shows public city fields as default');
-assert(routeFormSource.includes('Odkud – město/obec') && routeFormSource.includes('Kam – město/obec'), 'route form shows public city fields as default');
-assert(requestFormSource.includes('Upřesnit přesné místo') && routeFormSource.includes('Upřesnit přesné místo'), 'both forms offer optional precise place expansion');
-assert(requestFormSource.includes('Přesné místo je soukromé a zobrazí se pouze oprávněnému účastníkovi přepravy.'), 'request form explains private precise place');
-assert(routeFormSource.includes('Přesné místo je soukromé a zobrazí se pouze oprávněnému účastníkovi přepravy.'), 'route form explains private precise place');
-assert(requestFormSource.includes('Tento údaj bude viditelný veřejně.') && routeFormSource.includes('Tento údaj bude viditelný veřejně.'), 'both forms keep public visibility notice');
+// UI: odjezd a cíl jsou vždy dva ověřené vstupy. Formulář volné kapacity navíc
+// nabízí volitelný třetí vstup pro průjezdní bod ("Cheb → Praha přes Plzeň"),
+// takže smí obsahovat tři instance VerifiedLocationInput.
+assert((requestFormSource.match(/<VerifiedLocationInput/g) || []).length === 2, 'request form requires two verified locations');
+assert((routeFormSource.match(/<VerifiedLocationInput/g) || []).length >= 2, 'route form requires origin and destination verified locations');
+assert((routeFormSource.match(/<VerifiedLocationInput/g) || []).length <= 3, 'route form exposes at most one via-point input');
+assert(routeFormSource.includes('Průjezdní bod · volitelný'), 'route form offers an optional via point');
+assert(routeFormSource.includes('Odebrat průjezdní bod'), 'a chosen via point can be removed again');
+assert(!requestFormSource.includes('Upřesnit přesné místo') && !routeFormSource.includes('Upřesnit přesné místo'), 'forms no longer duplicate public and private address entry');
+assert(requestFormSource.includes('přesná adresa zůstane soukromá') && routeFormSource.includes('přesná adresa zůstane soukromá'), 'both forms explain address privacy');
+assert(requestFormSource.includes('pickupLocation.formattedAddress') && routeFormSource.includes('fromLocation.formattedAddress'), 'private addresses come from verified selections');
 
 // Soukromá adresa se nikdy nedostane do veřejného market objektu.
 const publicMarket = requireProductionTsModule('lib/publicMarket.ts');

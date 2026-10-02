@@ -4,12 +4,16 @@ import { SafeAreaView } from "../../components/SafeAreaViewCompat";
 import { styles } from "../../lib/appStyles";
 import { useAppContext } from "../../contexts/AppContext";
 import { navigateLegacy } from "../../navigation/navigationRef";
+import { useHardwareBackTo } from "../../hooks/useBackHandlers";
 import type { RootScreenProps } from "../../navigation/types";
 
 export default function LoginScreen({ navigation }: RootScreenProps<"login">) {
   const {
-    authState: { loginEmail, setLoginEmail, loginUser },
+    authState: { loginEmail, setLoginEmail, loginUser, loginWithGoogle, googleLoading },
   } = useAppContext();
+
+  // Hardware Back na přihlášení vede zpět na úvod místo ukončení aplikace.
+  useHardwareBackTo("home");
 
   // Lokální stav formuláře. E-mail zůstává v kontextu (přežije odhlášení).
   const [loginPassword, setLoginPassword] = useState("");
@@ -45,15 +49,34 @@ export default function LoginScreen({ navigation }: RootScreenProps<"login">) {
           placeholder="Heslo"
           secureTextEntry
         />
-        <TouchableOpacity style={styles.primary} onPress={handleLogin} disabled={loginLoading}>
+        <TouchableOpacity
+          style={styles.primary}
+          onPress={handleLogin}
+          disabled={loginLoading || googleLoading}
+        >
           <Text style={styles.primaryText}>{loginLoading ? "Přihlašuji…" : "Přihlásit"}</Text>
+        </TouchableOpacity>
+        <View style={styles.authDividerRow}>
+          <View style={styles.authDividerLine} />
+          <Text style={styles.authDividerText}>nebo</Text>
+          <View style={styles.authDividerLine} />
+        </View>
+        <TouchableOpacity
+          style={styles.googleButton}
+          onPress={loginWithGoogle}
+          disabled={loginLoading || googleLoading}
+        >
+          <Text style={styles.googleMark}>G</Text>
+          <Text style={styles.googleText}>
+            {googleLoading ? "Otevírám Google…" : "Pokračovat přes Google"}
+          </Text>
         </TouchableOpacity>
         <TouchableOpacity
           onPress={() => {
             setLoginPassword("");
             navigation.replace("signup");
           }}
-          disabled={loginLoading}
+          disabled={loginLoading || googleLoading}
         >
           <Text style={styles.link}>Nemám účet</Text>
         </TouchableOpacity>
@@ -62,7 +85,7 @@ export default function LoginScreen({ navigation }: RootScreenProps<"login">) {
             setLoginPassword("");
             navigateLegacy("home");
           }}
-          disabled={loginLoading}
+          disabled={loginLoading || googleLoading}
         >
           <Text style={styles.link}>Zpět na úvod</Text>
         </TouchableOpacity>

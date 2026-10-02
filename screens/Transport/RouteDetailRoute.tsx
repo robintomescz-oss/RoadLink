@@ -17,6 +17,7 @@ import {
 } from "../../lib/labels";
 import { supabase } from "../../lib/supabase";
 import type { Job } from "../../lib/types";
+import { fetchRouteMatches, routeMatchSummary, type RouteMatch } from "../../lib/routeMatches";
 
 export default function RouteDetailRoute() {
   const { userId, setActiveJobId, setRequestViewMode, setTransportTab, transportState } = useAppContext();
@@ -29,9 +30,14 @@ export default function RouteDetailRoute() {
     routeInterestsLoading,
     routeInterestsError,
     setJobs,
+    loadAuthorizedJobDetail,
   } = transportState;
   const [interestSelectionVisible, setInterestSelectionVisible] = useState(false);
   const [interestSubmitting, setInterestSubmitting] = useState(false);
+  const [routeMatches, setRouteMatches] = useState<RouteMatch[] | null>(null);
+  const [matchesLoading, setMatchesLoading] = useState(false);
+  const [matchesError, setMatchesError] = useState<string | null>(null);
+  const [matchesIncomplete, setMatchesIncomplete] = useState(false);
 
   const backToCapacity = () => {
     setTransportTab("capacity");
@@ -89,6 +95,28 @@ export default function RouteDetailRoute() {
     navigateLegacy("job");
   }
 
+  async function loadRecommendedMatches() {
+    if (!activeRouteId || matchesLoading) return;
+    setMatchesLoading(true);
+    setMatchesError(null);
+    const result = await fetchRouteMatches(activeRouteId);
+    setMatchesLoading(false);
+    if (!result.ok) {
+      setRouteMatches(null);
+      setMatchesError(result.code === "rate_limited" ? "Limit výpočtů byl dočasně vyčerpán. Zkuste to později." : result.code === "unauthorized" ? "Pro doporučené shody se znovu přihlaste." : "Doporučené shody se nepodařilo spočítat.");
+      return;
+    }
+    setRouteMatches(result.matches);
+    setMatchesIncomplete(result.incomplete);
+  }
+
+  async function openMatchedRequest(match: RouteMatch) {
+    setActiveJobId(match.requestId);
+    setRequestViewMode("provider");
+    await loadAuthorizedJobDetail(match.requestId);
+    navigateLegacy("job");
+  }
+
   if (!activeRoute) {
     return (
       <SafeAreaView style={styles.container}>
@@ -138,11 +166,20 @@ export default function RouteDetailRoute() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.sectionLabel}>VOLNÁ KAPACITA</Text>
                 <Text style={styles.detailHeroTitle}>{activeRoute.fromAddress} → {activeRoute.toAddress}</Text>
+                {activeRoute.viaLabels.length > 0 ? (
+                  <Text style={styles.detailMuted}>přes {activeRoute.viaLabels.join(", ")}</Text>
+                ) : null}
               </View>
             </View>
             <View style={styles.detailSectionFlat}>
               <Text style={styles.sectionLabel}>TRASA</Text>
               <Text style={styles.routeEndpoint}>{activeRoute.fromAddress}</Text>
+              {activeRoute.viaLabels.map((label) => (
+                <View key={label} style={styles.viaDetailRow}>
+                  <Text style={styles.routeArrowDown}>↓</Text>
+                  <Text style={styles.routeEndpoint}>{label}</Text>
+                </View>
+              ))}
               <Text style={styles.routeArrowDown}>↓</Text>
               <Text style={styles.routeEndpoint}>{activeRoute.toAddress}</Text>
             </View>
@@ -158,6 +195,32 @@ export default function RouteDetailRoute() {
             {activeRoute.description ? <View style={styles.detailSectionFlat}><Text style={styles.sectionLabel}>POZNÁMKA</Text><Text style={styles.detailMuted}>{activeRoute.description}</Text></View> : null}
 
             {activeRoute.driverId === userId ? (
+              <>
+              <View style={styles.detailSectionFlat}>
+                <Text style={styles.sectionLabel}>DOPORUČENÉ SHODY</Text>
+                <Text style={styles.detailMuted}>RoadLink porovná termín, vozidlo, kapacitu a skutečnou zajížďku. Nabídka se nikdy neodešle automaticky.</Text>
+                {activeRoute.viaLabels.length > 0 ? (
+                  <Text style={styles.detailMuted}>Automatické shody zatím fungují jen pro přímé trasy bez průjezdních bodů.</Text>
+                ) : routeMatches === null ? (
+                  <TouchableOpacity style={styles.secondary} onPress={loadRecommendedMatches} disabled={matchesLoading} accessibilityLabel="Najít vhodné poptávky">
+                    <Text style={styles.secondaryText}>{matchesLoading ? "Počítám shody…" : "Najít vhodné poptávky"}</Text>
+                  </TouchableOpacity>
+                ) : routeMatches.length === 0 ? (
+                  <View>
+                    <Text style={styles.detailMuted}>Pro tuto trasu nyní není vhodná otevřená poptávka.</Text>
+                    <TouchableOpacity style={styles.secondary} onPress={loadRecommendedMatches} disabled={matchesLoading}><Text style={styles.secondaryText}>Přepočítat shody</Text></TouchableOpacity>
+                  </View>
+                ) : routeMatches.map((match, index) => (
+                  <TouchableOpacity key={match.requestId} style={styles.dispatchCard} onPress={() => openMatchedRequest(match)} accessibilityLabel={`Doporučená shoda ${index + 1}`}>
+                    <View style={styles.dispatchHeader}><Text style={styles.dispatchLabel}>SHODA {index + 1}</Text><Text style={styles.statusPill}>{match.score} bodů</Text></View>
+                    <Text style={styles.dispatchVehicle}>{routeMatchSummary(match)}</Text>
+                    {match.reasons.map((reason) => <Text key={reason} style={styles.dispatchMeta}>✓ {reason}</Text>)}
+                    <View style={styles.dispatchFooter}><Text style={styles.dispatchMeta}>Zobrazit poptávku</Text><Text style={styles.dispatchArrow}>→</Text></View>
+                  </TouchableOpacity>
+                ))}
+                {matchesError ? <Text style={styles.fieldError}>{matchesError}</Text> : null}
+                {matchesIncomplete ? <Text style={styles.detailMuted}>Některé kandidáty se nepodařilo ověřit. Výsledek může být neúplný.</Text> : null}
+              </View>
               <View style={styles.detailSectionFlat}>
                 <Text style={styles.sectionLabel}>PROJEVENÝ ZÁJEM</Text>
                 {routeInterestsLoading ? <Text style={styles.detailMuted}>Načítám projevený zájem…</Text> : routeInterestsError ? <Text style={styles.detailMuted}>Projevený zájem se nepodařilo načíst. Zkuste to prosím znovu.</Text> : routeInterestedRequests.length === 0 ? <Text style={styles.detailMuted}>Zatím žádná poptávka neprojevila zájem o tuto kapacitu.</Text> : routeInterestedRequests.map((item) => (
@@ -169,6 +232,7 @@ export default function RouteDetailRoute() {
                   </TouchableOpacity>
                 ))}
               </View>
+              </>
             ) : null}
 
             {activeRoute.driverId !== userId ? <TouchableOpacity style={styles.primary} onPress={handleInterestPress}><Text style={styles.primaryText}>MÁM ZÁJEM O PŘEPRAVU</Text></TouchableOpacity> : null}

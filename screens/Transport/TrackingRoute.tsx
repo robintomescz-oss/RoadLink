@@ -3,6 +3,7 @@ import { Alert, Text } from "react-native";
 import { supabase } from "../../lib/supabase";
 import { useAppContext } from "../../contexts/AppContext";
 import { navigateLegacy } from "../../navigation/navigationRef";
+import { useHardwareBackAction } from "../../hooks/useBackHandlers";
 import {
   formatOfferArrivalDateTime,
   pickupDisplayLabel,
@@ -80,6 +81,8 @@ export default function TrackingRoute() {
     setTransportTab(requestViewMode === "owner" ? "mine" : "requests");
     navigateLegacy("transport");
   };
+  // Hardware Back musí dělat totéž co horní ‹ Zpět — jinak by ukončil aplikaci.
+  useHardwareBackAction(goBack);
 
   const controller = createTransportStatusController({
     getCurrentContext: () => currentContextRef.current,

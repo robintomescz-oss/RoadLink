@@ -44,6 +44,8 @@ export function AppBottomNav() {
   const activeKey =
     screen === "home" || screen === "overview"
       ? "overview"
+      : screen === "sos"
+      ? "sos"
       : screen === "transport" && transportTab === "mine"
       ? "mine"
       : screen === "create"

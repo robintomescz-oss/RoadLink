@@ -4,13 +4,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path, Circle } from "react-native-svg";
 import { StatusBar } from "expo-status-bar";
 
-type Props = { onTransport: () => void; bottomNav?: React.ReactNode };
+type Props = { onTransport: () => void; onSos: () => void; bottomNav?: React.ReactNode };
 function Icon({ name, color = "#102A43", size = 40 }: { name: string; color?: string; size?: number }) {
   return <Svg width={size} height={size} viewBox="0 0 48 48" fill="none" stroke={color} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round">
     {name === "person" ? <><Circle cx={24} cy={15} r={7} fill={color} stroke="none" /><Path d="M10 39v-5c0-12 28-12 28 0v5c-8 4-20 4-28 0Z" fill={color} stroke="none" /></> : name === "truck" ? <><Path d="M3 29h27v10H3zM30 23h8l7 8v8H30M33 26v7h10M6 24v-6l5-7h12l6 7v6H6ZM8 18h18" /><Circle cx={11} cy={39} r={5} fill="#EAF3FF" /><Circle cx={37} cy={39} r={5} fill="#EAF3FF" /><Circle cx={11} cy={23} r={2} /><Circle cx={24} cy={23} r={2} /></> : name === "siren" ? <><Path d="M13 35V23a11 11 0 0 1 22 0v12ZM10 40h28M24 3v5M7 10l4 4M41 10l-4 4M3 24h5M40 24h5" /><Path d="M14 34V24a10 10 0 0 1 20 0v10Z" fill={color} /><Path d="M18 23c0-3 1-5 4-6" stroke="white" /></> : <><Path d="M30 5a12 12 0 0 0-13 16L5 34a6 6 0 0 0 9 9l13-14A12 12 0 0 0 43 15l-9 8-8-8 8-10Z" fill={color} stroke="none" /><Circle cx={10} cy={38} r={2} fill="white" stroke="none" /></>}
   </Svg>;
 }
-function HomeContent({ onTransport, bottomNav }: Props) {
+function HomeContent({ onTransport, onSos, bottomNav }: Props) {
   const insets = useSafeAreaInsets();
   const { width, height, fontScale } = useWindowDimensions();
   const [headerH, setHeaderH] = React.useState(0);
@@ -60,16 +60,16 @@ function HomeContent({ onTransport, bottomNav }: Props) {
           </View>
           <View style={s.actionBlue}><Text style={s.actionArrow}>›</Text></View>
         </TouchableOpacity>
-        <TouchableOpacity style={[s.card, compact && s.cardCompact, { minHeight: density === "compact" ? 70 : 88, paddingVertical: cardPaddingV }]} onPress={() => Alert.alert("SOS", "SOS pomoc při poruše bude dostupná v další verzi.")} accessibilityRole="button" accessibilityLabel="SOS pomoc">
+        <TouchableOpacity style={[s.card, compact && s.cardCompact, { minHeight: density === "compact" ? 70 : 88, paddingVertical: cardPaddingV }]} onPress={onSos} accessibilityRole="button" accessibilityLabel="SOS pomoc" accessibilityHint="Otevře průvodce pro poruchu nebo nehodu s tísňovými čísly.">
           <View style={[s.tile, s.redTile, { width: tileSize, height: tileSize }]}><Icon name="siren" size={iconSize} color="#D7263D" /></View>
           <View style={s.body}>
             <View style={s.titleRow}>
               <Text style={s.title} allowFontScaling>SOS pomoc</Text>
-              {inlineStatus ? <View style={[s.pill, compact && s.pillCompact]}><Text style={s.pillText}>Připravujeme</Text></View> : null}
+              <View style={[s.pill, s.pillReady, compact && s.pillCompact]}><Text style={s.pillReadyText}>Připraveno</Text></View>
               {inlineStatus ? <Text style={s.chev}>›</Text> : null}
             </View>
-            <Text style={s.description} allowFontScaling>Pomoc při poruše nebo nehodě.</Text>
-            {!inlineStatus ? <View style={s.pillRowBelow}><View style={s.pill}><Text style={s.pillText}>Připravujeme</Text></View><Text style={s.chev}>›</Text></View> : null}
+            <Text style={s.description} allowFontScaling>Průvodce pro poruchu nebo nehodu a tísňová čísla.</Text>
+            {!inlineStatus ? <View style={s.pillRowBelow}><Text style={s.chev}>›</Text></View> : null}
           </View>
         </TouchableOpacity>
         <TouchableOpacity style={[s.card, compact && s.cardCompact, { minHeight: density === "compact" ? 70 : 88, paddingVertical: cardPaddingV }]} onPress={() => Alert.alert("Servisy", "Seznam servisů bude dostupný v další verzi.")} accessibilityRole="button" accessibilityLabel="Servis vozidla">
@@ -111,6 +111,8 @@ const s = StyleSheet.create({
   actionBlue: { width: 42, height: 42, borderRadius: 21, backgroundColor: "#2062FF", alignItems: "center", justifyContent: "center", marginLeft: 10 },
   actionArrow: { color: "white", fontSize: 20, fontWeight: "600", marginTop: -1, includeFontPadding: false } as any,
   pill: { backgroundColor: "#E8EEF6", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16 },
+  pillReady: { backgroundColor: "#E4F7EA", borderWidth: 1, borderColor: "#B7E4C4" },
+  pillReadyText: { color: "#15803D", fontSize: 11, fontWeight: "700" },
   pillCompact: { paddingHorizontal: 8, paddingVertical: 5 },
   pillText: { color: "#6B7A90", fontSize: 11, fontWeight: "600" },
   chev: { color: "#8A9BB3", fontSize: 16, fontWeight: "400", marginLeft: 2 },

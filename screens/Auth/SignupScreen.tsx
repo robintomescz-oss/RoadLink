@@ -1,15 +1,19 @@
 import React, { useState } from "react";
-import { ScrollView, Text, TextInput, TouchableOpacity } from "react-native";
+import { ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "../../components/SafeAreaViewCompat";
 import { styles } from "../../lib/appStyles";
 import { useAppContext } from "../../contexts/AppContext";
 import { navigateLegacy } from "../../navigation/navigationRef";
+import { useHardwareBackTo } from "../../hooks/useBackHandlers";
 import type { RootScreenProps } from "../../navigation/types";
 
 export default function SignupScreen({ navigation }: RootScreenProps<"signup">) {
   const {
-    authState: { registerUser },
+    authState: { registerUser, loginWithGoogle, googleLoading },
   } = useAppContext();
+
+  // Hardware Back při registraci vede zpět na úvod místo ukončení aplikace.
+  useHardwareBackTo("home");
 
   // Lokální stav registračního formuláře (dřív v useAuth / App).
   const [registrationFirstName, setRegistrationFirstName] = useState("");
@@ -48,13 +52,32 @@ export default function SignupScreen({ navigation }: RootScreenProps<"signup">) 
         <TextInput style={styles.input} value={registrationEmail} onChangeText={setRegistrationEmail} placeholder="E-mail" keyboardType="email-address" autoCapitalize="none" />
         <TextInput style={styles.input} value={registrationPassword} onChangeText={setRegistrationPassword} placeholder="Heslo" secureTextEntry />
         <TextInput style={styles.input} value={registrationPasswordConfirmation} onChangeText={setRegistrationPasswordConfirmation} placeholder="Potvrzení hesla" secureTextEntry />
-        <TouchableOpacity style={styles.primary} onPress={handleRegister} disabled={registrationLoading}>
+        <TouchableOpacity
+          style={styles.primary}
+          onPress={handleRegister}
+          disabled={registrationLoading || googleLoading}
+        >
           <Text style={styles.primaryText}>{registrationLoading ? "Vytvářím účet…" : "Vytvořit účet"}</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation.replace("login")} disabled={registrationLoading}>
+        <View style={styles.authDividerRow}>
+          <View style={styles.authDividerLine} />
+          <Text style={styles.authDividerText}>nebo</Text>
+          <View style={styles.authDividerLine} />
+        </View>
+        <TouchableOpacity
+          style={styles.googleButton}
+          onPress={loginWithGoogle}
+          disabled={registrationLoading || googleLoading}
+        >
+          <Text style={styles.googleMark}>G</Text>
+          <Text style={styles.googleText}>
+            {googleLoading ? "Otevírám Google…" : "Registrovat přes Google"}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.replace("login")} disabled={registrationLoading || googleLoading}>
           <Text style={styles.link}>Už účet mám – Přihlásit se</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => navigateLegacy("home")} disabled={registrationLoading}>
+        <TouchableOpacity onPress={() => navigateLegacy("home")} disabled={registrationLoading || googleLoading}>
           <Text style={styles.link}>Zpět na úvod</Text>
         </TouchableOpacity>
       </ScrollView>

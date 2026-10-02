@@ -8,6 +8,9 @@ ROADLINK_TEST_CONTEXT.md
 # Freebuff agent workspace — logy, pid, runbooky (nepatří do checkpointu)
 .freebuff/
 
+# Lokální E2E asistent pro fyzické zařízení (interaktivní, není součástí CI)
+scripts/adb-e2e-runner.mjs
+
 # RoadLink agent workspace — track explicit project regression scripts, ignore other local artifacts
 .roadlink/*
 !.roadlink/transport-confirmation-regression.js
@@ -16,6 +19,16 @@ ROADLINK_TEST_CONTEXT.md
 !.roadlink/form-creation-tests.js
 !.roadlink/public-market-regression.js
 !.roadlink/post-native-fix-regression.js
+!.roadlink/address-routing-regression.js
+!.roadlink/google-auth-regression.js
+!.roadlink/sos-regression.js
+!.roadlink/back-handler-regression.js
+!.roadlink/route-metrics-regression.js
+!.roadlink/rate-limit-regression.js
+!.roadlink/google-routes-rate-limit-integration.mjs
+!.roadlink/route-preview-regression.js
+!.roadlink/matching-v1-regression.js
+!.roadlink/matching-server-regression.js
 
 # Runtime snímky obrazovky a dočasné soubory v rootu
 /screen-devlauncher.png

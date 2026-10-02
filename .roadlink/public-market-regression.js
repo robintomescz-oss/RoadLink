@@ -36,6 +36,7 @@ const {
   mapPublicMarketplaceRoute,
   publicCardAuthTarget,
   publicLabelOrFallback,
+  publicRouteLabel,
   shouldShowPublicMarketEmptyState,
   validatePublicLocationLabel,
 } = requireProductionTsModule('lib/publicMarket.ts');
@@ -69,6 +70,57 @@ const route = mapPublicMarketplaceRoute({
   status: 'open',
 });
 assert(route.vehicle_types[0] === 'Dodávka' && route.price === 1500, 'RPC route mapping keeps only public route card fields');
+
+// Průjezdní body: ve feedu viditelné jako názvy oblastí, ne jako place ID.
+assert(route.via_labels === null, 'a route without via points maps to null via_labels');
+
+const routeWithVia = mapPublicMarketplaceRoute({
+  public_id: '33333333-3333-4333-8333-333333333333',
+  item_type: 'carrier_route',
+  origin_label: 'Cheb',
+  destination_label: 'Praha',
+  via_labels: ['Plzeň-město'],
+  vehicle_types: ['Osobní automobil'],
+  departure_at: '2026-10-02T12:00:00Z',
+  available_spaces: 1,
+  price: null,
+  created_at: '2026-09-21T12:00:00Z',
+  status: 'open',
+});
+assert(
+  routeWithVia.via_labels.length === 1 && routeWithVia.via_labels[0] === 'Plzeň-město',
+  'RPC route mapping keeps public via labels',
+);
+assert(
+  publicRouteLabel({ origin_label: 'Cheb', destination_label: 'Praha', via_labels: ['Plzeň-město'] })
+    === 'Cheb → Praha přes Plzeň-město',
+  'a route with a via point is shown as Cheb to Praha via Plzen',
+);
+assert(
+  publicRouteLabel({ origin_label: 'Cheb', destination_label: 'Praha', via_labels: ['Plzeň-město', 'Klatovy'] })
+    === 'Cheb → Praha přes Plzeň-město, Klatovy',
+  'multiple via points are joined in the given order',
+);
+assert(
+  publicRouteLabel({ origin_label: 'Cheb', destination_label: 'Praha', via_labels: [] })
+    === 'Cheb → Praha',
+  'a route without via points shows the plain origin and destination',
+);
+assert(
+  publicRouteLabel({ origin_label: 'Cheb', destination_label: 'Praha', via_labels: null })
+    === 'Cheb → Praha',
+  'a null via list shows the plain origin and destination',
+);
+assert(
+  publicRouteLabel({ origin_label: 'Cheb', destination_label: 'Praha', via_labels: ['  ', ''] })
+    === 'Cheb → Praha',
+  'blank via labels are dropped instead of rendering an empty "prez"',
+);
+assert(
+  publicRouteLabel({ origin_label: null, destination_label: 'Praha', via_labels: ['Plzeň-město'] })
+    === 'Oblast neuvedena → Praha přes Plzeň-město',
+  'a missing origin keeps the same fallback the card already used',
+);
 
 for (const field of PUBLIC_MARKETPLACE_FORBIDDEN_FIELDS) {
   let blocked = false;
@@ -104,13 +156,13 @@ const requestFormSource = read('screens/Transport/CreateRequestScreen.tsx');
 assert(requestFormSource.includes('pickup_public_label: validatedPickupPublic.value'), 'request payload contains pickup_public_label');
 assert(requestFormSource.includes('destination_public_label: validatedDestinationPublic.value'), 'request payload contains destination_public_label');
 assert(requestFormSource.includes('pickup_address: trimmedPickupAddress') && requestFormSource.includes('destination_address: trimmedDestination'), 'request payload preserves private precise addresses');
-assert(requestFormSource.includes('Tento údaj bude viditelný veřejně.'), 'request form explains public visibility');
+assert(requestFormSource.includes('Veřejně se zobrazí pouze město nebo oblast'), 'request form explains public visibility');
 
 const routeFormSource = read('screens/Transport/RouteFormRoute.tsx');
 assert(routeFormSource.includes('from_public_label: validatedFromPublic.value'), 'route payload contains from_public_label');
 assert(routeFormSource.includes('to_public_label: validatedToPublic.value'), 'route payload contains to_public_label');
 assert(routeFormSource.includes('from_address: fromAddress') && routeFormSource.includes('to_address: toAddress'), 'route payload preserves private precise places');
-assert(routeFormSource.includes('Tento údaj bude viditelný veřejně.'), 'route form explains public visibility');
+assert(routeFormSource.includes('Veřejně se zobrazí pouze město nebo oblast'), 'route form explains public visibility');
 
 const forwardSql = read('supabase/migrations/0014_public_marketplace_feeds.sql');
 assert(!/select\s+\*/i.test(forwardSql), 'forward migration has no SELECT *');

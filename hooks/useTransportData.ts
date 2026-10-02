@@ -142,6 +142,9 @@ export function useTransportData({
       driverId: data.driver_id,
       fromAddress: data.from_address || "Neuvedeno",
       toAddress: data.to_address || "Neuvedeno",
+      viaLabels: Array.isArray(data.via_public_labels)
+        ? (data.via_public_labels as unknown[]).filter((value): value is string => typeof value === "string" && value.trim() !== "")
+        : [],
       departureAt: data.departure_at || "Neuvedeno",
       availableSpaces: data.available_spaces ?? 0,
       maxDeviationKm: data.max_deviation_km ?? null,
@@ -296,6 +299,9 @@ export function useTransportData({
         driverId: row.driver_id,
         fromAddress: row.from_address || "Neuvedeno",
         toAddress: row.to_address || "Neuvedeno",
+        viaLabels: Array.isArray(row.via_public_labels)
+          ? (row.via_public_labels as unknown[]).filter((value): value is string => typeof value === "string" && value.trim() !== "")
+          : [],
         departureAt: row.departure_at || "Neuvedeno",
         availableSpaces: row.available_spaces ?? 0,
         maxDeviationKm: row.max_deviation_km ?? null,

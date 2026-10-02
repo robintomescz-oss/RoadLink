@@ -21,6 +21,9 @@ export const supabase = createClient(
       autoRefreshToken: true,
       persistSession: true,
       detectSessionInUrl: false,
+      // PKCE je potřeba pro OAuth (Google): zpět z prohlížeče přichází `code`,
+      // který aplikace vymění za session. E-mailové přihlášení to nemění.
+      flowType: "pkce",
     },
   }
 );

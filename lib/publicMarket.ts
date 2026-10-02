@@ -17,6 +17,8 @@ export type PublicMarketplaceRoute = {
   item_type: "carrier_route";
   origin_label: string | null;
   destination_label: string | null;
+  /** Veřejné názvy oblastí průjezdních bodů ("Cheb → Plzeň → Praha"). */
+  via_labels: string[] | null;
   vehicle_types: string[] | null;
   departure_at: string | null;
   available_spaces: number | null;
@@ -40,6 +42,11 @@ export type PublicMarketplaceForbiddenField =
   | "from_lng"
   | "to_lat"
   | "to_lng"
+  | "origin_place_id"
+  | "destination_place_id"
+  | "via_place_ids"
+  | "route_distance_meters"
+  | "route_duration_seconds"
   | "problem_description"
   | "description"
   | "offer"
@@ -61,6 +68,11 @@ export const PUBLIC_MARKETPLACE_FORBIDDEN_FIELDS: PublicMarketplaceForbiddenFiel
   "from_lng",
   "to_lat",
   "to_lng",
+  "origin_place_id",
+  "destination_place_id",
+  "via_place_ids",
+  "route_distance_meters",
+  "route_duration_seconds",
   "problem_description",
   "description",
   "offer",
@@ -98,6 +110,29 @@ export function publicLabelOrFallback(value: string | null | undefined) {
   return normalized || "Oblast neuvedena";
 }
 
+/**
+ * Veřejný název trasy včetně průjezdních bodů.
+ *
+ * "Cheb → Praha přes Plzeň" pro trasu s průjezdem, "Cheb → Praha" bez něj.
+ * Průjezdné labely procházejí stejným fallbackem jako odjezd a cíl, takže se
+ * v karty nikdy neukáže prázdná oblast. Prázdné/whitespace labely se zahazují,
+ * aby překlep ve zdrojových datech neudělal "Praha přes  ".
+ */
+export function publicRouteLabel(input: {
+  origin_label: string | null | undefined;
+  destination_label: string | null | undefined;
+  via_labels?: readonly string[] | null;
+}) {
+  const origin = publicLabelOrFallback(input.origin_label);
+  const destination = publicLabelOrFallback(input.destination_label);
+  const via = (input.via_labels ?? [])
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  return via.length > 0 ? `${origin} → ${destination} přes ${via.join(", ")}` : `${origin} → ${destination}`;
+}
+
 export function mapPublicMarketplaceRequest(row: Record<string, unknown>): PublicMarketplaceRequest {
   assertNoForbiddenFields(row);
   return {
@@ -122,6 +157,7 @@ export function mapPublicMarketplaceRoute(row: Record<string, unknown>): PublicM
     item_type: "carrier_route",
     origin_label: typeof row.origin_label === "string" ? row.origin_label : null,
     destination_label: typeof row.destination_label === "string" ? row.destination_label : null,
+    via_labels: Array.isArray(row.via_labels) ? row.via_labels.filter((value): value is string => typeof value === "string") : null,
     vehicle_types: Array.isArray(row.vehicle_types) ? row.vehicle_types.filter((value): value is string => typeof value === "string") : null,
     departure_at: typeof row.departure_at === "string" ? row.departure_at : null,
     available_spaces: typeof row.available_spaces === "number" ? row.available_spaces : null,

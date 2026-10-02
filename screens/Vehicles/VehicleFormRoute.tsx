@@ -6,6 +6,7 @@ import { AppBottomNav as BottomNav } from "../../components/AppBottomNav";
 import { styles } from "../../lib/appStyles";
 import { useAppContext } from "../../contexts/AppContext";
 import { navigateLegacy } from "../../navigation/navigationRef";
+import { useHardwareBackAction } from "../../hooks/useBackHandlers";
 import { parseVehicleNumericFields } from "../../hooks/useProfile";
 
 export default function VehicleFormRoute() {
@@ -43,6 +44,8 @@ export default function VehicleFormRoute() {
   });
   const valid = numeric.allValid;
   const goBack = () => navigateLegacy("vehicles");
+  // Hardware Back opakuje spodní „Zpět na vozidla“ místo ukončení aplikace.
+  useHardwareBackAction(goBack);
   const onSubmit = () => {
     if (valid) saveVehicle();
   };

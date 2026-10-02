@@ -3,25 +3,30 @@ import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from "reac
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { SafeAreaView } from "../../components/SafeAreaViewCompat";
 import { FieldError, FormBackHeader, FormSection, ReviewRow } from "../../components/form/FormParts";
+import { RouteMetricsPreviewCard } from "../../components/form/RouteMetricsPreviewCard";
 import { showDiscardDraftConfirmation } from "../../components/form/showDiscardDraftConfirmation";
+import { VerifiedLocationInput } from "../../components/form/VerifiedLocationInput";
 import { useAppContext, type RequestDraft } from "../../contexts/AppContext";
 import { supabase } from "../../lib/supabase";
 import { styles } from "../../lib/appStyles";
 import type { Job } from "../../lib/types";
 import { canonicalVehicleType, formatPostgresDate } from "../../lib/labels";
-import { coordinatesFromValues, geocodeAddress } from "../../lib/geocode";
+import { coordinatesFromValues } from "../../lib/geocode";
+import type { VerifiedLocation } from "../../lib/verifiedLocation";
 import {
   LOADING_STATE_OPTIONS,
   loadingOptionToFields,
   requestSnapshot,
-  resolvePrivateAddress,
   validateRequestForm,
+  buildRouteMetricsPayload,
+  routeMetricsSubmitBlockReason,
   type LoadingStateOption,
   type RequestErrorKey,
 } from "../../lib/createFormLogic";
 import { validatePublicLocationLabel } from "../../lib/publicMarket";
 import { navigateLegacy } from "../../navigation/navigationRef";
 import { useFormBackGuard } from "../../hooks/useBackHandlers";
+import { useRouteMetricsPreview } from "../../hooks/useRouteMetricsPreview";
 
 const INITIAL_LOADING_STATE: LoadingStateOption = "drive";
 const EMPTY_REQUEST_DRAFT: RequestDraft = {
@@ -57,6 +62,8 @@ export default function CreateRequestScreen() {
   const [destinationPublicLabel, setDestinationPublicLabel] = useState(requestDraft.destinationPublicLabel);
   const [vehicle, setVehicle] = useState(requestDraft.vehicle);
   const [problem, setProblem] = useState(requestDraft.problem);
+  const [pickupLocation, setPickupLocation] = useState<VerifiedLocation | null>(null);
+  const [destinationLocation, setDestinationLocation] = useState<VerifiedLocation | null>(null);
 
   // Při každém otevření začínají prázdné (jako dřív v openRequestFlow).
   const [requestedDate, setRequestedDate] = useState<Date | null>(null);
@@ -84,8 +91,15 @@ export default function CreateRequestScreen() {
   const [creatingRequest, setCreatingRequest] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
-  // Volitelné upřesnění přesných míst — ve výchozím stavu sbalené (soukromé).
-  const [showPrecisePlaces, setShowPrecisePlaces] = useState(false);
+  const routePreview = useRouteMetricsPreview({
+    originPlaceId: pickupLocation?.placeId ?? null,
+    destinationPlaceId: destinationLocation?.placeId ?? null,
+  });
+  const requestRouteBlockReason = routeMetricsSubmitBlockReason({
+    originPlaceId: pickupLocation?.placeId ?? null,
+    destinationPlaceId: destinationLocation?.placeId ?? null,
+    preview: routePreview,
+  });
 
   // Při zavření formuláře (jakýmkoli způsobem) vrátíme poslední hodnoty do kontextu.
   const draftRef = useRef<RequestDraft>({ pickupText, destination, pickupPublicLabel, destinationPublicLabel, vehicle, problem });
@@ -160,7 +174,15 @@ export default function CreateRequestScreen() {
       loadingState: loadingStateOption,
     });
     setRequestErrors(validation.errors);
-    if (!validation.valid) {
+    if (!pickupLocation || !destinationLocation) {
+      setRequestErrors((current) => ({ ...current, route: "Vyberte obě ověřená místa z nabídky." }));
+    }
+    if (!validation.valid || !pickupLocation || !destinationLocation) {
+      requestScrollRef.current?.scrollTo({ y: 0, animated: true });
+      return;
+    }
+    if (requestRouteBlockReason) {
+      setRequestErrors((current) => ({ ...current, route: requestRouteBlockReason }));
       requestScrollRef.current?.scrollTo({ y: 0, animated: true });
       return;
     }
@@ -182,14 +204,15 @@ export default function CreateRequestScreen() {
         setRequestErrors((current) => ({ ...current, publicPlace: (validatedPickupPublic.valid ? validatedDestinationPublic.error : validatedPickupPublic.error) ?? "Zadejte veřejné město/obec." }));
         return;
       }
-      // Soukromá přesná adresa: vyplněná hodnota, nebo bezpečný fallback =
-      // zadané veřejné město/obec (DB sloupce a geocoding zůstávají beze změny).
-      const trimmedPickupAddress = resolvePrivateAddress(validatedPickupPublic.value, pickupText);
-      const trimmedDestination = resolvePrivateAddress(validatedDestinationPublic.value, destination);
-      const [pickupCoordinates, destinationCoordinates] = await Promise.all([
-        geocodeAddress(trimmedPickupAddress),
-        geocodeAddress(trimmedDestination),
-      ]);
+      const trimmedPickupAddress = pickupLocation.formattedAddress;
+      const trimmedDestination = destinationLocation.formattedAddress;
+      const pickupCoordinates = { latitude: pickupLocation.latitude, longitude: pickupLocation.longitude };
+      const destinationCoordinates = { latitude: destinationLocation.latitude, longitude: destinationLocation.longitude };
+      const routeMetricsPayload = buildRouteMetricsPayload({
+        originPlaceId: pickupLocation.placeId,
+        destinationPlaceId: destinationLocation.placeId,
+        preview: routePreview,
+      });
 
       const { data, error } = await supabase
         .from("tow_requests")
@@ -212,6 +235,7 @@ export default function CreateRequestScreen() {
           time_preference: "specific",
           vehicle_mobility: loadingMapping.vehicle_mobility,
           can_drive_onto_trailer: loadingMapping.can_drive_onto_trailer,
+          ...routeMetricsPayload,
           status: "open",
         })
         .select()
@@ -276,24 +300,10 @@ export default function CreateRequestScreen() {
         <Text style={styles.formIntroText}>Zadejte trasu, termín a stav vozidla. Odeslání vytvoří poptávku v Trhu přepravy.</Text>
 
         <FormSection title="Trasa">
-          <Text style={styles.label}>Odkud – město/obec</Text>
-          <Text style={styles.publicHintText}>Tento údaj bude viditelný veřejně.</Text>
-          <TextInput style={styles.compactInput} value={pickupPublicLabel} onChangeText={(value) => { setPickupPublicLabel(value); setRequestErrors((current) => ({ ...current, publicPlace: undefined, route: undefined })); }} placeholder="Např. Praha" maxLength={80} returnKeyType="next" />
-          <Text style={styles.label}>Kam – město/obec</Text>
-          <Text style={styles.publicHintText}>Tento údaj bude viditelný veřejně.</Text>
-          <TextInput style={styles.compactInput} value={destinationPublicLabel} onChangeText={(value) => { setDestinationPublicLabel(value); setRequestErrors((current) => ({ ...current, publicPlace: undefined, route: undefined })); }} placeholder="Např. Brno" maxLength={80} returnKeyType="next" />
-          <TouchableOpacity style={styles.expandToggle} onPress={() => setShowPrecisePlaces((current) => !current)} accessibilityRole="button" accessibilityState={{ expanded: showPrecisePlaces }} accessibilityLabel="Upřesnit přesné místo">
-            <Text style={styles.expandToggleText}>{showPrecisePlaces ? "− Upřesnit přesné místo" : "+ Upřesnit přesné místo"}</Text>
-          </TouchableOpacity>
-          {showPrecisePlaces ? (
-            <>
-              <Text style={styles.label}>Přesné místo nakládky (soukromé)</Text>
-              <TextInput style={styles.compactInput} value={pickupText} onChangeText={(value) => { setPickupText(value); setRequestErrors((current) => ({ ...current, route: undefined })); }} placeholder="Např. Praha, ulice a číslo popisné" returnKeyType="next" />
-              <Text style={styles.label}>Přesné místo vykládky (soukromé)</Text>
-              <TextInput style={styles.compactInput} value={destination} onChangeText={(value) => { setDestination(value); setRequestErrors((current) => ({ ...current, route: undefined })); }} placeholder="Např. Brno, ulice a číslo popisné" returnKeyType="next" />
-              <Text style={styles.privateHintText}>Přesné místo je soukromé a zobrazí se pouze oprávněnému účastníkovi přepravy.</Text>
-            </>
-          ) : null}
+          <Text style={styles.publicHintText}>Vyberte existující místo z nabídky. Veřejně se zobrazí pouze město nebo oblast; přesná adresa zůstane soukromá.</Text>
+          <VerifiedLocationInput label="Místo nakládky" placeholder="Začněte psát adresu nebo obec" value={pickupLocation} onChange={(location) => { setPickupLocation(location); setPickupText(location?.formattedAddress ?? ""); setPickupPublicLabel(location?.publicLabel ?? ""); setRequestErrors((current) => ({ ...current, publicPlace: undefined, route: undefined })); }} onError={(message) => setRequestErrors((current) => ({ ...current, route: message }))} />
+          <VerifiedLocationInput label="Místo vykládky" placeholder="Začněte psát adresu nebo obec" value={destinationLocation} onChange={(location) => { setDestinationLocation(location); setDestination(location?.formattedAddress ?? ""); setDestinationPublicLabel(location?.publicLabel ?? ""); setRequestErrors((current) => ({ ...current, publicPlace: undefined, route: undefined })); }} onError={(message) => setRequestErrors((current) => ({ ...current, route: message }))} />
+          <RouteMetricsPreviewCard originLabel={pickupPublicLabel} destinationLabel={destinationPublicLabel} preview={routePreview} />
           <FieldError message={requestErrors.route} />
           <FieldError message={requestErrors.publicPlace} />
           <TouchableOpacity style={styles.inlineSecondary} onPress={requestLocation} accessibilityLabel="Použít aktuální polohu">
@@ -363,7 +373,8 @@ export default function CreateRequestScreen() {
           <ReviewRow label="Termín" value={dateMode === "window" ? `${requestedDate ? requestedDate.toLocaleDateString("cs-CZ") : "Od neuvedeno"} – ${requestedEndDate ? requestedEndDate.toLocaleDateString("cs-CZ") : "Do neuvedeno"}` : requestedDate ? requestedDate.toLocaleDateString("cs-CZ") : "Datum neuvedeno"} />
           <ReviewRow label="Vozidlo" value={`${vehicle}${requestVehicleModel.trim() ? ` · ${requestVehicleModel.trim()}` : ""}`} />
           <ReviewRow label="Nakládka" value={loadingLabel} />
-          <TouchableOpacity style={styles.primary} disabled={creatingRequest} onPress={createJob} accessibilityLabel="Odeslat poptávku">
+          <FieldError message={requestRouteBlockReason ?? undefined} />
+          <TouchableOpacity style={[styles.primary, (creatingRequest || Boolean(requestRouteBlockReason)) && styles.primaryDisabled]} disabled={creatingRequest || Boolean(requestRouteBlockReason)} onPress={createJob} accessibilityLabel="Odeslat poptávku">
             <Text style={styles.primaryText}>{creatingRequest ? "Odesílám…" : "Odeslat poptávku"}</Text>
           </TouchableOpacity>
         </FormSection>

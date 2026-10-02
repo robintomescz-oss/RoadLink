@@ -2,6 +2,7 @@
   "expo": {
     "name": "RoadLink",
     "slug": "roadlink",
+    "scheme": "roadlink",
     "owner": "roadlinks-team",
     "version": "0.3.0",
     "icon": "./assets/roadlink-app-icon.png",
@@ -17,7 +18,8 @@
           "locationAlwaysAndWhenInUsePermission": "RoadLink potřebuje přístup k poloze, aby našel nejbližší odtahovou službu."
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-web-browser"
     ],
     "android": {
       "package": "cz.roadlink.mobile",

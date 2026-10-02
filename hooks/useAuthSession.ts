@@ -2,6 +2,7 @@ import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { Alert } from "react-native";
 import { supabase } from "../lib/supabase";
 import { formatSupabaseError } from "../lib/labels";
+import { signInWithGoogle } from "../lib/googleAuth";
 
 // Očekávaná auth odmítnutí, která aplikace zpracuje Alertem — záměrně se nelogují,
 // aby nespouštěly LogBox. Neočekávané chyby se logují strukturovaně (bez hesel/tokenů/PII).
@@ -41,6 +42,10 @@ export type RegistrationValues = {
  * `loginEmail` ZÁMĚRNĚ zůstává tady (v kontextu): e-mail se má zachovat po
  * neúspěšném přihlášení i po odhlášení, aby ho uživatel nemusel přepisovat.
  * Heslo je lokální stav obrazovky a mizí s ní.
+ *
+ * Google přihlášení (loginWithGoogle) je společná akce přihlášení i registrace,
+ * proto žije tady a jeho `googleLoading` drží kontext — běží přes prohlížeč,
+ * takže nesmí zmizet s obrazovkou.
  */
 export function useAuthSession({
   setScreen,
@@ -53,6 +58,7 @@ export function useAuthSession({
   const [loginEmail, setLoginEmail] = useState("");
   const [authInitialized, setAuthInitialized] = useState(false);
   const [signOutLoading, setSignOutLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -124,6 +130,41 @@ export function useAuthSession({
 
     setScreen("home");
     return "success";
+  }
+
+  /**
+   * Google přihlášení / registrace jedním krokem (OAuth přes Supabase).
+   * Uživatel přes Google nemá řádek v profiles — doplní ho signInWithGoogle.
+   */
+  async function loginWithGoogle() {
+    if (googleLoading) return;
+
+    setGoogleLoading(true);
+    const result = await signInWithGoogle();
+    setGoogleLoading(false);
+
+    if (result.status === "cancelled") return;
+
+    if (result.status === "error") {
+      console.error("Supabase signInWithOAuth error:", { message: result.message });
+      Alert.alert("Přihlášení přes Google se nepodařilo", result.message);
+      return;
+    }
+
+    setUserId(result.userId);
+    setScreen("home");
+
+    if (result.profile === "created") {
+      Alert.alert(
+        "Vítejte v RoadLinku",
+        "Účet je propojený s Googlem. Doplňte prosím telefon v Profilu."
+      );
+    } else if (result.profile === "failed") {
+      Alert.alert(
+        "Profil se nezaložil",
+        "Přihlášení proběhlo, ale profil se nepodařilo vytvořit. Otevřete Profil a zkuste to znovu."
+      );
+    }
   }
 
   async function signOutUser() {
@@ -221,6 +262,8 @@ export function useAuthSession({
     loginEmail,
     setLoginEmail,
     signOutLoading,
+    googleLoading,
+    loginWithGoogle,
     loginUser,
     registerUser,
     signOutUser,

@@ -5,7 +5,7 @@ import Svg, { Circle, Path, Rect } from "react-native-svg";
  * Sdílí vizuální styl s ikonami Global Home (viewBox 48, stroke 3,
  * kulaté konce) — jednotná tloušťka a velikost na spodní liště.
  */
-export type NavIconName = "dashboard" | "create" | "mine" | "person";
+export type NavIconName = "dashboard" | "create" | "mine" | "person" | "sos";
 
 export function NavIcon({ name, color, size = 24 }: { name: NavIconName; color: string; size?: number }) {
   return (
@@ -16,6 +16,12 @@ export function NavIcon({ name, color, size = 24 }: { name: NavIconName; color: 
           <Rect x="27" y="7" width="14" height="14" rx="3" />
           <Rect x="7" y="27" width="14" height="14" rx="3" />
           <Rect x="27" y="27" width="14" height="14" rx="3" />
+        </>
+      ) : name === "sos" ? (
+        <>
+          <Path d="M13 34V23a11 11 0 0 1 22 0v11Z" />
+          <Path d="M9 39h30" />
+          <Path d="M24 4v5M7 11l4 4M41 11l-4 4" />
         </>
       ) : name === "mine" ? (
         <>
