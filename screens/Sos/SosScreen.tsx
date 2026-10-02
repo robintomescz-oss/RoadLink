@@ -75,6 +75,7 @@ import {
   type RoadType,
   type SosState,
 } from "../../lib/sos/sosState";
+import { personalVehicleDisplayLabel } from "../../lib/personalVehicles";
 import {
   defaultClientRequestId,
   cancelConfirmedOrder,
@@ -708,6 +709,7 @@ function AssistancePanel({
   onManualLocation,
   onRoadType,
   vehicleOptions,
+  onAddPersonalVehicle,
   onSelectVehicle,
   onConfirm,
   onGetOffer,
@@ -719,13 +721,15 @@ function AssistancePanel({
   onRequestLocation: () => void;
   onManualLocation: (text: string) => void;
   onRoadType: (type: RoadType) => void;
-  vehicleOptions: Array<{ id: string; label: string }>;
+  vehicleOptions: Array<{ id: string; label: string; make: string; model: string; registration: string }>;
+  /** Odkaz z prázdného stavu do profilu, kde se vozidlo přidá. */
+  onAddPersonalVehicle: () => void;
   onSelectVehicle: (vehicle: { source: "profile" | "manual"; label: string; make: string; model: string; registration: string }) => void;
   onConfirm: () => void;
   onGetOffer: () => void;
   onBack: () => void;
 }) {
-  const { sosBooking } = useAppContext();
+  const { sosBooking, personalVehiclesState } = useAppContext();
   const [make, setMake] = React.useState(state.vehicle?.make ?? "");
   const [model, setModel] = React.useState(state.vehicle?.model ?? "");
   const [registration, setRegistration] = React.useState(state.vehicle?.registration ?? "");
@@ -834,19 +838,35 @@ function AssistancePanel({
                 key={option.id}
                 label={option.label}
                 active={state.vehicle?.label === option.label && state.vehicle?.source === "profile"}
-                onPress={() =>
-                  onSelectVehicle({ source: "profile", label: option.label, make: "", model: "", registration: "" })
-                }
+                onPress={() => {
+                  // Výběr vozidla předvyplní i textová pole, aby je uživatel mohl
+                  // libovolně upravit před odesláním.
+                  setMake(option.make);
+                  setModel(option.model);
+                  setRegistration(option.registration);
+                  onSelectVehicle({
+                    source: "profile",
+                    label: option.label,
+                    make: option.make,
+                    model: option.model,
+                    registration: option.registration,
+                  });
+                }}
                 accessibilityLabel={`Vozidlo z profilu: ${option.label}`}
               />
             ))}
           </View>
         ) : (
           <Text style={S.noteText} allowFontScaling>
-            V profilu není uložené žádné vozidlo. Zadejte ho ručně – pomoc můžete
-            přivolat i bez registrace.
+            V profilu nemáte uložené žádné osobní vozidlo. Zadejte ho ručně – pomoc
+            můžete přivolat i bez registrace.
           </Text>
         )}
+        {personalVehiclesState.personalVehicles.length === 0 ? (
+          <TouchableOpacity style={S.noteLink} onPress={onAddPersonalVehicle} accessibilityRole="button" accessibilityLabel="Přidat moje vozidlo do profilu">
+            <Text style={S.noteLinkText} allowFontScaling>Přidat vozidlo do profilu</Text>
+          </TouchableOpacity>
+        ) : null}
         <Text style={S.inputLabel} allowFontScaling>
           Značka / model / registrační značka
         </Text>
@@ -1102,7 +1122,7 @@ function StatusPanel({
 // ── Hlavní obrazovka ───────────────────────────────────────────────────────
 
 export default function SosScreen() {
-  const { locationState, profileState, sosState: state, setSosState: setState, sosBooking, setSosBooking } = useAppContext();
+  const { locationState, sosState: state, setSosState: setState, sosBooking, setSosBooking, personalVehiclesState } = useAppContext();
   const operationBusy = React.useRef(false);
 
   async function handleGetOffer() {
@@ -1149,13 +1169,16 @@ export default function SosScreen() {
     nowMs,
   });
 
-  const vehicleOptions = profileState.vehicles.map((vehicle) => ({
+  // SOS předvyplňuje OSOBNÍ vozidla (`personal_vehicles`), ne přepravní
+  // (`carrier_vehicles`). Přepravní technika sem nepatří — v té je náklad, ne
+  // auta jejího řidiče.
+  const vehicleOptions = personalVehiclesState.personalVehicles.map((vehicle) => ({
     id: vehicle.id,
-    label:
-      vehicle.name ||
-      [vehicle.make, vehicle.model].filter(Boolean).join(" ") ||
-      vehicle.registration_number ||
-      "Vozidlo",
+    label: personalVehicleDisplayLabel(vehicle),
+    // Značka, model a registrace se z výběru rovnou propírají do formuláře.
+    make: vehicle.make,
+    model: vehicle.model,
+    registration: vehicle.registration ?? "",
   }));
 
   function handleIntroChoice(id: IntroChoiceId) {
@@ -1313,6 +1336,7 @@ export default function SosScreen() {
               }
               onRoadType={(type) => setState((current) => setRoadType(current, type))}
               vehicleOptions={vehicleOptions}
+              onAddPersonalVehicle={() => navigateLegacy("personalVehicles")}
               onSelectVehicle={(vehicle) =>
                 setState((current) => setVehicle(current, vehicle))
               }

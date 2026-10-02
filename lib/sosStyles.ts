@@ -129,6 +129,10 @@ export const sosStyles = StyleSheet.create({
   stepIcon: { fontSize: 30 },
   stepTitle: { flex: 1, color: SOS.text, fontSize: 18, fontWeight: "800" },
   noteText: { color: SOS.textMuted, fontSize: 13, lineHeight: 18 },
+  // Odkaz z prázdného stavu: „Přidat vozidlo do profilu“. Styl odpovídá ostatním
+  // akčním odkazům v SOS, jen je tichší než hlavní tlačítko.
+  noteLink: { alignSelf: "flex-start", marginTop: 6, paddingVertical: 4, paddingHorizontal: 2 },
+  noteLinkText: { color: SOS.accent, fontSize: 13, fontWeight: "700" },
 
   // ── Tlačítka ──
   actionRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },

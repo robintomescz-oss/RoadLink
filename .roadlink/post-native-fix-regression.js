@@ -188,6 +188,14 @@ assert(leaked, 'public market mapping rejects private address/GPS/customer field
 assert(profileSource.includes('setProfileEditing(true)'), 'profile edit opens only after Upravit action');
 assert(profileSource.includes('if (!userId)'), 'ProfileRoute guards private screen when logged out');
 assert(profileSource.includes('profileCardHeading'), 'ProfileRoute uses card layout headings');
-assert(profileSource.includes('Spravovat vozidla'), 'ProfileRoute vehicles card has single manage action');
+// Vozidla jsou rozdělená na dvě nesměitelné oblasti (fáze 1 rozdělení vozidel):
+// „Přepravní vozidla“ navázaná na přepravní profil a „Moje vozidla“ jako osobní.
+// Každá má vlastní kartu, vlastní akci a vlastní obrazovku.
+assert(profileSource.includes('Přepravní vozidla'), 'profile separates carrier vehicles into their own card');
+assert(profileSource.includes('Spravovat přepravní vozidla'), 'carrier vehicles card has a single manage action');
+assert(profileSource.includes('Moje vozidla'), 'profile has a separate personal vehicles card');
+assert(profileSource.includes('Spravovat moje vozidla'), 'personal vehicles card has a single manage action');
+assert((profileSource.match(/navigateLegacy\("vehicles"\)/g) || []).length === 1, 'carrier vehicles action opens only the carrier screen');
+assert((profileSource.match(/navigateLegacy\("personalVehicles"\)/g) || []).length === 1, 'personal vehicles action opens only the personal screen');
 
 console.log('\nVŠECHNY KONTROLY PROŠLY.');

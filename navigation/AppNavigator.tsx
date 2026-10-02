@@ -22,6 +22,8 @@ import TrackingRoute from "../screens/Transport/TrackingRoute";
 import ProfileRoute from "../screens/Profile/ProfileRoute";
 import VehiclesRoute from "../screens/Vehicles/VehiclesRoute";
 import VehicleFormRoute from "../screens/Vehicles/VehicleFormRoute";
+import PersonalVehiclesRoute from "../screens/PersonalVehicles/PersonalVehiclesRoute";
+import PersonalVehicleFormRoute from "../screens/PersonalVehicles/PersonalVehicleFormRoute";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -66,8 +68,12 @@ export default function AppNavigator() {
 
             {/* Profil a vozidla */}
             <Stack.Screen name="profile" component={ProfileRoute} />
+            {/* Přepravní vozidla (carrier_vehicles) — beze změny */}
             <Stack.Screen name="vehicles" component={VehiclesRoute} />
             <Stack.Screen name="vehicleForm" component={VehicleFormRoute} />
+            {/* Osobní vozidla (personal_vehicles) — jen profil a SOS */}
+            <Stack.Screen name="personalVehicles" component={PersonalVehiclesRoute} />
+            <Stack.Screen name="personalVehicleForm" component={PersonalVehicleFormRoute} />
           </Stack.Navigator>
         </NavigationContainer>
       </AppProvider>
