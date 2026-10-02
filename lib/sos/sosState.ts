@@ -261,15 +261,15 @@ export function orderFailed(state: SosState, message: string): SosState {
   };
 }
 
-/** Retry po chybě: uvolní klíč, ale zachová průběh průvodce. */
+/** Retry po chybě zachová klíč: server mohl požadavek přijmout před výpadkem odpovědi. */
 export function resetFailedOrder(state: SosState): SosState {
-  if (state.order.status === "sending") return state;
+  if (state.order.status !== "failed" && state.order.status !== "rejected") return state;
   return {
     ...state,
     stage: "assistance",
     order: {
       status: "idle",
-      clientRequestId: null,
+      clientRequestId: state.order.status === "failed" ? state.order.clientRequestId : null,
       providerName: null,
       orderId: null,
       etaMinutes: null,

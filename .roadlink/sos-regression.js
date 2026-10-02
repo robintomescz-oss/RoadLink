@@ -165,6 +165,15 @@ assertEqual(failed.order.orderId, null, "při chybě se nenastaví ID objednávk
 assert(failed.order.status !== "sent", "síťová chyba NIKDY neznamená „odesláno“");
 assert(state.canSubmitOrder(failed) === true, "po chybě lze bezpečně zkusit znovu");
 assertEqual(state.resetFailedOrder(failed).order.status, "idle", "retry uvolní objednávku");
+const retryReady = state.resetFailedOrder(failed);
+assertEqual(retryReady.order.clientRequestId, "req-1", "timeout retry zachová původní idempotency klíč");
+const retryKey = assistance.resolveClientRequestId(retryReady.order.clientRequestId, () => "unexpected-new-key");
+const retrySending = state.beginOrder(retryReady, retryKey, null, 3000);
+assertEqual(retrySending.order.clientRequestId, "req-1", "další pokus odešle stejný klíč i po ztracené odpovědi");
+const secondRetry = state.resetFailedOrder(state.orderFailed(retrySending, "another timeout"));
+assertEqual(secondRetry.order.clientRequestId, "req-1", "opakované timeouty zachovají stejný klíč");
+assertEqual(state.resetFailedOrder(sent), sent, "retry nesmí resetovat existující odeslanou objednávku");
+assertEqual(state.resetFailedOrder(state.orderStatusChanged(s, "rejected")).order.clientRequestId, null, "potvrzené odmítnutí dovolí nový klíč");
 assertEqual(state.cancelOrder(s).order.status, "sending", "během odesílání nelze zrušit");
 assertEqual(state.cancelOrder(sent).order.status, "cancelled", "odeslanou objednávku lze zrušit");
 assertEqual(state.orderStatusView("rejected").tone, "error", "odmítnutí má chybový tón");
@@ -233,10 +242,22 @@ assert(summary.vehicleLabel.includes("Škoda"), "souhrn obsahuje vozidlo");
   const fakeProvider = {
     id: "fake",
     isConfigured: () => true,
+    getOffer: async () => ({ offerId: "quote-1", providerName: "P", serviceScope: "Odtah", confirmedPrice: "1500 Kč", estimatedPrice: null, etaMinutes: 15, cancellationTerms: "Storno 0 Kč" }),
+    cancelOrder: async (id) => { assertEqual(id, "o-9", "storno předá skutečné ID objednávky poskytovateli"); return { cancelled: true }; },
     requestOrder: async () => ({ status: "accepted_by_provider", orderId: "o-9", offer: { providerName: "P", serviceScope: "s", confirmedPrice: null, estimatedPrice: "odhad", etaMinutes: 15, cancellationTerms: "dle podmínek" } }),
   };
   assistance.setAssistanceProvider(fakeProvider);
   assert(assistance.getAssistanceProvider().isConfigured() === true, "provider lze vyměnit");
+  const quote = await fakeProvider.getOffer({});
+  assertEqual(quote.confirmedPrice, "1500 Kč", "nabídka poskytne cenu před objednáním");
+  const activeOrder = state.orderSent(state.beginOrder(state.createInitialSosState(), "cancel-key", "fake", 0), { orderId: "o-9", etaMinutes: 15 });
+  assertEqual((await assistance.cancelConfirmedOrder(fakeProvider, activeOrder)).order.status, "cancelled", "potvrzené storno změní stav");
+  for (const cancelOrder of [async () => ({ cancelled: false }), async () => { throw new Error("timeout"); }]) {
+    let rejected = false;
+    try { await assistance.cancelConfirmedOrder({ ...fakeProvider, cancelOrder }, activeOrder); } catch { rejected = true; }
+    assert(rejected, "nepotvrzené nebo síťově selhané storno se nevykazuje jako zrušení");
+    assertEqual(activeOrder.order.status, "sent", "nepotvrzené storno zachová aktivní objednávku");
+  }
   assistance.resetAssistanceProvider();
   assert(assistance.getAssistanceProvider().id === "none", "reset vrátí výchozího providera");
 

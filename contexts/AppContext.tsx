@@ -16,6 +16,8 @@ import { useLocation } from "../hooks/useLocation";
 import { useProfile } from "../hooks/useProfile";
 import { useTransportData } from "../hooks/useTransportData";
 import type { OfferProviderProfile, RequestViewMode, TowOffer } from "../lib/types";
+import { createInitialSosState, type SosState } from "../lib/sos/sosState";
+import type { AssistanceOffer, AssistanceOrderRequest } from "../lib/sos/assistanceProvider";
 
 export type TransportTab = "all" | "requests" | "capacity" | "mine";
 
@@ -48,6 +50,10 @@ type TransportState = ReturnType<typeof useTransportData>;
 type ProfileState = ReturnType<typeof useProfile>;
 
 export type AppContextValue = {
+  sosState: SosState;
+  setSosState: React.Dispatch<React.SetStateAction<SosState>>;
+  sosBooking: { offer: AssistanceOffer; request: AssistanceOrderRequest; providerId: string } | null;
+  setSosBooking: React.Dispatch<React.SetStateAction<AppContextValue["sosBooking"]>>;
   // ── Jádro (sdílené napříč obrazovkami) ────────────────────────────────
   // Žádná `role`: RoadLink má jeden účet (viz ROADLINK_AGENT_RULES.md).
   userId: AuthState["userId"];
@@ -87,6 +93,8 @@ export type AppContextValue = {
 const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
+  const [sosState, setSosState] = useState<SosState>(createInitialSosState);
+  const [sosBooking, setSosBooking] = useState<AppContextValue["sosBooking"]>(null);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [requestViewMode, setRequestViewMode] = useState<RequestViewMode>("owner");
   const [transportTab, setTransportTab] = useState<TransportTab>("all");
@@ -183,6 +191,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
 
   const value: AppContextValue = {
+    sosState, setSosState, sosBooking, setSosBooking,
     userId,
     activeJobId,
     setActiveJobId,
