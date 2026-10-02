@@ -545,7 +545,8 @@ export const SOS_ACCIDENT_HEADLINE = "Mám volat policii?";
 
 export const SOS_DATA_SHARING_INTRO =
   "Pokud objednáte asistenci u partnera, budou mu předány jen údaje potřebné " +
-  "ke zásahu. Nic se neodesílá, dokud objednávku nepotvrdíte.";
+    "ke zásahu. Klepnutím na Získat nabídku odešlete uvedené údaje poskytovateli " +
+    "pro nacenění. Závazná objednávka vzniká až po vašem samostatném potvrzení nabídky.";
 
 export const SOS_DATA_SHARED_ITEMS = [
   "Poloha a její přesnost (nebo popis místa, který zadáte ručně).",

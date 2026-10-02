@@ -30,7 +30,6 @@ import {
   SOS_LEGAL_METADATA,
   SOS_NEVER_AUTO_CALL_NOTE,
   SOS_OPERATOR_INSTRUCTION,
-  SOS_ORDER_NO_PARTNER_YET,
   SOS_ORDER_ONE_CONFIRMATION,
   SOS_SAFETY_HEADLINE,
   SOS_SAFETY_NEVER_BLOCKS,
@@ -60,8 +59,6 @@ import {
   beginOrder,
   buildRequestSummary,
   canSubmitOrder,
-  cancelOrder,
-  createInitialSosState,
   describeLocation,
   goToStage,
   isOrderBusy,
@@ -80,6 +77,7 @@ import {
 } from "../../lib/sos/sosState";
 import {
   defaultClientRequestId,
+  cancelConfirmedOrder,
   getAssistanceProvider,
   resolveClientRequestId,
 } from "../../lib/sos/assistanceProvider";
@@ -712,6 +710,7 @@ function AssistancePanel({
   vehicleOptions,
   onSelectVehicle,
   onConfirm,
+  onGetOffer,
   onBack,
 }: {
   state: SosState;
@@ -723,11 +722,17 @@ function AssistancePanel({
   vehicleOptions: Array<{ id: string; label: string }>;
   onSelectVehicle: (vehicle: { source: "profile" | "manual"; label: string; make: string; model: string; registration: string }) => void;
   onConfirm: () => void;
+  onGetOffer: () => void;
   onBack: () => void;
 }) {
+  const { sosBooking } = useAppContext();
   const [make, setMake] = React.useState(state.vehicle?.make ?? "");
   const [model, setModel] = React.useState(state.vehicle?.model ?? "");
   const [registration, setRegistration] = React.useState(state.vehicle?.registration ?? "");
+  const [assistancePhone, setAssistancePhone] = React.useState("");
+  const phoneNumber = assistancePhone.replace(/[\s()-]/g, "");
+  const validPhone = /^\+?[0-9]{9,15}$/.test(phoneNumber);
+  const providerConfigured = getAssistanceProvider().isConfigured();
 
   const roadSuggestion = suggestRoadType({
     mapDataAvailable: false,
@@ -945,23 +950,71 @@ function AssistancePanel({
       </View>
 
       <BigButton
-        label={busy ? "Odesílám…" : canSubmit ? "Potvrdit objednávku asistence" : "Objednávka už existuje"}
+        label="Získat nabídku asistence"
+        onPress={onGetOffer}
+        disabled={!providerConfigured || busy || !canSubmit || (Boolean(state.order.clientRequestId) && (state.order.status === "failed" || state.order.status === "idle"))}
+      />
+      {sosBooking ? (
+        <View style={S.card}>
+          <Text style={S.cardTitle} allowFontScaling>{sosBooking.offer.providerName}</Text>
+          <Text style={S.cardText} allowFontScaling>{sosBooking.offer.serviceScope}</Text>
+          <Text style={S.cardText} allowFontScaling>
+            {sosBooking.offer.confirmedPrice ? `Konečná cena: ${sosBooking.offer.confirmedPrice}` : `Odhad ceny: ${sosBooking.offer.estimatedPrice}`}
+          </Text>
+          <Text style={S.cardText} allowFontScaling>Odhad příjezdu: {sosBooking.offer.etaMinutes == null ? "není dostupný" : `${sosBooking.offer.etaMinutes} min`}</Text>
+          <Text style={S.cardText} allowFontScaling>Storno: {sosBooking.offer.cancellationTerms}</Text>
+          <Text style={S.cardText} allowFontScaling>Problém nabídky: {sosBooking.request.problemLabel}</Text>
+          <Text style={S.cardText} allowFontScaling>Poloha nabídky: {sosBooking.request.location.description}</Text>
+          <Text style={S.cardText} allowFontScaling>Vozidlo nabídky: {sosBooking.request.vehicle ? [sosBooking.request.vehicle.label, sosBooking.request.vehicle.registration].filter(Boolean).join(" · ") : "Neuvedeno"}</Text>
+          <Text style={S.noteText} allowFontScaling>Objedná se problém a poloha zobrazené při získání této nabídky. Pro změnu údajů si vyžádejte novou nabídku.</Text>
+        </View>
+      ) : null}
+      <BigButton
+        label={!providerConfigured ? "Online objednání není dostupné" : busy ? "Odesílám…" : canSubmit ? "Potvrdit objednávku asistence" : "Objednávka už existuje"}
         onPress={onConfirm}
-        disabled={busy || !canSubmit}
+        disabled={!providerConfigured || !sosBooking || busy || !canSubmit || (["completed", "cancelled", "rejected"].includes(state.order.status) && sosBooking.request.clientRequestId === state.order.clientRequestId)}
         accessibilityHint="Jedno potvrzení. Opakované klepnutí nevytvoří duplicitní objednávku."
       />
 
-      {!getAssistanceProvider().isConfigured() ? (
+      {!providerConfigured ? (
         <View style={S.disclosureCard}>
           <Text style={S.cardTitle} allowFontScaling>
-            Objednání u partnera
+            Zavolejte svou asistenci
           </Text>
           <Text style={S.cardText} allowFontScaling>
-            {SOS_ORDER_NO_PARTNER_YET}
+            Online objednání zatím není dostupné. Použijte kontakt na asistenci
+            své pojišťovny nebo odtahovou službu z pojistných dokumentů.
           </Text>
           <Text style={S.noteText} allowFontScaling>
-            Rozhraní pro budoucí napojení partnerského API je připravené.
+            Zadejte telefonní číslo včetně předvolby, pokud voláte do zahraničí.
+            Tísňové linky jsou určené pro naléhavé situace.
           </Text>
+          <TextInput
+            style={S.input}
+            value={assistancePhone}
+            onChangeText={setAssistancePhone}
+            placeholder="Telefon na asistenci"
+            placeholderTextColor={SOS.textFaint}
+            keyboardType="phone-pad"
+            accessibilityLabel="Telefonní číslo vlastní asistence nebo pojišťovny"
+            allowFontScaling
+          />
+          {assistancePhone.length > 0 && !validPhone ? (
+            <Text style={S.noteText} allowFontScaling>
+              Zadejte 9 až 15 číslic, případně s předvolbou začínající +.
+            </Text>
+          ) : null}
+          <BigButton
+            label="Zavolat vlastní asistenci"
+            disabled={!validPhone}
+            onPress={() => {
+              if (!validPhone) return;
+              Linking.openURL(`tel:${phoneNumber}`).catch(() => {
+                Alert.alert("Nelze otevřít volání", `Zavolejte číslo ${phoneNumber} ručně v telefonní aplikaci.`);
+              });
+            }}
+            accessibilityHint="Otevře telefonní aplikaci se zadaným číslem."
+          />
         </View>
       ) : null}
 
@@ -1049,8 +1102,36 @@ function StatusPanel({
 // ── Hlavní obrazovka ───────────────────────────────────────────────────────
 
 export default function SosScreen() {
-  const { locationState, profileState } = useAppContext();
-  const [state, setState] = React.useState<SosState>(createInitialSosState);
+  const { locationState, profileState, sosState: state, setSosState: setState, sosBooking, setSosBooking } = useAppContext();
+  const operationBusy = React.useRef(false);
+
+  async function handleGetOffer() {
+    const provider = getAssistanceProvider();
+    if (!provider.isConfigured() || operationBusy.current || !canSubmitOrder(state) || (state.order.clientRequestId && (state.order.status === "failed" || state.order.status === "idle"))) return;
+    operationBusy.current = true;
+    setSosBooking(null);
+    const summary = buildRequestSummary({ problemId: state.problem, location: locationSummary, vehicle: state.vehicle, roadType: state.roadType });
+    const request = { clientRequestId: defaultClientRequestId(), problemId: state.problem, problemLabel: summary.problemLabel, location: locationSummary, vehicle: state.vehicle, roadTypeLabel: summary.roadTypeLabel, disclosedItems: SOS_DATA_SHARED_ITEMS };
+    try {
+      const offer = await provider.getOffer(request);
+      if (!offer.offerId || !offer.providerName || !offer.serviceScope || !(offer.confirmedPrice || offer.estimatedPrice) || !offer.cancellationTerms) throw new Error("Nabídka neobsahuje všechny potřebné podmínky.");
+      setSosBooking({ offer, request: { ...request, offerId: offer.offerId }, providerId: provider.id });
+    } catch {
+      Alert.alert("Nabídka není dostupná", "Nabídku se nepodařilo získat. Zkuste to znovu nebo zavolejte vlastní asistenci.");
+    } finally { operationBusy.current = false; }
+  }
+
+  async function handleCancelOrder() {
+    const provider = getAssistanceProvider();
+    const orderId = state.order.orderId;
+    if (!orderId || operationBusy.current || provider.id !== state.order.providerName) return;
+    operationBusy.current = true;
+    try {
+      const cancelled = await cancelConfirmedOrder(provider, state);
+      setState(current => current.order.orderId === orderId ? { ...current, order: cancelled.order } : current);
+    } catch { Alert.alert("Storno nebylo potvrzeno", "Nepodařilo se ověřit zrušení. Objednávka zůstává aktivní."); }
+    finally { operationBusy.current = false; }
+  }
 
   const nowMs = Date.now();
   const rawLocation = locationState.location
@@ -1082,15 +1163,13 @@ export default function SosScreen() {
   }
 
   async function handleConfirmOrder() {
-    if (!canSubmitOrder(state) || isOrderBusy(state)) return;
+    if (!canSubmitOrder(state) || isOrderBusy(state) || operationBusy.current || !sosBooking) return;
     const provider = getAssistanceProvider();
-    const clientRequestId = resolveClientRequestId(state.order.clientRequestId, defaultClientRequestId);
-    const summary = buildRequestSummary({
-      problemId: state.problem,
-      location: locationSummary,
-      vehicle: state.vehicle,
-      roadType: state.roadType,
-    });
+    if (!provider.isConfigured() || provider.id !== sosBooking.providerId) return;
+    if (["completed", "cancelled", "rejected"].includes(state.order.status) && sosBooking.request.clientRequestId === state.order.clientRequestId) return;
+    operationBusy.current = true;
+    const retryKey = state.order.status === "failed" || state.order.status === "idle" ? state.order.clientRequestId : null;
+    const clientRequestId = resolveClientRequestId(retryKey, () => sosBooking.request.clientRequestId);
     setState((current) =>
       beginOrder(
         current,
@@ -1102,13 +1181,8 @@ export default function SosScreen() {
 
     try {
       const result = await provider.requestOrder({
+        ...sosBooking.request,
         clientRequestId,
-        problemId: state.problem,
-        problemLabel: summary.problemLabel,
-        location: locationSummary,
-        vehicle: state.vehicle,
-        roadTypeLabel: summary.roadTypeLabel,
-        disclosedItems: SOS_DATA_SHARED_ITEMS,
       });
 
       setState((current) => {
@@ -1149,7 +1223,7 @@ export default function SosScreen() {
           "Objednávku se nepodařilo odeslat. Zkontrolujte připojení a zkuste to znovu, nebo volejte přímo."
         );
       });
-    }
+    } finally { operationBusy.current = false; }
   }
 
   return (
@@ -1243,6 +1317,7 @@ export default function SosScreen() {
                 setState((current) => setVehicle(current, vehicle))
               }
               onConfirm={handleConfirmOrder}
+              onGetOffer={handleGetOffer}
               onBack={() => setState((current) => goToStage(current, "problem"))}
             />
           ) : null}
@@ -1250,8 +1325,11 @@ export default function SosScreen() {
           {state.stage === "status" ? (
             <StatusPanel
               state={state}
-              onRetry={() => setState((current) => resetFailedOrder(current))}
-              onCancel={() => setState((current) => cancelOrder(current))}
+              onRetry={() => {
+                if (state.order.status === "rejected") setSosBooking(null);
+                setState((current) => resetFailedOrder(current));
+              }}
+              onCancel={() => Alert.alert("Zrušit objednávku?", sosBooking?.offer.cancellationTerms || "Storno podmínky ověřte u poskytovatele.", [{ text: "Ponechat", style: "cancel" }, { text: "Požádat o storno", style: "destructive", onPress: handleCancelOrder }])}
               onBackToAssistance={() =>
                 setState((current) => goToStage(current, "assistance"))
               }
