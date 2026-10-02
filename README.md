@@ -5,7 +5,7 @@ Mobilní tržiště pro poptávky a nabídky přepravy vozidel. Aplikace je post
 ## Aktuální stav
 
 - veřejný, sanitizovaný trh přepravy dostupný bez přihlášení;
-- přihlášení a oddělené soukromé detaily chráněné přes Supabase RLS;
+- přihlášení a registrace e-mailem i přes Google účet, oddělené soukromé detaily chráněné přes Supabase RLS (nastavení Google přihlášení: `docs/google-auth-setup.md`);
 - poptávky, nabídky dopravců, volné trasy a průběh přepravy;
 - profil dopravce a vozový park;
 - responzivní domovská obrazovka a formuláře;
