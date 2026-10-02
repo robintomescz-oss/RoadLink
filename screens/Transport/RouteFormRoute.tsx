@@ -3,7 +3,7 @@ import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from "reac
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { supabase } from "../../lib/supabase";
 import { canonicalVehicleType } from "../../lib/labels";
-import { buildRouteMetricsPayload, capacitySnapshot, normalizeViaPlaces, routeMetricsSubmitBlockReason, MAX_VIA_PLACES, type CapacityErrorKey, validateCapacityForm } from "../../lib/createFormLogic";
+import { buildRouteMetricsPayload, capacitySnapshot, routeMetricsSubmitBlockReason, type CapacityErrorKey, validateCapacityForm } from "../../lib/createFormLogic";
 import { FormBackHeader, FormSection, FieldError, ReviewRow } from "../../components/form/FormParts";
 import { RouteMetricsPreviewCard } from "../../components/form/RouteMetricsPreviewCard";
 import { VerifiedLocationInput } from "../../components/form/VerifiedLocationInput";
@@ -29,7 +29,6 @@ export default function RouteFormRoute() {
   const [routeDepartureDate, setRouteDepartureDate] = useState<Date | null>(null);
   const [routeDepartureTime, setRouteDepartureTime] = useState<Date | null>(null);
   const [routeSpaces, setRouteSpaces] = useState("1");
-  const [viaPlaces, setViaPlaces] = useState<VerifiedLocation[]>([]);
   const [routeVehicleTypes, setRouteVehicleTypes] = useState("Osobní automobil");
   const [routePrice, setRoutePrice] = useState("");
   const [routePriceMode, setRoutePriceMode] = useState<"fixed" | "negotiable">("fixed");
@@ -43,7 +42,6 @@ export default function RouteFormRoute() {
   const routePreview = useRouteMetricsPreview({
     originPlaceId: fromLocation?.placeId ?? null,
     destinationPlaceId: toLocation?.placeId ?? null,
-    viaPlaceIds: viaPlaces.map((place) => place.placeId),
   });
   const capacityRouteBlockReason = routeMetricsSubmitBlockReason({
     originPlaceId: fromLocation?.placeId ?? null,
@@ -52,7 +50,7 @@ export default function RouteFormRoute() {
   });
 
   function currentRouteSnapshot() {
-    return capacitySnapshot({ routeFrom, routeTo, fromPublicLabel: routeFromPublicLabel, toPublicLabel: routeToPublicLabel, routeDepartureDate, routeDepartureTime, routeSpaces, viaPlaces, routeVehicleTypes, routePrice, routePriceMode, routeDescription });
+    return capacitySnapshot({ routeFrom, routeTo, fromPublicLabel: routeFromPublicLabel, toPublicLabel: routeToPublicLabel, routeDepartureDate, routeDepartureTime, routeSpaces, routeVehicleTypes, routePrice, routePriceMode, routeDescription });
   }
 
   useEffect(() => {
@@ -101,21 +99,6 @@ export default function RouteFormRoute() {
     const availableSpaces = Number(routeSpaces);
     const price = routePrice.trim() === "" ? null : Number(routePrice);
 
-    // Průjezdní body se normalizují znovu těsně před insertem, ne jen v UI:
-    // tím se do databáze nedostane bod shodný s odjezdem/cílem ani duplikát.
-    const viaPlaceIds = normalizeViaPlaces({
-      viaPlaces,
-      originPlaceId: fromLocation?.placeId ?? null,
-      destinationPlaceId: toLocation?.placeId ?? null,
-    });
-    if (!viaPlaceIds) {
-      setRouteErrors((current) => ({
-        ...current,
-        route: `Průjezdní body musí být různé od odjezdu a cíle (nejvýše ${MAX_VIA_PLACES}).`,
-      }));
-      return;
-    }
-
     setCreatingRoute(true);
     try {
       // Veřejné labely (město/obec) — povinné, trimované, max 80 znaků;
@@ -154,8 +137,6 @@ export default function RouteFormRoute() {
         to_lng: toCoordinates?.longitude ?? null,
         departure_at: departureAt.toISOString(),
         available_spaces: availableSpaces,
-        via_place_ids: viaPlaceIds.length > 0 ? viaPlaceIds.map((place) => place.placeId) : null,
-        via_public_labels: viaPlaceIds.length > 0 ? viaPlaceIds.map((place) => place.publicLabel) : null,
         vehicle_types: [vehicleType],
         price: routePriceMode === "negotiable" ? null : price,
         description: routeDescription,
@@ -170,7 +151,6 @@ export default function RouteFormRoute() {
       await loadRoutes();
       setRouteDepartureDate(null);
       setRouteDepartureTime(null);
-      setViaPlaces([]);
       Alert.alert("Trasa vytvořena", "Vaše nabídka volné trasy byla uložena.");
       setRouteErrors({});
       initialSnapshotRef.current = null;
@@ -190,41 +170,7 @@ export default function RouteFormRoute() {
           <Text style={styles.publicHintText}>Vyberte existující místo z nabídky. Veřejně se zobrazí pouze město nebo oblast; přesná adresa zůstane soukromá.</Text>
           <VerifiedLocationInput label="Místo odjezdu" placeholder="Začněte psát adresu nebo obec" value={fromLocation} onChange={(location) => { setFromLocation(location); setRouteFrom(location?.formattedAddress ?? ""); setRouteFromPublicLabel(location?.publicLabel ?? ""); setRouteErrors((current) => ({ ...current, publicPlace: undefined, route: undefined })); }} onError={(message) => setRouteErrors((current) => ({ ...current, route: message }))} />
           <VerifiedLocationInput label="Cíl trasy" placeholder="Začněte psát adresu nebo obec" value={toLocation} onChange={(location) => { setToLocation(location); setRouteTo(location?.formattedAddress ?? ""); setRouteToPublicLabel(location?.publicLabel ?? ""); setRouteErrors((current) => ({ ...current, publicPlace: undefined, route: undefined })); }} onError={(message) => setRouteErrors((current) => ({ ...current, route: message }))} />
-          {viaPlaces.map((place, index) => (
-            <View key={place.placeId} style={styles.viaRow}>
-              <View style={styles.viaRowText}>
-                <Text style={styles.viaRowTitle}>Přes {place.publicLabel}</Text>
-              </View>
-              <TouchableOpacity
-                style={styles.viaRemove}
-                onPress={() => setViaPlaces((current) => current.filter((_, position) => position !== index))}
-                accessibilityRole="button"
-                accessibilityLabel={`Odebrat průjezdní bod ${place.publicLabel}`}
-              >
-                <Text style={styles.viaRemoveText}>Odebrat</Text>
-              </TouchableOpacity>
-            </View>
-          ))}
-          {viaPlaces.length < MAX_VIA_PLACES ? (
-            <VerifiedLocationInput
-              // Vstup si drží text ve vlastním stavu a `value` je tu stále null,
-              // takže po výběru (i po Odebrat) by v něm zůstala adresa předchozího
-              // bodu. Změna klíče podle počtu bodů vynutí čistou instanci.
-              key={`via-${viaPlaces.length}`}
-              label={viaPlaces.length === 0 ? "Průjezdní bod · volitelný" : "Další průjezdní bod · volitelný"}
-              placeholder="Např. Plzeň"
-              value={null}
-              onChange={(location) => {
-                if (!location) return;
-                setViaPlaces((current) => (current.some((item) => item.placeId === location.placeId) ? current : [...current, location]));
-                setRouteErrors((current) => ({ ...current, route: undefined }));
-              }}
-              onError={(message) => setRouteErrors((current) => ({ ...current, route: message }))}
-            />
-          ) : (
-            <Text style={styles.publicHintText}>Maximum {MAX_VIA_PLACES} průjezdních bodů. Přebytečný bod odeberte tlačítkem Odebrat.</Text>
-          )}
-          <RouteMetricsPreviewCard originLabel={routeFromPublicLabel} destinationLabel={routeToPublicLabel} viaLabels={viaPlaces.map((place) => place.publicLabel)} preview={routePreview} />
+          <RouteMetricsPreviewCard originLabel={routeFromPublicLabel} destinationLabel={routeToPublicLabel} preview={routePreview} />
           <FieldError message={routeErrors.route} />
           <FieldError message={routeErrors.publicPlace} />
         </FormSection>

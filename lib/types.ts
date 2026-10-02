@@ -49,8 +49,6 @@ export type CarrierRoute = {
   driverId?: string;
   fromAddress: string;
   toAddress: string;
-  /** Veřejné názvy oblastí průjezdních bodů; prázdné = přímá trasa. */
-  viaLabels: string[];
   departureAt: string;
   availableSpaces: number;
   maxDeviationKm: number | null;

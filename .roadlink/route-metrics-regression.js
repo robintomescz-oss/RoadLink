@@ -219,72 +219,11 @@ for (const [label, body] of [
 const samePlace = edge.validateRouteRequest({ originPlaceId: 'ChIJsame', destinationPlaceId: 'ChIJsame' });
 assert(samePlace.ok === false && samePlace.code === 'invalid_request', 'identical origin and destination is rejected');
 
-// ── 2b. Průjezdní body (via) ────────────────────────────────────────────────
-const withVia = edge.validateRouteRequest({
-  originPlaceId: 'ChIJfrom',
-  destinationPlaceId: 'ChIJto',
-  viaPlaceIds: ['ChIJplzen', 'ChIJklatovy'],
-});
-assert(withVia.ok === true, 'a route with via points passes validation');
-assert(
-  Array.isArray(withVia.value.viaPlaceIds) && withVia.value.viaPlaceIds.length === 2,
-  'validated request carries the via place IDs',
-);
-assert(
-  edge.MAX_VIA_PLACES === 3,
-  'the via limit is three points',
-);
-
-const noVia = edge.validateRouteRequest({ originPlaceId: 'ChIJfrom', destinationPlaceId: 'ChIJto' });
-assert(noVia.ok === true, 'a route without via points still passes validation');
-assert(!noVia.value.viaPlaceIds || noVia.value.viaPlaceIds.length === 0, 'a route without via points has none');
-
-assert(
-  edge.validateRouteRequest({ originPlaceId: 'ChIJa', destinationPlaceId: 'ChIJb', viaPlaceIds: 'not-an-array' }).ok === false,
-  'a non-array via value is rejected',
-);
-assert(
-  edge.validateRouteRequest({ originPlaceId: 'ChIJa', destinationPlaceId: 'ChIJb', viaPlaceIds: ['has space'] }).ok === false,
-  'a via point that is not a valid place ID is rejected',
-);
-assert(
-  edge.validateRouteRequest({ originPlaceId: 'ChIJa', destinationPlaceId: 'ChIJb', viaPlaceIds: ['ok1', 'ok2', 'ok3', 'ok4'] }).ok === false,
-  'more than three via points are rejected',
-);
-assert(
-  edge.validateRouteRequest({ originPlaceId: 'ChIJa', destinationPlaceId: 'ChIJb', viaPlaceIds: ['ChIJa'] }).ok === false,
-  'a via point identical to the origin is rejected',
-);
-assert(
-  edge.validateRouteRequest({ originPlaceId: 'ChIJa', destinationPlaceId: 'ChIJb', viaPlaceIds: ['ChIJb'] }).ok === false,
-  'a via point identical to the destination is rejected',
-);
-assert(
-  edge.validateRouteRequest({ originPlaceId: 'ChIJa', destinationPlaceId: 'ChIJb', viaPlaceIds: ['dup', 'dup'] }).ok === false,
-  'a duplicated via point is rejected',
-);
-
 // ── 3. Pevné tělo volání Google ─────────────────────────────────────────────
 const body = edge.buildComputeRoutesBody({ originPlaceId: 'ChIJa', destinationPlaceId: 'ChIJb' });
 assert(body.origin.placeId === 'ChIJa' && body.destination.placeId === 'ChIJb', 'compute routes body uses the two place IDs');
 assert(body.travelMode === 'DRIVE' && body.routingPreference === 'TRAFFIC_UNAWARE' && body.units === 'METRIC', 'compute routes body is fixed by the server');
 assert(!JSON.stringify(body).includes('http'), 'client cannot influence the Google URL through the body');
-assert(!('intermediates' in body), 'a direct route sends no intermediates at all');
-
-const bodyWithVia = edge.buildComputeRoutesBody({
-  originPlaceId: 'ChIJfrom',
-  destinationPlaceId: 'ChIJto',
-  viaPlaceIds: ['ChIJplzen'],
-});
-assert(
-  Array.isArray(bodyWithVia.intermediates) && bodyWithVia.intermediates.length === 1
-    && bodyWithVia.intermediates[0].placeId === 'ChIJplzen',
-  'via points are sent as Google intermediates',
-);
-assert(
-  bodyWithVia.optimizeWaypointOrder === false,
-  'waypoint order is never optimized, so the driver keeps the chosen order',
-);
 assert(edge.ROUTES_FIELD_MASK === 'routes.distanceMeters,routes.duration', 'field mask requests only distance and duration');
 assert(!edge.ROUTES_FIELD_MASK.includes('polyline'), 'field mask never requests route geometry');
 assert(edge.ROUTES_COMPUTE_URL.startsWith('https://routes.googleapis.com/'), 'compute routes URL is a fixed Google endpoint');

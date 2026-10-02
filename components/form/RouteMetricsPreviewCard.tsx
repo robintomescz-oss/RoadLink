@@ -7,12 +7,10 @@ import { routeMetricsPreviewLabel, type RouteMetricsPreviewSnapshot } from "../.
 type Props = {
   originLabel: string;
   destinationLabel: string;
-  /** Veřejné názvy průjezdních bodů; prázdné = přímá trasa. */
-  viaLabels?: string[];
   preview: RouteMetricsPreviewSnapshot & { retry?: () => void | Promise<void> };
 };
 
-export function RouteMetricsPreviewCard({ originLabel, destinationLabel, viaLabels, preview }: Props) {
+export function RouteMetricsPreviewCard({ originLabel, destinationLabel, preview }: Props) {
   if (!preview.pairKey && preview.status === "idle") {
     return (
       <View style={styles.routePreviewCard}>
@@ -34,7 +32,7 @@ export function RouteMetricsPreviewCard({ originLabel, destinationLabel, viaLabe
   }
 
   if (preview.status === "success" && preview.metrics) {
-    const label = routeMetricsPreviewLabel({ originLabel, destinationLabel, viaLabels, metrics: preview.metrics });
+    const label = routeMetricsPreviewLabel({ originLabel, destinationLabel, metrics: preview.metrics });
     return (
       <View style={[styles.routePreviewCard, styles.routePreviewSuccess]}>
         <Text style={styles.routePreviewTitle}>{label.title}</Text>

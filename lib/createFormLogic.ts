@@ -240,44 +240,6 @@ export function buildRouteMetricsPayload(input: {
   };
 }
 
-/** Kolik průjezdních bodů smí trasa obsahovat; odpovídá DB a `MAX_VIA_PLACES`. */
-export const MAX_VIA_PLACES = 3;
-
-export type ViaPlace = { placeId: string; publicLabel: string };
-
-/**
- * Znormalizuje seznam průjezdních bodů a odmítne rozbitý vstup.
- *
- * Vrací `null`, když je pole příliš dlouhé, obsahuje prázdný/duplicitní bod
- * nebo bod shodný s odjezdem či cílem — taková trasa by byla zbytečně dlouhá
- * nebo by Google odmítl. Prázdné pole znamená přímou trasu a je legitimní.
- */
-export function normalizeViaPlaces(input: {
-  viaPlaces: readonly ViaPlace[];
-  originPlaceId?: string | null;
-  destinationPlaceId?: string | null;
-}): ViaPlace[] | null {
-  const source = input.viaPlaces ?? [];
-  if (source.length > MAX_VIA_PLACES) return null;
-
-  const seen = new Set<string>();
-  const origin = input.originPlaceId ?? null;
-  const destination = input.destinationPlaceId ?? null;
-  const result: ViaPlace[] = [];
-
-  for (const place of source) {
-    const placeId = typeof place?.placeId === "string" ? place.placeId.trim() : "";
-    const publicLabel = typeof place?.publicLabel === "string" ? place.publicLabel.trim() : "";
-    if (!placeId || !publicLabel) return null;
-    if (placeId === origin || placeId === destination) return null;
-    if (seen.has(placeId)) return null;
-    seen.add(placeId);
-    result.push({ placeId, publicLabel });
-  }
-
-  return result;
-}
-
 export function capacitySnapshot(input: {
   routeFrom: string;
   routeTo: string;
@@ -286,7 +248,6 @@ export function capacitySnapshot(input: {
   routeDepartureDate: Date | null;
   routeDepartureTime: Date | null;
   routeSpaces: string;
-  viaPlaces?: readonly ViaPlace[];
   routeVehicleTypes: string;
   routePrice: string;
   routePriceMode: "fixed" | "negotiable";

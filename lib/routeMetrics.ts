@@ -147,14 +147,11 @@ export function parseRouteMetricsResponse(payload: unknown): RouteMetricsResult 
 export async function fetchRouteMetrics(input: {
   originPlaceId: string;
   destinationPlaceId: string;
-  /** Průjezdní body v zadaném pořadí; prázdné pole = přímá trasa. */
-  viaPlaceIds?: string[];
 }): Promise<RouteMetricsResult> {
   const { data, error } = await supabase.functions.invoke(ROUTE_METRICS_FUNCTION, {
     body: {
       originPlaceId: input.originPlaceId,
       destinationPlaceId: input.destinationPlaceId,
-      viaPlaceIds: input.viaPlaceIds ?? [],
     },
   });
 

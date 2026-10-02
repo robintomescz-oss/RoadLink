@@ -166,20 +166,11 @@ export default function RouteDetailRoute() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.sectionLabel}>VOLNÁ KAPACITA</Text>
                 <Text style={styles.detailHeroTitle}>{activeRoute.fromAddress} → {activeRoute.toAddress}</Text>
-                {activeRoute.viaLabels.length > 0 ? (
-                  <Text style={styles.detailMuted}>přes {activeRoute.viaLabels.join(", ")}</Text>
-                ) : null}
               </View>
             </View>
             <View style={styles.detailSectionFlat}>
               <Text style={styles.sectionLabel}>TRASA</Text>
               <Text style={styles.routeEndpoint}>{activeRoute.fromAddress}</Text>
-              {activeRoute.viaLabels.map((label) => (
-                <View key={label} style={styles.viaDetailRow}>
-                  <Text style={styles.routeArrowDown}>↓</Text>
-                  <Text style={styles.routeEndpoint}>{label}</Text>
-                </View>
-              ))}
               <Text style={styles.routeArrowDown}>↓</Text>
               <Text style={styles.routeEndpoint}>{activeRoute.toAddress}</Text>
             </View>
@@ -199,9 +190,7 @@ export default function RouteDetailRoute() {
               <View style={styles.detailSectionFlat}>
                 <Text style={styles.sectionLabel}>DOPORUČENÉ SHODY</Text>
                 <Text style={styles.detailMuted}>RoadLink porovná termín, vozidlo, kapacitu a skutečnou zajížďku. Nabídka se nikdy neodešle automaticky.</Text>
-                {activeRoute.viaLabels.length > 0 ? (
-                  <Text style={styles.detailMuted}>Automatické shody zatím fungují jen pro přímé trasy bez průjezdních bodů.</Text>
-                ) : routeMatches === null ? (
+                {routeMatches === null ? (
                   <TouchableOpacity style={styles.secondary} onPress={loadRecommendedMatches} disabled={matchesLoading} accessibilityLabel="Najít vhodné poptávky">
                     <Text style={styles.secondaryText}>{matchesLoading ? "Počítám shody…" : "Najít vhodné poptávky"}</Text>
                   </TouchableOpacity>

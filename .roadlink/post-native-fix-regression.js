@@ -163,17 +163,9 @@ const validCapacityCollapsed = {
 };
 assert(createFormLogic.validateCapacityForm(validCapacityCollapsed).valid === true, 'capacity form validates with collapsed precise places (public labels only)');
 
-// UI: odjezd a cíl jsou vždy dva ověřené vstupy. Formulář volné kapacity navíc
-// nabízí volitelný třetí vstup pro průjezdní bod ("Cheb → Praha přes Plzeň"),
-// takže smí obsahovat tři instance VerifiedLocationInput.
+// UI: jedna ověřená lokalita pro každý konec; veřejný label se odvodí automaticky.
 assert((requestFormSource.match(/<VerifiedLocationInput/g) || []).length === 2, 'request form requires two verified locations');
-assert((routeFormSource.match(/<VerifiedLocationInput/g) || []).length >= 2, 'route form requires origin and destination verified locations');
-assert((routeFormSource.match(/<VerifiedLocationInput/g) || []).length <= 3, 'route form exposes at most one via-point input');
-assert(routeFormSource.includes('Průjezdní bod · volitelný'), 'route form offers an optional via point');
-assert(routeFormSource.includes('Odebrat průjezdní bod'), 'a chosen via point can be removed again');
-// Vstup průjezdního bodu drží text ve vlastním stavu a value je stále null, takže
-// bez změny klíče by v něm po výběru (i po Odebrat) zůstala předchozí adresa.
-assert(/key=\{`via-\$\{viaPlaces\.length\}`\}/.test(routeFormSource), 'via input remounts clean after each pick and remove');
+assert((routeFormSource.match(/<VerifiedLocationInput/g) || []).length === 2, 'route form requires two verified locations');
 assert(!requestFormSource.includes('Upřesnit přesné místo') && !routeFormSource.includes('Upřesnit přesné místo'), 'forms no longer duplicate public and private address entry');
 assert(requestFormSource.includes('přesná adresa zůstane soukromá') && routeFormSource.includes('přesná adresa zůstane soukromá'), 'both forms explain address privacy');
 assert(requestFormSource.includes('pickupLocation.formattedAddress') && routeFormSource.includes('fromLocation.formattedAddress'), 'private addresses come from verified selections');
