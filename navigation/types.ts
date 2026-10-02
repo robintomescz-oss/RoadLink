@@ -39,6 +39,8 @@ export type RootStackParamList = {
   profile: undefined;
   vehicles: undefined;
   vehicleForm: undefined;
+  personalVehicles: undefined;
+  personalVehicleForm: undefined;
 };
 
 export type RootScreenName = keyof RootStackParamList;

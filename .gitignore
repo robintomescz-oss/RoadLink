@@ -29,6 +29,7 @@ scripts/adb-e2e-runner.mjs
 !.roadlink/route-preview-regression.js
 !.roadlink/matching-v1-regression.js
 !.roadlink/matching-server-regression.js
+!.roadlink/personal-vehicles-regression.js
 
 # Runtime snímky obrazovky a dočasné soubory v rootu
 /screen-devlauncher.png
