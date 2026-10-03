@@ -14,7 +14,10 @@ kontrolní dotazy. Teprve když sedí, pokračujete. Nic se nespouští automati
   existuje poslední bod obnovy. Migrace 120000–140000 mění návratový typ RPC,
   takže je potřeba mít kam se vrátit.
 - Mít otevřený **transakční log** toho, co jste spustili, s časem.
-- Větev `feature/via-route-matching`, commit `f565033`. Nic nebylo pushnuto.
+- Nasazujte z větve `feature/via-route-matching`, která je pushnutá na `origin` a má otevřený
+  PR #7 (Draft) do `master`. **Nenasazujte z `master`** — obsahuje ještě matching jen pro
+  trasy bez průjezdních bodů. Migrace zůstávají neaplikované, dokud neproběhne read-only
+  preflight a výslovné schválení.
 
 ### Základní kontrola před startem (read-only)
 
