@@ -120,6 +120,12 @@ assert(vehiclesSource.includes('‹ Profil'), 'VehiclesRoute has single top back
 assert(!/Zpět na profil<\/Text>/.test(vehiclesSource), 'VehiclesRoute has no duplicate bottom back-to-profile');
 assert(!/Zpět na přehled<\/Text>/.test(vehiclesSource), 'VehiclesRoute has no bottom back-to-overview');
 
+// Prázdný stav bez přepravního profilu nabízí aktivaci, ne jen prázdný seznam.
+assert(vehiclesSource.includes('carrierProfileMissing'), 'VehiclesRoute distinguishes a missing carrier profile');
+assert(vehiclesSource.includes('Aktivovat přepravní profil'), 'VehiclesRoute offers profile activation in the empty state');
+assert(vehiclesSource.includes('activateCarrierProfile'), 'VehiclesRoute wires the activation action');
+assert(vehiclesSource.includes('loadVehicles'), 'VehiclesRoute reloads vehicles after activation');
+
 // ── 5. Veřejné/soukromé payloady lokalit ─────────────────────────────────────
 const createFormLogic = requireProductionTsModule('lib/createFormLogic.ts');
 assert(typeof createFormLogic.resolvePrivateAddress === 'function', 'resolvePrivateAddress exists in production form logic');

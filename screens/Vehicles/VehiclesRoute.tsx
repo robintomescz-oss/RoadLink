@@ -11,12 +11,28 @@ import type { CarrierVehicle } from "../../lib/types";
 
 export default function VehiclesRoute() {
   const { profileState } = useAppContext();
-  const { vehicles, vehiclesLoading, editVehicle, deleteVehicle } = profileState;
+  const {
+    vehicles,
+    vehiclesLoading,
+    editVehicle,
+    deleteVehicle,
+    activateCarrierProfile,
+    loadVehicles,
+    carrierProfileLoading,
+    carrierProfileMissing,
+  } = profileState;
   const goBack = () => navigateLegacy("profile");
   const goToAdd = () => navigateLegacy("vehicleForm");
   const onEdit = (item: CarrierVehicle) => { editVehicle(item); goToAdd(); };
   const onDelete = (item: CarrierVehicle) => {
     deleteVehicle(item);
+  };
+  // Bez přepravního profilu není kam vozidla ukládat. Aktivace profil rovnou
+  // založí a hned znovu načteme vozidla, aby se stav přepnul na prázdný seznam
+  // s tlačítkem „Přidat vozidlo“.
+  const onActivateCarrier = async () => {
+    await activateCarrierProfile();
+    await loadVehicles();
   };
 
   // Hardwarové Zpět = návrat na Profil (jinak by Back ukončil aplikaci).
@@ -34,6 +50,21 @@ export default function VehiclesRoute() {
         <View style={styles.scroll}>
           <Text style={styles.empty}>Načítám vozidla…</Text>
         </View>
+      ) : carrierProfileMissing ? (
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+          <Text style={styles.empty}>Přepravní profil zatím není aktivovaný.</Text>
+          <Text style={styles.profileCardHint}>
+            Přepravní vozidla patří k přepravnímu profilu. Nejdřív profil aktivujte, pak můžete přidat svou odtahovou techniku.
+          </Text>
+          <TouchableOpacity
+            style={styles.primary}
+            onPress={onActivateCarrier}
+            disabled={carrierProfileLoading}
+            accessibilityLabel="Aktivovat přepravní profil"
+          >
+            <Text style={styles.primaryText}>{carrierProfileLoading ? "Aktivuji…" : "Aktivovat přepravní profil"}</Text>
+          </TouchableOpacity>
+        </ScrollView>
       ) : vehicles.length === 0 ? (
         <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
           <Text style={styles.empty}>Žádná vozidla.</Text>

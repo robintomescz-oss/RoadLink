@@ -32,6 +32,9 @@ export function useProfile({ userId, screen }: { userId: string | null; screen: 
   const [profilePhone, setProfilePhone] = useState("");
   const [carrierProfile, setCarrierProfile] = useState<CarrierProfile | null>(null);
   const [carrierProfileLoading, setCarrierProfileLoading] = useState(false);
+  // Uživatel bez aktivovaného přepravního profilu: obrazovka vozidel z toho udělá
+  // prázdný stav s nabídkou aktivace místo jen prázdného seznamu.
+  const [carrierProfileMissing, setCarrierProfileMissing] = useState(false);
   const [carrierProfileEditing, setCarrierProfileEditing] = useState(false);
   const [carrierDisplayName, setCarrierDisplayName] = useState("");
   const [carrierBusinessType, setCarrierBusinessType] = useState<"individual" | "company">("individual");
@@ -183,12 +186,14 @@ export function useProfile({ userId, screen }: { userId: string | null; screen: 
       setCarrierProfile(null);
       setVerificationStatus(null);
       setInsuranceStatus(null);
+      setCarrierProfileMissing(true);
       setCarrierProfileLoading(false);
       return;
     }
 
     const loadedProfile = data as CarrierProfile;
     setCarrierProfile(loadedProfile);
+    setCarrierProfileMissing(false);
     const formFields = mapCarrierProfileToFormFields(loadedProfile);
     setCarrierDisplayName(formFields.displayName);
     setCarrierBusinessType(formFields.businessType);
@@ -259,9 +264,13 @@ export function useProfile({ userId, screen }: { userId: string | null; screen: 
     if (!carrier) {
       // Bez přepravního profilu nejsou žádná přepravní vozidla (prázdný stav).
       setVehicles([]);
+      setCarrierProfileMissing(true);
       setVehiclesLoading(false);
       return;
     }
+
+    // Přepravní profil existuje — obrazovka nabídne rovnou přidání vozidla.
+    setCarrierProfileMissing(false);
 
     const { data, error } = await supabase
       .from("carrier_vehicles")
@@ -525,6 +534,7 @@ export function useProfile({ userId, screen }: { userId: string | null; screen: 
     setProfile(null);
     setCarrierProfile(null);
     setVehicles([]);
+    setCarrierProfileMissing(false);
     setProfileEditing(false);
     setCarrierProfileEditing(false);
     setVehicleEditing(false);
@@ -556,6 +566,7 @@ export function useProfile({ userId, screen }: { userId: string | null; screen: 
     setProfilePhone,
     carrierProfile,
     carrierProfileLoading,
+    carrierProfileMissing,
     carrierProfileEditing,
     setCarrierProfileEditing,
     carrierDisplayName,
