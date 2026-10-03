@@ -1,0 +1,34 @@
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Balíček pro Supabase SQL Editor — matching s průjezdnými body
+-- ══════════════════════════════════════════════════════════════════════════════
+--
+-- Tyto soubory jsou GENEROVÁNY z supabase/migrations/ skriptem
+-- scripts/build-sql-editor-bundle.mjs. NEUPRAVUJTE JE RUČNĚ — upravte
+-- zdrojovou migraci a spusťte generator znovu.
+--
+-- Cílový projekt: RoadLink (vbmxnrhmdjmqrsdtgjkn)
+--
+-- POŘADÍ — vložujte soubory po řadě, JEDEN na dotaz, pokaždé čekejte na
+-- výsledek a zkontrolujte ho. Každý soubor má na konci kontrolní dotazy
+-- s očekávaným výsledkem.
+--
+--   00_preflight_readonly.sql      kontrola předem, nic nemění
+--   step_1_120000_via_routes.sql
+--   step_2_130000_via_coordinates.sql
+--   step_3_140000_bbox_preselection.sql
+--   step_4_150000_enable_postgis.sql      ZASTÁVKA pokud selže
+--   step_5_160000_route_line.sql
+--   step_6_170000_spatial_preselection.sql
+--
+-- CO TU ZAMYŠLENĚ NENÍ
+--   krok 20261005180000 (spatial_cleanup). Je jednosměrný — odstraňuje
+--   bbox_* sloupce a nepřehrává se. Patří až po ověřeném provozu
+--   v produkci, nejdříve za pár dní reálných dotazů.
+--
+--   Edge Function google-route-matches se nasazuje až PO zeleném
+--   smoke testu z kroku 6.
+--
+-- VYHRA
+--   Každý krok je v jedné transakci. Selhání = automatický rollback,
+--   databáze zůstane beze změny. Kroky jsou idempotentní, opakované
+--   spuštění je bezpečné.

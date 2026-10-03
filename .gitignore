@@ -46,3 +46,4 @@ scripts/adb-e2e-runner.mjs
 !.roadlink/via-privacy-migrations-regression.js
 !.roadlink/deployment-runbook-regression.js
 !.roadlink/spatial-index-proof-regression.js
+!.roadlink/sql-editor-bundle-regression.js

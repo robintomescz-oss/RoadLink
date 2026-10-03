@@ -14,6 +14,7 @@ const regressionScripts = [
   ".roadlink/via-privacy-migrations-regression.js",
   ".roadlink/deployment-runbook-regression.js",
   ".roadlink/spatial-index-proof-regression.js",
+  ".roadlink/sql-editor-bundle-regression.js",
   ".roadlink/rate-limit-regression.js",
   ".roadlink/google-auth-regression.js",
   ".roadlink/sos-regression.js",
