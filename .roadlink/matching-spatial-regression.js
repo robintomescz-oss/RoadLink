@@ -293,6 +293,20 @@ assert(/route_line je null/i.test(smoke), "the smoke test asserts that routes wi
 assert(/pořadí podle vzdálenosti od trasy je porušeno/i.test(smoke), "the smoke test asserts the ordering contract");
 assert(/limit je/i.test(smoke), "the smoke test asserts the limit contract");
 
+// Smoke test MUSÍ projít i PO úklidu (20261005180000), který trigger přejmenuje
+// na carrier_routes_route_geometry_assign a zahodí bbox_* sloupce. Kontrola
+// jednoho konkrétního jména by po úklidu selhala navzdory tomu, že je všechno
+// v pořádku — a runbook přitom výslovně žádá smoke test po úklidu zopakovat.
+assert(
+  /tgname\s+in\s*\(\s*'carrier_routes_route_line_assign'\s*,\s*'carrier_routes_route_geometry_assign'\s*\)/i.test(smokeBody),
+  "the smoke test accepts either geometry trigger name, so it still passes after the cleanup renames it",
+);
+assert(
+  /Oba triggery odvozující route_line/i.test(smoke),
+  "the smoke test also rejects a half-applied cleanup where both trigger names exist",
+);
+assert(/ST_NPoints\(route_line::extensions\.geometry\)|ST_NPoints\(cr\.route_line::extensions\.geometry\)/i.test(smoke) === false, "the smoke test does not call ST_NPoints on geography");
+
 // ── Živý harness: statické bezpečnostní brány + čistá logika ───────────────
 const harness = read(".roadlink/matching-spatial-integration.mjs");
 assert(/--confirm-live-spatial-smoke/.test(harness), "the live harness requires an explicit confirmation flag");

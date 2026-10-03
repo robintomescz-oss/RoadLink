@@ -70,13 +70,32 @@ begin
     raise exception 'CHYBA: chybí sloupec carrier_routes.route_line. Aplikuj krok 2.';
   end if;
 
+  -- PŘED úklidem je trigger `carrier_routes_route_line_assign`, PO úklidu
+  -- `carrier_routes_route_geometry_assign` (jediný zdroj pravdy). Koukat se má
+  -- na to, co odvozuje `route_line` — ne na konkrétní jméno, které úklid přejmenuje.
+  -- Kontrola jednoho jména by po úklidu selhala, přestože je všechno v pořádku.
   if not exists (
     select 1 from pg_trigger
-    where tgname = 'carrier_routes_route_line_assign'
+    where tgname in ('carrier_routes_route_line_assign', 'carrier_routes_route_geometry_assign')
       and tgrelid = 'public.carrier_routes'::regclass
       and not tgisinternal
   ) then
-    raise exception 'CHYBA: chybí trigger carrier_routes_route_line_assign. Aplikuj krok 2.';
+    raise exception 'CHYBA: chybí trigger odvozující route_line (carrier_routes_route_line_assign, po úklidu carrier_routes_route_geometry_assign). Aplikuj krok 6.';
+  end if;
+
+  -- Oba názvy najednou by znamenaly, že úklid proběhl napůl.
+  if exists (
+    select 1 from pg_trigger
+    where tgname in ('carrier_routes_route_line_assign', 'carrier_routes_route_geometry_assign')
+      and tgrelid = 'public.carrier_routes'::regclass
+      and not tgisinternal
+  ) then
+    if (select count(*) from pg_trigger
+        where tgname in ('carrier_routes_route_line_assign', 'carrier_routes_route_geometry_assign')
+          and tgrelid = 'public.carrier_routes'::regclass
+          and not tgisinternal) > 1 then
+      raise exception 'CHYBA: existují OBA triggery odvozující route_line. Úklid se nezvedl celý nebo proběhl dvakrát.';
+    end if;
   end if;
 
   if not exists (
