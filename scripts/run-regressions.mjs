@@ -12,6 +12,7 @@ const regressionScripts = [
   ".roadlink/matching-coordinates-regression.js",
   ".roadlink/matching-spatial-regression.js",
   ".roadlink/via-privacy-migrations-regression.js",
+  ".roadlink/deployment-runbook-regression.js",
   ".roadlink/rate-limit-regression.js",
   ".roadlink/google-auth-regression.js",
   ".roadlink/sos-regression.js",
