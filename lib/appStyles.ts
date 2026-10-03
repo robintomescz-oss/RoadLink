@@ -238,6 +238,9 @@ export const styles = StyleSheet.create({
   profileLinkText: { color: DESIGN.colors.textSecondary, marginTop: 5 },
   // Redesign profilu do karet: kompaktní stavové řádky a nadpisy karet.
   profileCardHeading: { color: DESIGN.colors.textPrimary, fontSize: 16, fontWeight: "800", marginBottom: 4 },
+  // Dvě sekce profilu (Můj účet a SOS / Přepravce) — vizuální hierarchie.
+  profileSectionTitle: { color: DESIGN.colors.textPrimary, fontSize: 19, fontWeight: "800", marginTop: DESIGN.spacing.lg, marginBottom: 2 },
+  profileSectionHint: { color: DESIGN.colors.textSecondary, fontSize: 12, lineHeight: 17, marginBottom: DESIGN.spacing.sm },
   // Krátké vysvětlení pod nadpisem karty (např. k čemu karta slouží).
   profileCardHint: { color: DESIGN.colors.textSecondary, fontSize: 12, lineHeight: 17, marginTop: 2, marginBottom: 8 },
   profileSummaryRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 7, borderTopWidth: 1, borderTopColor: DESIGN.colors.border },
