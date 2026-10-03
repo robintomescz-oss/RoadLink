@@ -20,9 +20,10 @@
 --   step_1_120000_via_routes.sql
 --   step_2_130000_via_coordinates.sql
 --   step_3_140000_bbox_preselection.sql    NEJDŮLEŽITĚJŠÍ pro zbytek řetězce
---   step_4_150000_enable_postgis.sql        ZASTÁVKA pokud selže
---   step_5_160000_route_line.sql
---   step_6_170000_spatial_preselection.sql
+--   step_4_145000_bbox_without_via.sql     oprava: trasa bez via má také bbox
+--   step_5_150000_enable_postgis.sql        ZASTÁVKA pokud selže
+--   step_6_160000_route_line.sql
+--   step_7_170000_spatial_preselection.sql
 --
 -- Tabulka oprávnění se vrací v každém kroku a je pokaždé stejná. Stačí
 -- zkontrolovat sloupec 'jen_service_role_z_anon': postgres jako vlastník
@@ -34,7 +35,13 @@
 --   nejdříve za pár dní reálných dotazů.
 --
 --   Edge Function google-route-matches se nasazuje až PO zeleném výsledku
---   kroku 6.
+--   kroku 7.
+--
+-- KROK 4 JE OPRAVA KROKU 3
+--   Trigger bbox v kroku 3 považoval trasa bez průjezdných bodů za trasu bez
+--   geometrie. Krok 4 to opravuje a dopočítá obdélník i jim. Bez něj zůstává
+--   většina tras mimo obdélníkový index. Kroky 3 a 4 jsou na sobě závislé —
+--   krok 4 spusťte hned po kroku 3.
 --
 -- VYHRA
 --   Každý krok je v jedné transakci. Selhání = automatický rollback, databáze

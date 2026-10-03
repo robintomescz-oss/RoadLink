@@ -18,6 +18,7 @@ const steps = [
   { file: "20261005120000_matching_includes_via_routes.sql", key: "120000" },
   { file: "20261005130000_matching_via_coordinates.sql", key: "130000" },
   { file: "20261005140000_matching_sql_geo_preselection.sql", key: "140000" },
+  { file: "20261005145000_matching_bbox_without_via.sql", key: "145000" },
   { file: "20261005150000_enable_postgis.sql", key: "150000" },
   { file: "20261005160000_carrier_route_spatial_line.sql", key: "160000" },
   { file: "20261005170000_matching_spatial_preselection.sql", key: "170000" },
@@ -30,7 +31,9 @@ for (const step of steps) {
   assert(runbook.includes(step.file), `the runbook names ${step.file}`);
 }
 
-const mentioned = [...new Set([...runbook.matchAll(/202610051[2-8]0000_[a-z_]+\.sql/g)].map((match) => match[0]))];
+// Časová známka je `202610051` + 5 nebo 6 číslic (např. 120000 i 145000).
+const migrationFile = /202610051[2-8]\d{4,5}_[a-z_]+\.sql/g;
+const mentioned = [...new Set([...runbook.matchAll(migrationFile)].map((match) => match[0]))];
 const positions = steps.map((step) => mentioned.indexOf(step.file));
 for (let index = 0; index < positions.length; index += 1) {
   assert(positions[index] > -1, `step ${steps[index].key} is named in the runbook`);
@@ -40,12 +43,12 @@ for (let index = 0; index < positions.length; index += 1) {
 }
 
 const headings = runbook.match(/^## Krok \d+ .*$/gm) || [];
-assert.strictEqual(headings.length, steps.length, "the runbook has exactly seven step headings");
+assert.strictEqual(headings.length, steps.length, "the runbook has exactly eight step headings");
 for (const step of steps) {
   assert(new RegExp(`^## Krok \\d+ .*${step.key}`, "m").test(runbook), `step ${step.key} has its own heading`);
 }
 
-const applyCommands = runbook.match(/-f supabase\/migrations\/202610051[2-8]0000_[a-z_]+\.sql/g) || [];
+const applyCommands = runbook.match(/-f supabase\/migrations\/202610051[2-8]\d{4,5}_[a-z_]+\.sql/g) || [];
 assert.strictEqual(applyCommands.length, steps.length, "every step shows how to apply exactly one migration file");
 
 const verificationBlocks = runbook.match(/### Kontrola po kroku \d/g) || [];

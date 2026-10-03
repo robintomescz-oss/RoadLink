@@ -77,6 +77,28 @@ ${fromClause};
 
 const noAnon = "not exists (select 1 from information_schema.routine_privileges where routine_schema='public' and routine_name='get_route_matching_candidates_internal' and grantee in ('anon','authenticated'))";
 
+/**
+ * Podmínky „trasa má použitelné souřadnice“.
+ *
+ * Každý krok kontroluje POUZE to, co jeho VLASTNÍ migrace skutečně odvodí.
+ * Proto jsou tu dvě podmínky a nesmí se zaměnit:
+ *
+ *   ENDPOINTS_OK  — oba krajní body zadané (společné všem krokům),
+ *   VIA_WITH_COORDS — průjezdné body I souřadnice (co umí výpočet z kroku 3),
+ *   VIA_OK        — helper z kroku 4; PRÁZDNÝ seznam průjezdných bodů JE PLATNÝ.
+ *
+ * Použití `VIA_OK` v kroku 3 by selhalo, protože helper vytváří až krok 4 —
+ * kontrola by skončila chybou „function does not exist“, ne při žádné změně dat.
+ *
+ * Klíčová věc: PRŮJEZDNÉ BODY NEJSOU POVINNÉ. `via_latitudes IS NULL` u trasy
+ * bez průjezdných bodů je normální stav, ne chybějící údaj.
+ */
+const ENDPOINTS_OK = "from_lat IS NOT NULL AND from_lng IS NOT NULL AND to_lat IS NOT NULL AND to_lng IS NOT NULL";
+const VIA_WITH_COORDS = `via_latitudes IS NOT NULL AND via_longitudes IS NOT NULL
+           AND cardinality(via_latitudes) = cardinality(via_place_ids)
+           AND cardinality(via_longitudes) = cardinality(via_place_ids)`;
+const VIA_OK = "public.carrier_route_via_coordinates_valid(via_place_ids, via_latitudes, via_longitudes)";
+
 /** Vybrané rpc z katalogu, aby kontrola fungovala i na čisté databázi. */
 const RPC_DEF = `  CROSS JOIN LATERAL (
     SELECT COALESCE(pg_get_functiondef(to_regprocedure('public.get_route_matching_candidates_internal(uuid,uuid,integer)')), '') AS v_def
@@ -136,13 +158,22 @@ const steps = [
     purpose: "přidá bbox_* sloupce, btree indexy, roadlink_haversine_meters a RPC s polohovým filtrem",
     detail: `
 -- A) NEJDŮLEŽITĚJŠÍ KROK PRO ZBÝVAJÍCÍ ŘETĚZEC. Obdélník se musí dopočítat
---    u VŠECH tras s úplnými souřadnicemi; jinak na stavbě stojí celý zbytek.
--- B) Oba btree indexy musí být platné a připravené.${PRIVILEGES_NOTE}`,
+--    u všech tras, kterým tento krok umí geometrii odvodit (tedy u tras
+--    s průjezdnými body i souřadnicemi).
+-- B) Oba btree indexy musí být platné a připravené.
+-- C) Tento krok ZÁMĚRNĚ používá bbox_* — je to přechodná vrstva, kterou
+--    uklízí až krok 7. 'rpc_uziva_bbox_pred' proto hlídá, že se bbox používá;
+--    až krok 7 kontroluje, že ho už RPC nepoužívá.
+-- D) TENTO KROK MÁ ZNÁMOU CHYBU, kterou opravuje krok 4: považuje trasu BEZ
+--    průjezdných bodů za trasu bez geometrie, takže jim bbox zůstává NULL.
+--    Proto 'bez_bbox_tras_s_via' počítá jen trasy, kterým tento krok umí
+--    geometrii odvodit. Po kroku 4 se obdobně jmenovaný sloupec počítá přes
+--    VŠECHNY trasy s krajními body — a tam už musí být nula.${PRIVILEGES_NOTE}`,
     checks: [
-      { label: "bez_bbox_tras_s_ukoncene", condition: "bez_bbox = 0" },
+      { label: "bez_bbox_tras_s_via", condition: "bez_bbox = 0" },
       { label: "dva_btree_indexy_platne", condition: "platne_indexy = 2" },
       { label: "haversine_helper_existuje", condition: "helper = 1" },
-      { label: "rpc_uz_nepouzi_bbox_pred", condition: "v_def not like '%bbox%'" },
+      { label: "rpc_uziva_bbox_pred", condition: "v_def like '%bbox_min_lat%'" },
       { label: "jen_service_role_z_anon", condition: noAnon },
     ],
     from: `  CROSS JOIN LATERAL (
@@ -150,10 +181,10 @@ const steps = [
   ) AS f
   CROSS JOIN LATERAL (
     SELECT
+      -- Helper z kroku 4 tu ještě neexistuje, proto se počítá přes podmínky
+      -- psané přímo — přesně ty, které umí výpočet tohoto kroku.
       (SELECT count(*) FROM public.carrier_routes
-         WHERE from_lat IS NOT NULL AND from_lng IS NOT NULL
-           AND to_lat IS NOT NULL AND to_lng IS NOT NULL
-           AND bbox_min_lat IS NULL) AS bez_bbox,
+         WHERE ${ENDPOINTS_OK} AND ${VIA_WITH_COORDS} AND bbox_min_lat IS NULL) AS bez_bbox,
       (SELECT count(*) FROM pg_proc
          WHERE pronamespace='public'::regnamespace
            AND proname='roadlink_haversine_meters') AS helper,
@@ -166,14 +197,64 @@ const steps = [
   },
   {
     order: 4,
+    file: "20261005145000_matching_bbox_without_via.sql",
+    out: "step_4_145000_bbox_without_via.sql",
+    title: "Oprava obdélníku u tras BEZ průjezdných bodů",
+    purpose: "helper carrier_route_via_coordinates_valid + bbox trigger, který prázdný seznam průjezdných bodů považuje za platný stav",
+    detail: `
+-- A) Tento krok OPRAVUJE CHYBU z kroku 3: trigger bbox považoval trasa bez
+--    průjezdných bodů za trasu bez geometrie, takže jim bbox zůstal NULL a do
+--    částečných btree indexů vůbec nevstoupily. Průjezdné body NENÍ povinné.
+-- B) 'bez_bbox_tras_s_ukoncene' je teď počítáno přes VŠECHNY trasy s krajními
+--    body, ne jen přes trasy s průjezdnými body jako v kroku 3.
+-- C) Helper je sdílený i se dvěma dalšími triggery (krok 6 a úklid), které
+--    musí rozhodovat o úplnosti souřadnic stejně.${PRIVILEGES_NOTE}`,
+    checks: [
+      { label: "helper_existuje", condition: "helper = 1" },
+      { label: "prazdny_via_je_platny", condition: "empty_ok" },
+      { label: "via_s_orezenim_odmita", condition: "range_ok" },
+      { label: "bez_bbox_tras_s_ukoncene", condition: "bez_bbox = 0" },
+      { label: "dva_btree_indexy_platne", condition: "platne_indexy = 2" },
+      { label: "jen_service_role_z_anon", condition: noAnon },
+    ],
+    from: `  CROSS JOIN LATERAL (
+    SELECT
+      (SELECT count(*) FROM pg_proc
+         WHERE pronamespace='public'::regnamespace
+           AND proname='carrier_route_via_coordinates_valid') AS helper,
+      -- Prázdný seznam průjezdných bodů = platná trasa bez průjezdných bodů.
+      (SELECT public.carrier_route_via_coordinates_valid(
+                '{}'::text[], NULL, NULL)
+         AND public.carrier_route_via_coordinates_valid(
+                ARRAY[]::text[], ARRAY[]::double precision[], ARRAY[]::double precision[])
+         AND NOT public.carrier_route_via_coordinates_valid(
+                '{}'::text[], ARRAY[50.0]::double precision[], ARRAY[15.0]::double precision[])) AS empty_ok,
+      -- Souřadnice mimo rozsah ale spočítané správně musí odmítnout.
+      (SELECT NOT public.carrier_route_via_coordinates_valid(
+                ARRAY['via1']::text[], ARRAY[95.0]::double precision[], ARRAY[15.0]::double precision[])
+         AND NOT public.carrier_route_via_coordinates_valid(
+                ARRAY['via1']::text[], ARRAY[50.0]::double precision[], ARRAY[999.0]::double precision[])
+         AND NOT public.carrier_route_via_coordinates_valid(
+                ARRAY['via1']::text[], ARRAY[50.0]::double precision[], NULL)) AS range_ok,
+      (SELECT count(*) FROM public.carrier_routes
+         WHERE ${ENDPOINTS_OK} AND ${VIA_OK} AND bbox_min_lat IS NULL) AS bez_bbox,
+      (SELECT count(*) FROM pg_index i
+         JOIN pg_class c ON c.oid = i.indexrelid
+         WHERE i.indrelid='public.carrier_routes'::regclass
+           AND c.relname LIKE 'carrier_routes_bbox%'
+           AND i.indisvalid AND i.indisready) AS platne_indexy
+  ) AS c`,
+  },
+  {
+    order: 5,
     file: "20261005150000_enable_postgis.sql",
-    out: "step_4_150000_enable_postgis.sql",
+    out: "step_5_150000_enable_postgis.sql",
     title: "Zapnutí PostGIS — ZASTÁVKA",
     purpose: "create extension if not exists postgis do schématu extensions",
     detail: `
 -- Tento krok je ZASTÁVKA. Pokud skript skončí chybou, PostGIS není v plánu
--- dostupný: ZASTAVTE celé nasazení a kroky 5–7 NEPUŠTĚJTE. Krok 3 funguje
--- i bez PostGIS, jen je pomalejší.
+-- dostupný: ZASTAVTE celé nasazení a kroky 6–7 NEPUŠTĚJTE. Kroky 3 a 4 fungují
+-- i bez PostGIS, jen je předvýběr pomalejší.
 --
 -- Když geography_ty_p nebo geography_linestring není ANO, NEJDE pokračovat.`,
     checks: [
@@ -192,20 +273,24 @@ const steps = [
   ) AS c`,
   },
   {
-    order: 5,
+    order: 6,
     file: "20261005160000_carrier_route_spatial_line.sql",
-    out: "step_5_160000_route_line.sql",
+    out: "step_6_160000_route_line.sql",
     title: "Skutečná prostorová geometrie trasy",
     purpose: "přidá route_line geography(LineString,4326), BEFORE trigger, dopočet a GiST index",
     detail: `
--- A) 'bez_chybejici_geometrie' je přesně podmínka, kterou požaduje úklid v
---    kroku 7. Kdyby nebylo ANO, krok 7 NEAPLIKUJTE.
--- B) 'pocet_bodu_souhlasi' ověřuje, že lomená čára má odjezd + via + cíl.${PRIVILEGES_NOTE}`,
+-- A) 'bez_chybejici_geometrie' je přesně podmínka, kterou požaduje úklid.
+--    Kdyby nebylo ANO, úklid NEAPLIKUJTE.
+-- B) 'pocet_bodu_souhlasi' ověřuje, že lomená čára má odjezd + via + cíl.
+-- C) Trasa BEZ průjezdných bodů má mít geometrii ze dvou krajních bodů.
+--    'geometrie_bez_via_existuje' to hlídá a je podmínkou celého prostorového
+--    předvýběru: bez ní by většina tras neměla co prosorový index hledat.${PRIVILEGES_NOTE}`,
     checks: [
       { label: "typ_je_extensions_geography", condition: "udt_schema = 'extensions' AND udt_name = 'geography'" },
       { label: "bez_chybejici_geometrie", condition: "missing = 0" },
       { label: "gist_index_platny", condition: "gist_ok = 1" },
       { label: "pocet_bodu_souhlasí", condition: "npoints_ok" },
+      { label: "geometrie_bez_via_existuje", condition: "npoints_bez_via_ok" },
       { label: "jen_service_role_z_anon", condition: noAnon },
     ],
     from: `  CROSS JOIN LATERAL (
@@ -215,12 +300,7 @@ const steps = [
       (SELECT udt_name FROM information_schema.columns
          WHERE table_schema='public' AND table_name='carrier_routes' AND column_name='route_line') AS udt_name,
       (SELECT count(*) FROM public.carrier_routes
-         WHERE from_lat IS NOT NULL AND from_lng IS NOT NULL
-           AND to_lat IS NOT NULL AND to_lng IS NOT NULL
-           AND via_latitudes IS NOT NULL AND via_longitudes IS NOT NULL
-           AND cardinality(via_latitudes) = cardinality(via_place_ids)
-           AND cardinality(via_longitudes) = cardinality(via_place_ids)
-           AND route_line IS NULL) AS missing,
+         WHERE ${ENDPOINTS_OK} AND ${VIA_OK} AND route_line IS NULL) AS missing,
       (SELECT count(*) FROM pg_index i
          JOIN pg_class c ON c.oid = i.indexrelid
          JOIN pg_am am ON am.oid = c.relam
@@ -229,13 +309,21 @@ const steps = [
       (SELECT COALESCE(bool_and(
                 extensions.ST_NPoints(cr.route_line) = cardinality(cr.via_place_ids) + 2), true)
          FROM public.carrier_routes cr
-         WHERE cardinality(cr.via_place_ids) > 0 AND cr.route_line IS NOT NULL) AS npoints_ok
+         WHERE cardinality(cr.via_place_ids) > 0 AND cr.route_line IS NOT NULL) AS npoints_ok,
+      -- Trasa bez průjezdných bodů = lomená čára ze dvou krajních bodů.
+      (SELECT COALESCE(bool_and(
+                extensions.ST_NPoints(cr.route_line) = 2
+                AND cr.route_line IS NOT NULL), true)
+         FROM public.carrier_routes cr
+         WHERE coalesce(cardinality(cr.via_place_ids), 0) = 0
+           AND cr.from_lat IS NOT NULL AND cr.from_lng IS NOT NULL
+           AND cr.to_lat IS NOT NULL AND cr.to_lng IS NOT NULL) AS npoints_bez_via_ok
   ) AS c`,
   },
   {
-    order: 6,
+    order: 7,
     file: "20261005170000_matching_spatial_preselection.sql",
-    out: "step_6_170000_spatial_preselection.sql",
+    out: "step_7_170000_spatial_preselection.sql",
     title: "Předvýběr kandidátů přes prostorový index",
     purpose: "RPC přepsaná přes create or replace: filtr ST_DWithin a řazení ST_Distance",
     detail: `
@@ -322,6 +410,13 @@ SELECT
     WHEN pg_get_functiondef(f.oid) LIKE '%route_proximity_meters%' THEN 'ANO — krok 3 prosel'
     ELSE 'NE — krok 3 jeste neprosel'
   END AS has_proximity,
+  -- bbox je POUZE v kroku 3 a 4 (přechodná vrstva). Jeho přítomnost v RPC
+  -- tedy není chyba — naopak je známkou, že už běží prostorový krok.
+  CASE
+    WHEN f.proname IS NULL THEN 'NE'
+    WHEN pg_get_functiondef(f.oid) LIKE '%bbox_min_lat%' THEN 'ANO — bezi prostorova vrstva'
+    ELSE 'NE — bezi jen obdelynik nebo nic'
+  END AS has_bbox,
   CASE WHEN NOT EXISTS (
          SELECT 1 FROM information_schema.routine_privileges
          WHERE routine_schema='public' AND routine_name='get_route_matching_candidates_internal'
@@ -351,8 +446,7 @@ CROSS JOIN LATERAL (
   SELECT count(*) AS new_columns
   FROM information_schema.columns
   WHERE table_schema='public' AND table_name='carrier_routes'
-    AND column_name IN ('via_latitudes','via_longitudes','bbox_min_lat','bbox_max_lat',
-                        'bbox_min_lng','bbox_max_lng','route_line')
+    AND column_name IN ('via_latitudes','via_longitudes','bbox_min_lat','bbox_max_lat',                        'bbox_min_lng','bbox_max_lng','route_line')
 ) AS col;
 
 -- Objemy pro interpretaci plánu později. Počet sloupců se zjišťuje přes
@@ -389,9 +483,10 @@ const bundleIndex = `-- ══════════════════�
 --   step_1_120000_via_routes.sql
 --   step_2_130000_via_coordinates.sql
 --   step_3_140000_bbox_preselection.sql    NEJDŮLEŽITĚJŠÍ pro zbytek řetězce
---   step_4_150000_enable_postgis.sql        ZASTÁVKA pokud selže
---   step_5_160000_route_line.sql
---   step_6_170000_spatial_preselection.sql
+--   step_4_145000_bbox_without_via.sql     oprava: trasa bez via má také bbox
+--   step_5_150000_enable_postgis.sql        ZASTÁVKA pokud selže
+--   step_6_160000_route_line.sql
+--   step_7_170000_spatial_preselection.sql
 --
 -- Tabulka oprávnění se vrací v každém kroku a je pokaždé stejná. Stačí
 -- zkontrolovat sloupec 'jen_service_role_z_anon': postgres jako vlastník
@@ -403,7 +498,13 @@ const bundleIndex = `-- ══════════════════�
 --   nejdříve za pár dní reálných dotazů.
 --
 --   Edge Function google-route-matches se nasazuje až PO zeleném výsledku
---   kroku 6.
+--   kroku 7.
+--
+-- KROK 4 JE OPRAVA KROKU 3
+--   Trigger bbox v kroku 3 považoval trasa bez průjezdných bodů za trasu bez
+--   geometrie. Krok 4 to opravuje a dopočítá obdélník i jim. Bez něj zůstává
+--   většina tras mimo obdélníkový index. Kroky 3 a 4 jsou na sobě závislé —
+--   krok 4 spusťte hned po kroku 3.
 --
 -- VYHRA
 --   Každý krok je v jedné transakci. Selhání = automatický rollback, databáze

@@ -5,6 +5,11 @@
 --   20261005160000_carrier_route_spatial_line.sql
 --   20261005170000_matching_spatial_preselection.sql
 --
+--   POZOR: tento skript používá `carrier_route_via_coordinates_valid`, který
+--   zavádí 20261005145000_matching_bbox_without_via.sql. Bez něj by skript
+--   skončil chybou „function does not exist“ — to znamená chybějící krok 4,
+--   ne poškozenou databázi.
+--
 -- Jak: Supabase Dashboard → SQL Editor, nebo
 --   psql "$DATABASE_URL" -f supabase/smoke/matching_spatial_smoke.sql
 --
@@ -16,7 +21,8 @@
 --      bez závislosti na zastaralých `bbox_*` sloupcích,
 --      (kontrola na `bbox_*` je historická — plní roli do okamžiku, kdy je
 --      uklízena migrací 20261005180000; potom je triviálně splněna),
---   B) pokrytí dat: trasy s úplnými souřadnicemi mají `route_line`,
+--   B) pokrytí dat: trasy s krajními body (i BEZ průjezdných bodů) mají
+--      `route_line`,
 --   C) plán dotazu: v `EXPLAIN` hledejte `carrier_routes_route_line_gist_idx`
 --      v `Index Cond` (viz komentář u jednotlivých EXPLAIN),
 --   D) výsledek RPC: kandidáti jsou seřazení od nejbližšího, limit je dodržen.
@@ -106,12 +112,24 @@ from (
       and cr.from_lng is not null
       and cr.to_lat is not null
       and cr.to_lng is not null
-      and cr.via_latitudes is not null
-      and cr.via_longitudes is not null
-      and cardinality(cr.via_latitudes) = cardinality(cr.via_place_ids)
-      and cardinality(cr.via_longitudes) = cardinality(cr.via_place_ids) as has_coordinates
+      -- PRŮJEZDNÉ BODY NEJSOU POVINNÉ. Podmínka musí být stejná jako
+      -- v assign_carrier_route_line(), jinak počítá jinou množinu tras.
+      and public.carrier_route_via_coordinates_valid(
+        cr.via_place_ids, cr.via_latitudes, cr.via_longitudes
+      ) as has_coordinates
   from public.carrier_routes as cr
 ) as coverage;
+
+-- A2) Zvlášť trasy BEZ průjezdných bodů: musí mít přímou dvoubodovou geometrii.
+--     Kdyby tu chyběla, celý prostorový předvýběr by pro většinu tras nic
+--     netřídil (viz 20261005145000).
+select
+  count(*) filter (where route_line is not null) as with_route_line,
+  count(*) filter (where route_line is null) as missing_route_line
+from public.carrier_routes as cr
+where coalesce(cardinality(cr.via_place_ids), 0) = 0
+  and cr.from_lat is not null and cr.from_lng is not null
+  and cr.to_lat is not null and cr.to_lng is not null;
 
 do $$
 declare
@@ -123,10 +141,9 @@ begin
     and cr.from_lng is not null
     and cr.to_lat is not null
     and cr.to_lng is not null
-    and cr.via_latitudes is not null
-    and cr.via_longitudes is not null
-    and cardinality(cr.via_latitudes) = cardinality(cr.via_place_ids)
-    and cardinality(cr.via_longitudes) = cardinality(cr.via_place_ids)
+    and public.carrier_route_via_coordinates_valid(
+      cr.via_place_ids, cr.via_latitudes, cr.via_longitudes
+    )
     and cr.route_line is null;
 
   if v_missing > 0 then

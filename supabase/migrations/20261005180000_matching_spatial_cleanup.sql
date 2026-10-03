@@ -64,16 +64,17 @@ begin
     raise exception 'CHYBA: RPC stále používá roadlink_haversine_meters. Nejdřív aplikuj 20261005170000.';
   end if;
 
+  -- Podmínka musí být stejná jako v `assign_carrier_route_geometry()` jinak by
+  -- kontrolovala jinou množinu tras, ne jakou geometrie opravdu nedává.
   select count(*) into v_missing_geometry
   from public.carrier_routes as cr
   where cr.from_lat is not null
     and cr.from_lng is not null
     and cr.to_lat is not null
     and cr.to_lng is not null
-    and cr.via_latitudes is not null
-    and cr.via_longitudes is not null
-    and cardinality(cr.via_latitudes) = cardinality(cr.via_place_ids)
-    and cardinality(cr.via_longitudes) = cardinality(cr.via_place_ids)
+    and public.carrier_route_via_coordinates_valid(
+      cr.via_place_ids, cr.via_latitudes, cr.via_longitudes
+    )
     and cr.route_line is null;
 
   if v_missing_geometry > 0 then
@@ -123,21 +124,14 @@ declare
 begin
   -- Neúplné nebo vadné souřadnice znamenají žádnou geometrii. Vstupní platnost
   -- přitom hlídá `carrier_routes_via_places_validate`; tady se jen odvozuje.
+  -- Podmínka je sdílená s obdélníkem (20261005145000): trasa BEZ průjezdných
+  -- bodů je platná a geometrii má — prázdný seznam není chybějící údaj.
   if new.from_lat is null
      or new.from_lng is null
      or new.to_lat is null
      or new.to_lng is null
-     or new.via_latitudes is null
-     or new.via_longitudes is null
-     or cardinality(new.via_latitudes) <> cardinality(new.via_place_ids)
-     or cardinality(new.via_longitudes) <> cardinality(new.via_place_ids)
-     or exists (
-       select 1 from unnest(new.via_latitudes) as v(value)
-       where value is null or value <> value or value < -90 or value > 90
-     )
-     or exists (
-       select 1 from unnest(new.via_longitudes) as v(value)
-       where value is null or value <> value or value < -180 or value > 180
+     or not public.carrier_route_via_coordinates_valid(
+       new.via_place_ids, new.via_latitudes, new.via_longitudes
      ) then
     new.route_line := null;
     return new;

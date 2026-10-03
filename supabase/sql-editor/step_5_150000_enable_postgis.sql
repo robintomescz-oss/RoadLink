@@ -1,5 +1,5 @@
 -- ══════════════════════════════════════════════════════════════════════════════
--- KROK 4 · Zapnutí PostGIS — ZASTÁVKA
+-- KROK 5 · Zapnutí PostGIS — ZASTÁVKA
 -- ══════════════════════════════════════════════════════════════════════════════
 --
 -- Zdroj: supabase/migrations/20261005150000_enable_postgis.sql
@@ -69,8 +69,8 @@ comment on extension postgis is
 commit;
 
 -- Tento krok je ZASTÁVKA. Pokud skript skončí chybou, PostGIS není v plánu
--- dostupný: ZASTAVTE celé nasazení a kroky 5–7 NEPUŠTĚJTE. Krok 3 funguje
--- i bez PostGIS, jen je pomalejší.
+-- dostupný: ZASTAVTE celé nasazení a kroky 6–7 NEPUŠTĚJTE. Kroky 3 a 4 fungují
+-- i bez PostGIS, jen je předvýběr pomalejší.
 --
 -- Když geography_ty_p nebo geography_linestring není ANO, NEJDE pokračovat.-- ══ VÝSLEDek KROKU ══════════════════════════════════════════════════════════
 --

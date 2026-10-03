@@ -1,5 +1,5 @@
 -- ══════════════════════════════════════════════════════════════════════════════
--- KROK 6 · Předvýběr kandidátů přes prostorový index
+-- KROK 7 · Předvýběr kandidátů přes prostorový index
 -- ══════════════════════════════════════════════════════════════════════════════
 --
 -- Zdroj: supabase/migrations/20261005170000_matching_spatial_preselection.sql

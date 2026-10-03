@@ -199,6 +199,12 @@ nejbližšího bodu.
 Zavedení je rozdělené na čtyři kroky, aby se dalo mezi nimi zastavit a otočit
 zpět (čtvrtý je už úklid a je jednosměrný):
 
+0. `20261005145000_matching_bbox_without_via.sql` — oprava předchozí vrstvy
+   `bbox_*`: triggery považovaly trasu BEZ průjezdných bodů za trasu bez
+   geometrie (chybějící `via_latitudes` se splétlo s chybějícími souřadnicemi),
+   a tím jí zůstalo `bbox` i `route_line` NULL. Průjezdné body nejsou povinné;
+   rozhodnutí o úplnosti teď žije v jednom helperu
+   `carrier_route_via_coordinates_valid()`, který sdílejí všechny tři triggery.
 1. `20261005150000_enable_postgis.sql` — `create extension if not exists postgis
    schema extensions` a okamžité ověření, že typ `geography(linestring)` existuje.
    Kdyby extension nebylo v plánu dostupná, skript skončí chybou a další kroky se
@@ -212,6 +218,15 @@ zpět (čtvrtý je už úklid a je jednosměrný):
 4. `20261005180000_matching_spatial_cleanup.sql` — až po ověření produkčního
    chodu: odstraní `bbox_*`, helper i starý trigger a nechá jediný zdroj pravdy
    pro odvozenou geometrii.
+
+**Přesnost je omezená a je to záměrné.** `route_line` je lomená čára spojující
+krajní body a průjezdné body, nikoli vlastní silniční geometrie z Googlu. Vzdálenost
+se tedy počítá k této aproximaci a může podhodnotit skutečnou vzdálenost tam, kde
+silnice výrazně zatáčí. Pro předvýběr kandidátů je to přijatelné — je to filtr
+„nevylučujeme“, jehož účelem je ušetřit Google volání, a konečné rozhodnutí
+stejně ověřuje `google-route-matches` přes Compute Routes, kde se při nejistotě
+vrací `incomplete = true`. Užší, přesnější odhad by vyžadoval ukládat polyline
+z Google; to je věc pro samostatný návrh, ne pro tento krok.
 
 Proč filtr bezpečně netrhá platné shody: varianta trasy, která vloží vyzvednutí
 P a vyložení D, je oproti základní trase delší nejméně o
@@ -316,19 +331,21 @@ Place ID, adresy ani souřadnice se nevrací.
 3. Aplikovat dopřednou migraci `20261005140000_matching_sql_geo_preselection.sql`
    (přidá `bbox_*`, trigger, indexy, funkci `roadlink_haversine_meters` a RPC
    s polohovým filtrem a pořadím podle blízkosti).
-4. Aplikovat `20261005150000_enable_postgis.sql` — pokud skončí chybou, zastavit
+4. Aplikovat `20261005145000_matching_bbox_without_via.sql` hned po kroku 3 —
+   opravuje trigger, který trasám bez průjezdných bodů nechal `bbox` NULL.
+5. Aplikovat `20261005150000_enable_postgis.sql` — pokud skončí chybou, zastavit
    a zjistit, zda je prostorová extension v plánu dostupná.
-5. Aplikovat `20261005160000_carrier_route_spatial_line.sql` a read-only ověřit,
+6. Aplikovat `20261005160000_carrier_route_spatial_line.sql` a read-only ověřit,
    že `route_line` je naplněný u tras se souřadnicemi.
-6. Teprve poté `20261005170000_matching_spatial_preselection.sql`.
-7. Ověřit nasazení: `supabase/smoke/matching_spatial_smoke.sql` (předpoklady,
+7. Teprve poté `20261005170000_matching_spatial_preselection.sql`.
+8. Ověřit nasazení: `supabase/smoke/matching_spatial_smoke.sql` (předpoklady,
    pokrytí, `EXPLAIN`, smlouva RPC) a volitelně
    `.roadlink/matching-spatial-integration.mjs --confirm-live-spatial-smoke`.
-8. Nasadit Edge Function `google-route-matches`.
-9. Počkat na ověřený produkční chod (alespoň pár dní reálných dotazů) a teprve
-   pak aplikovat `20261005180000_matching_spatial_cleanup.sql`. Migrace nejdřív
-   ověří předpoklady a při nesplnění skončí výjimkou bez jakékoli změny. Je
-   jednosměrná — návrat je znovu aplikovat `20261005140000`.
+9. Nasadit Edge Function `google-route-matches`.
+10. Počkat na ověřený produkční chod (alespoň pár dní reálných dotazů) a teprve
+    pak aplikovat `20261005180000_matching_spatial_cleanup.sql`. Migrace nejdřív
+    ověří předpoklady a při nesplnění skončí výjimkou bez jakékoli změny. Je
+    jednosměrná — návrat je znovu aplikovat `20261005140000`.
 10. Ověřit read-only, že RPC vrací `route_via_place_ids`, `route_via_latitudes`,
     `route_via_longitudes`, souřadnice poptávky a `route_proximity_meters`, že
     `anon` ani `authenticated` nemají EXECUTE a že `security definer` +

@@ -17,9 +17,16 @@
 --   * `search_path = ''` a všechny PostGIS funkce volané s výslovným schématem
 --     `extensions.`, aby se nespoléhalo na search_path databáze.
 --
--- Prázdná / vadná geometrie: když chybí jakákoli souřadnice odjezdu, cíle či
--- průjezdního bodu (nebo je mimo rozsah), zůstane `route_line` NULL. Matching
--- pak kandidáty bez geometrie nikdy nevyřadí a zařadí je na konec pořadí.
+-- Prázdná / vadná geometrie: když chybí souřadnice odjezdu nebo cíle, nebo jsou
+-- průjezdné body v rozporu se svými souřadnicemi, zůstane `route_line` NULL.
+-- Matching pak kandidáty bez geometrie nikdy nevyřadí a zařadí je na konec
+-- pořadí.
+--
+-- TRASA BEZ PRŮJEZDNÝCH BODŮ MÁ GEOMETRII. Podmínka úplnosti je sdílená s obdélníkem
+-- (`carrier_route_via_coordinates_valid`, migrace 20261005145000): prázdný seznam
+-- průjezdných bodů je platný stav, takže přímá trasa dostane lomenou čáru ze dvou
+-- krajních bodů. Dřívější verze zde měla `new.via_latitudes is null` mezi podmínkami
+-- pro NULL, a tím geometrii odebírala právě všem trasám bez průjezdných bodů.
 
 begin;
 
@@ -42,17 +49,8 @@ begin
      or new.from_lng is null
      or new.to_lat is null
      or new.to_lng is null
-     or new.via_latitudes is null
-     or new.via_longitudes is null
-     or cardinality(new.via_latitudes) <> cardinality(new.via_place_ids)
-     or cardinality(new.via_longitudes) <> cardinality(new.via_place_ids)
-     or exists (
-       select 1 from unnest(new.via_latitudes) as v(value)
-       where value is null or value <> value or value < -90 or value > 90
-     )
-     or exists (
-       select 1 from unnest(new.via_longitudes) as v(value)
-       where value is null or value <> value or value < -180 or value > 180
+     or not public.carrier_route_via_coordinates_valid(
+       new.via_place_ids, new.via_latitudes, new.via_longitudes
      ) then
     new.route_line := null;
     return new;
@@ -62,6 +60,7 @@ begin
     || extensions.ST_MakePoint(new.to_lng, new.to_lat)::extensions.geography;
 
   if cardinality(new.via_latitudes) > 0 then
+    -- Průjezdné body jsou mezi krajními body spojeny ve stejném pořadí.
     v_points := v_points || extensions.ST_MakeLine(array(
       select extensions.ST_MakePoint(v.lng, v.lat)::extensions.geography
       from unnest(new.via_longitudes, new.via_latitudes) as v(lng, lat)

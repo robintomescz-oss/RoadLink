@@ -25,6 +25,13 @@ SELECT
     WHEN pg_get_functiondef(f.oid) LIKE '%route_proximity_meters%' THEN 'ANO — krok 3 prosel'
     ELSE 'NE — krok 3 jeste neprosel'
   END AS has_proximity,
+  -- bbox je POUZE v kroku 3 a 4 (přechodná vrstva). Jeho přítomnost v RPC
+  -- tedy není chyba — naopak je známkou, že už běží prostorový krok.
+  CASE
+    WHEN f.proname IS NULL THEN 'NE'
+    WHEN pg_get_functiondef(f.oid) LIKE '%bbox_min_lat%' THEN 'ANO — bezi prostorova vrstva'
+    ELSE 'NE — bezi jen obdelynik nebo nic'
+  END AS has_bbox,
   CASE WHEN NOT EXISTS (
          SELECT 1 FROM information_schema.routine_privileges
          WHERE routine_schema='public' AND routine_name='get_route_matching_candidates_internal'
@@ -54,8 +61,7 @@ CROSS JOIN LATERAL (
   SELECT count(*) AS new_columns
   FROM information_schema.columns
   WHERE table_schema='public' AND table_name='carrier_routes'
-    AND column_name IN ('via_latitudes','via_longitudes','bbox_min_lat','bbox_max_lat',
-                        'bbox_min_lng','bbox_max_lng','route_line')
+    AND column_name IN ('via_latitudes','via_longitudes','bbox_min_lat','bbox_max_lat',                        'bbox_min_lng','bbox_max_lng','route_line')
 ) AS col;
 
 -- Objemy pro interpretaci plánu později. Počet sloupců se zjišťuje přes

@@ -26,6 +26,7 @@ assert.deepStrictEqual(
     "20261005120000_matching_includes_via_routes.sql",
     "20261005130000_matching_via_coordinates.sql",
     "20261005140000_matching_sql_geo_preselection.sql",
+    "20261005145000_matching_bbox_without_via.sql",
     "20261005150000_enable_postgis.sql",
     "20261005160000_carrier_route_spatial_line.sql",
     "20261005170000_matching_spatial_preselection.sql",
@@ -48,6 +49,12 @@ const roles = {
   },
   "20261005140000_matching_sql_geo_preselection.sql": (body) => {
     assert(/assign_carrier_route_bbox/i.test(body), "the transitional bbox step keeps its own trigger");
+  },
+  "20261005145000_matching_bbox_without_via.sql": (body) => {
+    assert(/carrier_route_via_coordinates_valid/i.test(body), "the bbox fix decides completeness in one shared place");
+    assert(/from_lat is null/i.test(body), "the bbox fix still refuses a route without endpoints");
+    assert(/set from_lat = from_lat/i.test(body), "the bbox fix backfills without changing a stored value");
+    assert(!/delete from|drop column|truncate/i.test(body), "the bbox fix destroys nothing");
   },
   "20261005150000_enable_postgis.sql": (body) => {
     assert(/create extension if not exists postgis/i.test(body), "PostGIS is enabled in its own step so it can be stopped alone");

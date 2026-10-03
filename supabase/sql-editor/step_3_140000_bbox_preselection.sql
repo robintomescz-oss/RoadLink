@@ -386,8 +386,17 @@ comment on function public.get_route_matching_candidates_internal(uuid, uuid, in
 commit;
 
 -- A) NEJDŮLEŽITĚJŠÍ KROK PRO ZBÝVAJÍCÍ ŘETĚZEC. Obdélník se musí dopočítat
---    u VŠECH tras s úplnými souřadnicemi; jinak na stavbě stojí celý zbytek.
+--    u všech tras, kterým tento krok umí geometrii odvodit (tedy u tras
+--    s průjezdnými body i souřadnicemi).
 -- B) Oba btree indexy musí být platné a připravené.
+-- C) Tento krok ZÁMĚRNĚ používá bbox_* — je to přechodná vrstva, kterou
+--    uklízí až krok 7. 'rpc_uziva_bbox_pred' proto hlídá, že se bbox používá;
+--    až krok 7 kontroluje, že ho už RPC nepoužívá.
+-- D) TENTO KROK MÁ ZNÁMOU CHYBU, kterou opravuje krok 4: považuje trasu BEZ
+--    průjezdných bodů za trasu bez geometrie, takže jim bbox zůstává NULL.
+--    Proto 'bez_bbox_tras_s_via' počítá jen trasy, kterým tento krok umí
+--    geometrii odvodit. Po kroku 4 se obdobně jmenovaný sloupec počítá přes
+--    VŠECHNY trasy s krajními body — a tam už musí být nula.
 --   Sloupec 'jen_service_role_z_anon': 'postgres' je vlastník funkce a EXECUTE
 --   má vždy, takže jeho přítomnost je správná. Rozhodující je nepřítomnost
 --   'anon' a 'authenticated' — ti by si mohli RPC volat a číst soukromá data.
@@ -396,16 +405,16 @@ commit;
 -- Tohle je jediná tabulka, kterou SQL Editor zobrazí. Zkontrolujte sloupec
 -- 'zavre_kontrola' a přesvědčte se, že vše je ANO.
 SELECT
-  CASE WHEN bez_bbox = 0 THEN 'ANO' ELSE 'NE' END AS bez_bbox_tras_s_ukoncene,
+  CASE WHEN bez_bbox = 0 THEN 'ANO' ELSE 'NE' END AS bez_bbox_tras_s_via,
   CASE WHEN platne_indexy = 2 THEN 'ANO' ELSE 'NE' END AS dva_btree_indexy_platne,
   CASE WHEN helper = 1 THEN 'ANO' ELSE 'NE' END AS haversine_helper_existuje,
-  CASE WHEN v_def not like '%bbox%' THEN 'ANO' ELSE 'NE' END AS rpc_uz_nepouzi_bbox_pred,
+  CASE WHEN v_def like '%bbox_min_lat%' THEN 'ANO' ELSE 'NE' END AS rpc_uziva_bbox_pred,
   CASE WHEN not exists (select 1 from information_schema.routine_privileges where routine_schema='public' and routine_name='get_route_matching_candidates_internal' and grantee in ('anon','authenticated')) THEN 'ANO' ELSE 'NE' END AS jen_service_role_z_anon
   ,
   CASE WHEN (bez_bbox = 0)
     AND (platne_indexy = 2)
     AND (helper = 1)
-    AND (v_def not like '%bbox%')
+    AND (v_def like '%bbox_min_lat%')
     AND (not exists (select 1 from information_schema.routine_privileges where routine_schema='public' and routine_name='get_route_matching_candidates_internal' and grantee in ('anon','authenticated')))
     THEN 'ANO — krok uspel'
     ELSE 'NE — NEPOUŠTĚJTE DALŠÍ KROK, poslete mi tuto tabulku'
@@ -416,10 +425,12 @@ FROM (SELECT 1) AS t
   ) AS f
   CROSS JOIN LATERAL (
     SELECT
+      -- Helper z kroku 4 tu ještě neexistuje, proto se počítá přes podmínky
+      -- psané přímo — přesně ty, které umí výpočet tohoto kroku.
       (SELECT count(*) FROM public.carrier_routes
-         WHERE from_lat IS NOT NULL AND from_lng IS NOT NULL
-           AND to_lat IS NOT NULL AND to_lng IS NOT NULL
-           AND bbox_min_lat IS NULL) AS bez_bbox,
+         WHERE from_lat IS NOT NULL AND from_lng IS NOT NULL AND to_lat IS NOT NULL AND to_lng IS NOT NULL AND via_latitudes IS NOT NULL AND via_longitudes IS NOT NULL
+           AND cardinality(via_latitudes) = cardinality(via_place_ids)
+           AND cardinality(via_longitudes) = cardinality(via_place_ids) AND bbox_min_lat IS NULL) AS bez_bbox,
       (SELECT count(*) FROM pg_proc
          WHERE pronamespace='public'::regnamespace
            AND proname='roadlink_haversine_meters') AS helper,

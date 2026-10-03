@@ -1,6 +1,6 @@
 # Runbook: ruční nasazení matchingu s průjezdními body
 
-**Sedm migrací, sedm zastávek.** Po každém kroku se zastavíte a spustíte
+**Osm migrací, osm zastávek.** Po každém kroku se zastavíte a spustíte
 kontrolní dotazy. Teprve když sedí, pokračujete. Nic se nespouští automaticky.
 
 > **Tento runbook neprovádí agent.** Popisuje, co *vy* spustíte ručně po mém
@@ -137,6 +137,13 @@ filtruje obdélníkem a řadí podle blízkosti. PostGIS tu ještě **nepotřebu
 proto je to krok, na kterém lze bezpečně zastavit, kdyby prostorový plán
 neprostál v kroku 4.
 
+> **⚠️ Známá chyba tohoto kroku.** Trigger `assign_carrier_route_bbox()` považuje
+> `via_latitudes IS NULL` za „chybí souřadnice“, a tím bere trasu **BEZ průjezdných
+> bodů** jako trasu bez geometrie. Těmto trasám zůstane `bbox = NULL` a do
+> částečných btree indexů nevstoupí. Opravuje to **krok 4** — spusťte ho hned
+> poté. Kontrola A) proto záměrně počítá jen trasy, kterým tento krok umí
+> geometrii odvodit.
+
 ```bash
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261005140000_matching_sql_geo_preselection.sql
 ```
@@ -144,12 +151,17 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261005140000_ma
 ### Kontrola po kroku 3
 
 ```sql
--- A) Obdélník se dopočítal u tras s úplnými souřadnicemi.
+-- A) Obdélník se dopočítal u tras, kterým tento krok umí geometrii odvodit
+--    (tedy u tras s průjezdnými body a jejich souřadnicemi).
+--    Trasy BEZ průjezdných bodů jsou opravené až v kroku 4.
 select count(*) as total,
        count(*) filter (where bbox_min_lat is null) as without_bbox
 from public.carrier_routes
 where from_lat is not null and from_lng is not null
-  and to_lat is not null and to_lng is not null;
+  and to_lat is not null and to_lng is not null
+  and via_latitudes is not null and via_longitudes is not null
+  and cardinality(via_latitudes) = cardinality(via_place_ids)
+  and cardinality(via_longitudes) = cardinality(via_place_ids);
 -- očekáváno: without_bbox = 0
 
 -- B) Indexy jsou platné a připravené.
@@ -174,11 +186,55 @@ select pg_get_functiondef(to_regprocedure('public.get_route_matching_candidates_
 ```
 
 **Rollback kroku 3:** viz `Rollback celého řetězce` níže — vrstva 140000 je
-jediná, kterou má smysl mazat, protože je plně zastaralá po kroku 6.
+jediná, kterou má smysl mazat, protože je plně zastaralá po kroku 7.
 
 ---
 
-## Krok 4 — `20261005150000_enable_postgis.sql` — **ZASTAVKA**
+## Krok 4 — `20261005145000_matching_bbox_without_via.sql`
+
+**Účel:** oprava chyby z kroku 3. Zavádí helper
+`carrier_route_via_coordinates_valid()` a přepisuje trigger bbox tak, aby
+**prázdný seznam průjezdných bodů byl platný stav**, ne chybějící údaj. Trasám
+bez průjezdných bodů se tím dopočítá obdélník ze samotných krajních bodů.
+
+Tento krok spusťte **bezprostředně po kroku 3** — bez něj zůstává většina tras
+mimo obdélníkový index a celý předvýběr tak nemá nad čím třídit.
+
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261005145000_matching_bbox_without_via.sql
+```
+
+### Kontrola po kroku 4
+
+```sql
+-- A) Helper existuje a prázdný seznam průjezdných bodů považuje za platný.
+select public.carrier_route_via_coordinates_valid('{}'::text[], null, null) as empty_ok,
+       public.carrier_route_via_coordinates_valid(
+         '{}'::text[], array[50.0]::double precision[], array[15.0]::double precision[]
+       ) as orphan_rejected,
+       public.carrier_route_via_coordinates_valid(
+         array['via1']::text[], array[95.0]::double precision[], array[15.0]::double precision[]
+       ) as out_of_range_rejected;
+-- očekáváno: empty_ok = true, orphan_rejected = false, out_of_range_rejected = false
+
+-- B) Obdélník je teď dopočítaný u VŠECH tras s krajními body — včetně těch
+--    bez průjezdných bodů. Tohle je přesně kontrola, která v kroku 3 selhala.
+select count(*) as total,
+       count(*) filter (where bbox_min_lat is null) as without_bbox
+from public.carrier_routes
+where from_lat is not null and from_lng is not null
+  and to_lat is not null and to_lng is not null
+  and public.carrier_route_via_coordinates_valid(via_place_ids, via_latitudes, via_longitudes);
+-- očekáváno: without_bbox = 0
+```
+
+**Rollback kroku 4:** migrace je dopředná a bezpečná, ale lze se vrátit
+znovu aplikací kroku 3 (vrátí původní trigger). Nic se nemaže, takže
+rollback databáze není potřeba.
+
+---
+
+## Krok 5 — `20261005150000_enable_postgis.sql` — **ZASTAVKA**
 
 **Účel:** `create extension if not exists postgis schema extensions`. Pokud
 PostIS není v plánu dostupný, **skript skončí chybou a nic se nezmění**.
@@ -207,20 +263,21 @@ where n.nspname = 'public' and c.relname like 'spatial_%';
 -- očekáváno: 0 řádků
 ```
 
-### ⚠️ Jestli krok 4 selhal
+### ⚠️ Jestli krok 5 selhal
 
-PostGIS není v plánu dostupný. **Zastavte celé nasazení.** Krok 3 (`140000`)
+PostGIS není v plánu dostupný. **Zastavte celé nasazení.** Kroky 3 a 4 (`140000`,
+`145000`)
 funguje bez PostGIS a předvýběr je použitelný (jen pomalejší, btree obdélník).
 Kroky 5–7 **neaplikujte**. Řešení je plán, ne hádanka: buď zůstanete na
 `140000`, nebo se rozhodnete plán rozšířit. Toto rozhodnutí je vaše.
 
-**Rollback kroku 4:** není potřeba a není možný — skript je v jedné transakci
+**Rollback kroku 5:** není potřeba a není možný — skript je v jedné transakci
 a při selhání se odroluje celý, takže po neúspěchu je databáze přesně tam, kde
 byla. Extension, která by se nestavila, v databázi nezůstane.
 
 ---
 
-## Krok 5 — `20261005160000_carrier_route_spatial_line.sql`
+## Krok 6 — `20261005160000_carrier_route_spatial_line.sql`
 
 **Účel:** `route_line geography(LineString, 4326)` + BEFORE trigger + GiST index
 + dopočet existujících řádků.
@@ -238,16 +295,26 @@ from information_schema.columns
 where table_schema = 'public' and table_name = 'carrier_routes' and column_name = 'route_line';
 -- očekáváno: extensions | geography
 
--- B) Geometrie je dopočítaná u všech tras s úplnými souřadnicemi.
+-- B) Geometrie je dopočítaná u všech tras s krajními body — VČETNĚ tras bez
+--    průjezdných bodů. Podmínka musí být stejná jako v triggeru, jinak počítá
+--    jinou množinu tras, ne jakou geometrie skutečně odvodí.
 select count(*) as total,
        count(*) filter (where route_line is null) as missing
 from public.carrier_routes
 where from_lat is not null and from_lng is not null
   and to_lat is not null and to_lng is not null
-  and via_latitudes is not null and via_longitudes is not null
-  and cardinality(via_latitudes) = cardinality(via_place_ids)
-  and cardinality(via_longitudes) = cardinality(via_place_ids);
--- očekáváno: missing = 0   (to je přesně podmínka, kterou požaduje úklid v kroku 7)
+  and public.carrier_route_via_coordinates_valid(via_place_ids, via_latitudes, via_longitudes);
+-- očekáváno: missing = 0   (to je přesně podmínka, kterou požaduje úklid v kroku 8)
+
+-- B2) Zvlášť trasy BEZ průjezdných bodů: musí mít přímou dvoubodovou geometrii.
+--     Kdyby tu chyběla, prostorový předvýběr by pro většinu tras nic netřídil.
+select count(*) filter (where route_line is not null) as with_route_line,
+       count(*) filter (where route_line is null) as missing_route_line
+from public.carrier_routes
+where coalesce(cardinality(via_place_ids), 0) = 0
+  and from_lat is not null and from_lng is not null
+  and to_lat is not null and to_lng is not null;
+-- očekáváno: missing_route_line = 0
 
 -- C) GiST index je platný a připravený.
 select c.relname, i.indisvalid, i.indisready, am.amname
@@ -267,13 +334,13 @@ limit 5;
 -- očekáváno: matches = true (bodů je via + 2 krajní)
 ```
 
-**Rollback kroku 5:** `drop trigger … route_line_assign; drop function … assign_carrier_route_line(); drop index … carrier_routes_route_line_gist_idx; alter table … drop column if exists route_line;`
+**Rollback kroku 6:** `drop trigger … route_line_assign; drop function … assign_carrier_route_line(); drop index … carrier_routes_route_line_gist_idx; alter table … drop column if exists route_line;`
 Ručně, v této transakci. Sloupec se smí mazat — je plně odvozený a lze ho
 znovu dopočítat krokem 5.
 
 ---
 
-## Krok 6 — `20261005170000_matching_spatial_preselection.sql`
+## Krok 7 — `20261005170000_matching_spatial_preselection.sql`
 
 **Účel:** RPC přepsaná přes `create or replace` (bez `DROP`, tedy bez okna bez
 grantu): filtr `ST_DWithin` na vyzvednutí *i* vyložení, řazení `ST_Distance`.
@@ -290,7 +357,7 @@ select pg_get_functiondef(to_regprocedure('public.get_route_matching_candidates_
        pg_get_functiondef(to_regprocedure('public.get_route_matching_candidates_internal(uuid,uuid,integer)')) like '%bbox_%' as still_bbox,
        pg_get_functiondef(to_regprocedure('public.get_route_matching_candidates_internal(uuid,uuid,integer)')) like '%roadlink_haversine_meters%' as still_haversine;
 -- očekáváno: spatial_filter = true, still_bbox = false, still_haversine = false
---   Právě tohle krok 7 vyžaduje jako předpoklad.
+--   Právě tohle krok 8 vyžaduje jako předpoklad.
 
 -- B) Oprávnění se nezměnila (create or replace negrantuje nikomu nové).
 select grantee from information_schema.routine_privileges
@@ -333,13 +400,13 @@ Volitelně živý harness (potřebuje `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY
 node .roadlink/matching-spatial-integration.mjs --confirm-live-spatial-smoke
 ```
 
-**Rollback kroku 6:** znovu aplikovat obsah `20261005140000_matching_sql_geo_preselection.sql`
+**Rollback kroku 7:** znovu aplikovat obsah `20261005140000_matching_sql_geo_preselection.sql`
 (krok 3 je v historii a má stále `if exists` / `create or replace`, takže se dá
 přehrajt). To je jediná čistá cesta zpět, protože `170000` mění tělo funkce.
 
 ---
 
-## Krok 7 — `20261005180000_matching_spatial_cleanup.sql` — **POSLEDNÍ**
+## Krok 8 — `20261005180000_matching_spatial_cleanup.sql` — **POSLEDNÍ**
 
 **Účel:** odstranit `bbox_*` + `roadlink_haversine_meters`, přepojit odvozování
 geometrie na jediný zdroj pravdy. **Až po ověřeném produkčním chodu**, ne
@@ -389,7 +456,7 @@ where routine_schema = 'public' and routine_name = 'get_route_matching_candidate
 Pak **znovu celý smoke test** — musí doběhnout bez výjimky, i když je
 kontrola na `bbox_*` v něm historická (po úklidu triviálně platí).
 
-**Rollback kroku 7:** migrace je **jednosměrná**, sloupce zmizí. Jediná cesta
+**Rollback kroku 8:** migrace je **jednosměrná**, sloupce zmizí. Jediná cesta
 zpět je znovu aplikovat `20261005140000_matching_sql_geo_preselection.sql`.
 Nejdřív ale zvažte, zda to vůbec potřebujete — data ani chování to nesměřuje.
 
@@ -397,7 +464,7 @@ Nejdřív ale zvažte, zda to vůbec potřebujete — data ani chování to nesm
 
 ## Rollback celého řetězce
 
-Pokud je třeba vzít všechny sedm kroků zpět (nejlépe před jakýmkoli nasazením
+Pokud je třeba vzít všechny osm kroků zpět (nejlépe před jakýmkoli nasazením
 Edge Function, aby se nikdo neocitl na půli cesty):
 
 ```sql

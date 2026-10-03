@@ -1,5 +1,5 @@
 -- ══════════════════════════════════════════════════════════════════════════════
--- KROK 5 · Skutečná prostorová geometrie trasy
+-- KROK 6 · Skutečná prostorová geometrie trasy
 -- ══════════════════════════════════════════════════════════════════════════════
 --
 -- Zdroj: supabase/migrations/20261005160000_carrier_route_spatial_line.sql
@@ -39,9 +39,16 @@
 --   * `search_path = ''` a všechny PostGIS funkce volané s výslovným schématem
 --     `extensions.`, aby se nespoléhalo na search_path databáze.
 --
--- Prázdná / vadná geometrie: když chybí jakákoli souřadnice odjezdu, cíle či
--- průjezdního bodu (nebo je mimo rozsah), zůstane `route_line` NULL. Matching
--- pak kandidáty bez geometrie nikdy nevyřadí a zařadí je na konec pořadí.
+-- Prázdná / vadná geometrie: když chybí souřadnice odjezdu nebo cíle, nebo jsou
+-- průjezdné body v rozporu se svými souřadnicemi, zůstane `route_line` NULL.
+-- Matching pak kandidáty bez geometrie nikdy nevyřadí a zařadí je na konec
+-- pořadí.
+--
+-- TRASA BEZ PRŮJEZDNÝCH BODŮ MÁ GEOMETRII. Podmínka úplnosti je sdílená s obdélníkem
+-- (`carrier_route_via_coordinates_valid`, migrace 20261005145000): prázdný seznam
+-- průjezdných bodů je platný stav, takže přímá trasa dostane lomenou čáru ze dvou
+-- krajních bodů. Dřívější verze zde měla `new.via_latitudes is null` mezi podmínkami
+-- pro NULL, a tím geometrii odebírala právě všem trasám bez průjezdných bodů.
 
 begin;
 
@@ -64,17 +71,8 @@ begin
      or new.from_lng is null
      or new.to_lat is null
      or new.to_lng is null
-     or new.via_latitudes is null
-     or new.via_longitudes is null
-     or cardinality(new.via_latitudes) <> cardinality(new.via_place_ids)
-     or cardinality(new.via_longitudes) <> cardinality(new.via_place_ids)
-     or exists (
-       select 1 from unnest(new.via_latitudes) as v(value)
-       where value is null or value <> value or value < -90 or value > 90
-     )
-     or exists (
-       select 1 from unnest(new.via_longitudes) as v(value)
-       where value is null or value <> value or value < -180 or value > 180
+     or not public.carrier_route_via_coordinates_valid(
+       new.via_place_ids, new.via_latitudes, new.via_longitudes
      ) then
     new.route_line := null;
     return new;
@@ -84,6 +82,7 @@ begin
     || extensions.ST_MakePoint(new.to_lng, new.to_lat)::extensions.geography;
 
   if cardinality(new.via_latitudes) > 0 then
+    -- Průjezdné body jsou mezi krajními body spojeny ve stejném pořadí.
     v_points := v_points || extensions.ST_MakeLine(array(
       select extensions.ST_MakePoint(v.lng, v.lat)::extensions.geography
       from unnest(new.via_longitudes, new.via_latitudes) as v(lng, lat)
@@ -117,9 +116,12 @@ create index if not exists carrier_routes_route_line_gist_idx
 
 commit;
 
--- A) 'bez_chybejici_geometrie' je přesně podmínka, kterou požaduje úklid v
---    kroku 7. Kdyby nebylo ANO, krok 7 NEAPLIKUJTE.
+-- A) 'bez_chybejici_geometrie' je přesně podmínka, kterou požaduje úklid.
+--    Kdyby nebylo ANO, úklid NEAPLIKUJTE.
 -- B) 'pocet_bodu_souhlasi' ověřuje, že lomená čára má odjezd + via + cíl.
+-- C) Trasa BEZ průjezdných bodů má mít geometrii ze dvou krajních bodů.
+--    'geometrie_bez_via_existuje' to hlídá a je podmínkou celého prostorového
+--    předvýběru: bez ní by většina tras neměla co prosorový index hledat.
 --   Sloupec 'jen_service_role_z_anon': 'postgres' je vlastník funkce a EXECUTE
 --   má vždy, takže jeho přítomnost je správná. Rozhodující je nepřítomnost
 --   'anon' a 'authenticated' — ti by si mohli RPC volat a číst soukromá data.
@@ -132,12 +134,14 @@ SELECT
   CASE WHEN missing = 0 THEN 'ANO' ELSE 'NE' END AS bez_chybejici_geometrie,
   CASE WHEN gist_ok = 1 THEN 'ANO' ELSE 'NE' END AS gist_index_platny,
   CASE WHEN npoints_ok THEN 'ANO' ELSE 'NE' END AS pocet_bodu_souhlasí,
+  CASE WHEN npoints_bez_via_ok THEN 'ANO' ELSE 'NE' END AS geometrie_bez_via_existuje,
   CASE WHEN not exists (select 1 from information_schema.routine_privileges where routine_schema='public' and routine_name='get_route_matching_candidates_internal' and grantee in ('anon','authenticated')) THEN 'ANO' ELSE 'NE' END AS jen_service_role_z_anon
   ,
   CASE WHEN (udt_schema = 'extensions' AND udt_name = 'geography')
     AND (missing = 0)
     AND (gist_ok = 1)
     AND (npoints_ok)
+    AND (npoints_bez_via_ok)
     AND (not exists (select 1 from information_schema.routine_privileges where routine_schema='public' and routine_name='get_route_matching_candidates_internal' and grantee in ('anon','authenticated')))
     THEN 'ANO — krok uspel'
     ELSE 'NE — NEPOUŠTĚJTE DALŠÍ KROK, poslete mi tuto tabulku'
@@ -150,12 +154,7 @@ FROM (SELECT 1) AS t
       (SELECT udt_name FROM information_schema.columns
          WHERE table_schema='public' AND table_name='carrier_routes' AND column_name='route_line') AS udt_name,
       (SELECT count(*) FROM public.carrier_routes
-         WHERE from_lat IS NOT NULL AND from_lng IS NOT NULL
-           AND to_lat IS NOT NULL AND to_lng IS NOT NULL
-           AND via_latitudes IS NOT NULL AND via_longitudes IS NOT NULL
-           AND cardinality(via_latitudes) = cardinality(via_place_ids)
-           AND cardinality(via_longitudes) = cardinality(via_place_ids)
-           AND route_line IS NULL) AS missing,
+         WHERE from_lat IS NOT NULL AND from_lng IS NOT NULL AND to_lat IS NOT NULL AND to_lng IS NOT NULL AND public.carrier_route_via_coordinates_valid(via_place_ids, via_latitudes, via_longitudes) AND route_line IS NULL) AS missing,
       (SELECT count(*) FROM pg_index i
          JOIN pg_class c ON c.oid = i.indexrelid
          JOIN pg_am am ON am.oid = c.relam
@@ -164,5 +163,13 @@ FROM (SELECT 1) AS t
       (SELECT COALESCE(bool_and(
                 extensions.ST_NPoints(cr.route_line) = cardinality(cr.via_place_ids) + 2), true)
          FROM public.carrier_routes cr
-         WHERE cardinality(cr.via_place_ids) > 0 AND cr.route_line IS NOT NULL) AS npoints_ok
+         WHERE cardinality(cr.via_place_ids) > 0 AND cr.route_line IS NOT NULL) AS npoints_ok,
+      -- Trasa bez průjezdných bodů = lomená čára ze dvou krajních bodů.
+      (SELECT COALESCE(bool_and(
+                extensions.ST_NPoints(cr.route_line) = 2
+                AND cr.route_line IS NOT NULL), true)
+         FROM public.carrier_routes cr
+         WHERE coalesce(cardinality(cr.via_place_ids), 0) = 0
+           AND cr.from_lat IS NOT NULL AND cr.from_lng IS NOT NULL
+           AND cr.to_lat IS NOT NULL AND cr.to_lng IS NOT NULL) AS npoints_bez_via_ok
   ) AS c;

@@ -26,16 +26,17 @@ const expected = [
   "step_1_120000_via_routes.sql",
   "step_2_130000_via_coordinates.sql",
   "step_3_140000_bbox_preselection.sql",
-  "step_4_150000_enable_postgis.sql",
-  "step_5_160000_route_line.sql",
-  "step_6_170000_spatial_preselection.sql",
+  "step_4_145000_bbox_without_via.sql",
+  "step_5_150000_enable_postgis.sql",
+  "step_6_160000_route_line.sql",
+  "step_7_170000_spatial_preselection.sql",
   "README.md",
 ];
 assert.deepStrictEqual(fs.readdirSync(bundleDir).sort(), [...expected].sort(), "the bundle contains exactly the expected files");
 
 // ── Každý step obsahuje zdrojovou migraci beze změny ───────────────────────
 const steps = expected.filter((name) => name.startsWith("step_"));
-assert.strictEqual(steps.length, 6, "the bundle covers six forward migrations");
+assert.strictEqual(steps.length, 7, "the bundle covers seven forward migrations");
 
 for (const name of steps) {
   const content = readBundle(name);
@@ -80,6 +81,7 @@ assert(
   "the preflight script only reads",
 );
 assert(/is_spatial/.test(preflight) && /has_via/.test(preflight) && /has_proximity/.test(preflight), "the preflight says which steps are already applied");
+assert(/has_bbox/.test(preflight), "the preflight explains that bbox in the RPC is the transitional layer, not an error");
 assert(/NEZACÍNAJTE OD KROKU 1|NEZACÍNAJTE ODKUD UŽ BYLO/.test(preflight), "the preflight warns not to restart from the beginning");
 
 // Preflight běží PŘED jakoukoli migrací, takže se nesmí dotazovat na sloupce,
@@ -104,6 +106,10 @@ for (const column of missingColumns) {
     if (!line.toLowerCase().includes(column)) return false;
     if (line.toLowerCase().includes("information_schema")) return false;
     if (line.includes(asQuotedName)) return false;
+    // Název sloupce UVNITŘ ŘETĚZCE uvnitř pg_get_functiondef() je jen text
+    // porovnávaný v katalogu, ne čtení dat. Je bezpečný a funguje i na čisté
+    // databázi, kde sloupec ještě neexistuje.
+    if (line.includes("pg_get_functiondef")) return false;
     return true;
   });
   assert.deepStrictEqual(offending, [], `the preflight never reads ${column} directly, so it works on a clean database`);
@@ -111,9 +117,76 @@ for (const column of missingColumns) {
 assert(/new_columns|sloupce_stav/.test(preflight), "the preflight reports how many new columns already exist");
 
 // ── Zastávky jsou zřetelné ─────────────────────────────────────────────────
-const step4 = readBundle("step_4_150000_enable_postgis.sql");
-assert(/ZASTÁVKA/.test(step4), "the PostGIS step is marked as a stopping point");
-assert(/ZASTAVTE celé nasazení/.test(step4), "it says to stop the rollout if PostGIS is unavailable");
+const step5 = readBundle("step_5_150000_enable_postgis.sql");
+assert(/ZASTÁVKA/.test(step5), "the PostGIS step is marked as a stopping point");
+assert(/ZASTAVTE celé nasazení/.test(step5), "it says to stop the rollout if PostGIS is unavailable");
+
+// ── Pořadí kroků odpovídá pořadí souborů migrací ──────────────────────────
+const orderInNames = steps.map((name) => Number(name.match(/step_(\d+)_(\d+)/)[2]));
+assert.deepStrictEqual(
+  orderInNames,
+  [...orderInNames].sort((a, b) => a - b),
+  "steps are numbered in the same order as their migration timestamps",
+);
+assert.deepStrictEqual(
+  steps.map((name) => Number(name.match(/step_(\d+)_/)[1])),
+  steps.map((_, index) => index + 1),
+  "steps are numbered consecutively from 1",
+);
+
+// ── Kontrola smí volat jen to, co v tomto okamžiku existuje ────────────────
+// Kroky se spouštějí postupně. Kontrola v kroku, který helper ještě nevytvořil,
+// by skončila chybou „function does not exist“ — a to by operátor četl jako
+// rozbitou databázi, přestože je všechno v pořádku.
+const helperStep = steps.findIndex((name) => name.startsWith("step_4_145000"));
+assert(helperStep > -1, "the bundle contains the step that creates the shared helper");
+for (let index = 0; index < helperStep; index += 1) {
+  const content = readBundle(steps[index]);
+  assert(
+    !content.includes("carrier_route_via_coordinates_valid("),
+    `${steps[index]} does not call a helper that a later step still has to create`,
+  );
+}
+// Kroky, které ODTVÁREJÍ geometrii, musí používat sdílený helper — jinak by
+// každý znal úplnost souřadnic trochu jinak. PostGIS jen zapíná extension
+// a geometrii neodvozuje, proto se kontrola netýká.
+const geometrySteps = ["step_4_145000_bbox_without_via.sql", "step_6_160000_route_line.sql"];
+for (const name of geometrySteps) {
+  assert(
+    readBundle(name).includes("carrier_route_via_coordinates_valid("),
+    `${name} decides geometry completeness through the shared helper`,
+  );
+}
+
+// ── Průjezdné body nejsou povinné — to je celý důvod nového kroku ─────────
+// Dřívější trigger považoval `via_latitudes IS NULL` za chybějící údaj, a tím
+// odebral geometrii VŠEM trasám bez průjezdných bodů, tedy většině tras.
+for (const name of ["step_4_145000_bbox_without_via.sql", "step_6_160000_route_line.sql"]) {
+  const content = readBundle(name);
+  // Podmínka musí být NA TRIGGERU. Uvnitř helperu je `p_via_latitudes is not
+  // null` správně — chrání větev, kde průjezdné body EXISTUJÍ, a prázdný
+  // seznam opomíjí. Vadné by bylo `new.via_latitudes is null` jako podmínka
+  // pro celou trasu.
+  const trigger = content.match(/function public\.assign_carrier_route_(?:bbox|line)\(\)[\s\S]*?\$\$;/);
+  assert(trigger, `${name} defines its geometry trigger`);
+  assert(
+    !/new\.via_(latitudes|longitudes) is null/i.test(trigger[0]),
+    `${name} no longer treats missing via coordinates as missing geometry`,
+  );
+  assert(
+    /carrier_route_via_coordinates_valid\(/i.test(trigger[0]),
+    `${name} decides completeness through the shared helper`,
+  );
+}
+const step4 = readBundle("step_4_145000_bbox_without_via.sql");
+assert(/coalesce\(new\.via_latitudes/i.test(step4), "the bbox trigger builds points with coalesce so an empty via list still yields a box");
+assert(/bez_bbox_tras_s_ukoncene/i.test(step4), "the fix step checks the count over ALL routes, not only routes with via points");
+
+// Krok 3 je přechodná vrstva a bbox ZÁMĚRNĚ používá. Kontrola „RPC nepoužívá
+// bbox“ patří až kroku 7; v kroku 3 by byla chybná a zablokovala řetězec.
+const step3 = readBundle("step_3_140000_bbox_preselection.sql");
+assert(!/not like '%bbox/i.test(step3), "step 3 does not assert that the RPC avoids bbox — step 3 introduces it");
+assert(/rpc_uziva_bbox_pred/i.test(step3), "step 3 asserts the RPC does use the bounding box");
 
 const readme = readBundle("README.md");
 assert(/NEUPRAVUJTE JE RUČNĚ/.test(readme), "the bundle is marked as generated");
@@ -122,7 +195,7 @@ assert(/zavre_kontrola/.test(readme) && /pokaždé čekejte na výsledek/i.test(
 
 // ── Oprávnění jsou kontrolována po každém kroku, kde RPC přepisujeme ──────
 for (const { name, content } of stepFiles) {
-  if (name.startsWith("step_1") || name.startsWith("step_2") || name.startsWith("step_3") || name.startsWith("step_6")) {
+  if (name.startsWith("step_1") || name.startsWith("step_2") || name.startsWith("step_3") || name.startsWith("step_7")) {
     assert(/routine_privileges/.test(content), `${name} verifies execute privileges after redefining the RPC`);
     assert(/service_role/.test(content), `${name} names service_role as the only allowed grantee`);
   }

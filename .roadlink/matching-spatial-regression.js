@@ -9,6 +9,7 @@ const extensionMigration = read("supabase/migrations/20261005150000_enable_postg
 const geometryMigration = read("supabase/migrations/20261005160000_carrier_route_spatial_line.sql");
 const rpcMigration = read("supabase/migrations/20261005170000_matching_spatial_preselection.sql");
 const bboxMigration = read("supabase/migrations/20261005140000_matching_sql_geo_preselection.sql");
+const bboxFixMigration = read("supabase/migrations/20261005145000_matching_bbox_without_via.sql");
 const cleanupMigration = read("supabase/migrations/20261005180000_matching_spatial_cleanup.sql");
 const cleanupBody = cleanupMigration.replace(/--[^\n]*/g, "");
 
@@ -30,6 +31,65 @@ assert(/set search_path = ''/i.test(geometryMigration), "PostGIS functions are c
 assert(/revoke all[\s\S]*from anon[\s\S]*from authenticated/i.test(geometryMigration), "the geometry trigger is closed for clients");
 assert(!/\b(drop column|delete from|truncate|drop table)\b/i.test(geometryMigration), "the geometry migration destroys nothing");
 assert(!/route_line\s*:=/i.test(geometryMigration.replace(/new\.route_line :=/g, "")), "only the trigger writes the geometry");
+
+// ── PRŮJEZDNÉ BODY NEJSOU POVINNÉ ────────────────────────────────────────────
+// Toto je nejsubtlnější chyba celého řetězce: triggery braly `via_latitudes IS
+// NULL` jako „chybí souřadnice“, a tím považovaly trasu BEZ průjezdných bodů za
+// trasu bez geometrie. Vpraxe to odebralo obdélník i geometrii většině tras, takže
+// prostorový předvýběr neměl nad čím pracovat. Prázdný seznam je platný stav.
+assert(/create or replace function public\.carrier_route_via_coordinates_valid/i.test(bboxFixMigration), "completeness of via points is decided in one shared place");
+assert(/returns boolean/i.test(bboxFixMigration), "the helper answers a yes/no question");
+assert(/coalesce\(cardinality\(p_via_place_ids\), 0\) = 0/i.test(bboxFixMigration), "an empty via list is a valid state, not missing data");
+assert(/coalesce\(cardinality\(p_via_latitudes\), 0\) = 0/i.test(bboxFixMigration), "orphaned via coordinates without via points are rejected");
+assert(/value <> value/i.test(bboxFixMigration), "NaN via coordinates are rejected (NaN <> NaN is true in Postgres)");
+assert(/revoke all[\s\S]*carrier_route_via_coordinates_valid[\s\S]*from anon[\s\S]*from authenticated/i.test(bboxFixMigration), "the helper is closed for clients");
+// `.trim()` nestačí: soubor začíná komentářem, takže `^` na trimovaném textu
+// ukazuje na `--`, ne na `begin`. Proto řádkový příznak `m`.
+assert(/^\s*begin;/im.test(bboxFixMigration) && /^\s*commit;\s*$/im.test(bboxFixMigration), "the fix is one explicit transaction");
+assert(!/\b(delete from|drop column|drop table|truncate)\b/i.test(bboxFixMigration), "the fix destroys nothing");
+assert(/set from_lat = from_lat/i.test(bboxFixMigration), "existing rows are backfilled by a no-op UPDATE, so no stored value changes");
+assert(!/alter table/i.test(bboxFixMigration), "the fix adds no column — the bbox columns already exist");
+
+const bboxFixBody = bboxFixMigration.replace(/--[^\n]*/g, "");
+const bboxTrigger = bboxFixBody.match(/function public\.assign_carrier_route_bbox\(\)[\s\S]*?\$\$;/);
+assert(bboxTrigger, "the fix redefines the bounding-box trigger");
+assert(!/new\.via_(latitudes|longitudes) is null/i.test(bboxTrigger[0]), "the bbox trigger no longer refuses a route that has no via points");
+assert(/coalesce\(new\.via_latitudes, '\{\}'::double precision\[\]\)/i.test(bboxTrigger[0]), "the bbox trigger concatenates with coalesce so an empty via list still yields a box");
+// Žádný klient nesmí obdélník podstrčit a trigger nesmí přijmout cizí hodnotu:
+// každý sloupec se buď vynuluje, nebo se dopočítá z `min`/`max` souřadnic.
+for (const column of ["bbox_min_lat", "bbox_max_lat", "bbox_min_lng", "bbox_max_lng"]) {
+  const assignments = bboxTrigger[0].match(new RegExp(`new\\.${column} := [^;]+`, "gi")) || [];
+  assert.strictEqual(assignments.length, 2, `${column} is assigned exactly twice: once cleared, once computed`);
+  assert(
+    assignments.every((line) => /:=\s*null/i.test(line) || /:=\s*\(select (min|max)\(/i.test(line)),
+    `${column} is only ever cleared or computed from the coordinates`,
+  );
+}
+
+// Všechny tři odvozující triggery musí rozhodovat o úplnosti stejně. Kdyby se
+// jejich podmínky rozdělily, kontroly by počítaly jinou množinu tras, ne jakou
+// geometrie skutečně vzniká.
+// Kontrola běží na kódu BEZ KOMENTÁŘŮ. Migrace tu chybu výslovně popisuje
+// v komentáři (doslova uvádí `new.via_latitudes is null` jako příklad toho,
+// co se opravuje), takže hledání v surovém textu by našlo právě vysvětlení.
+for (const [label, migration] of [["bbox", bboxFixMigration], ["line", geometryMigration], ["cleanup", cleanupMigration]]) {
+  const code = migration.replace(/--[^\n]*/g, "");
+  assert(
+    /carrier_route_via_coordinates_valid\(/i.test(code),
+    `the ${label} step derives geometry through the shared helper`,
+  );
+  assert(
+    !/assign_carrier_route_(?:bbox|line|geometry)\(\)[\s\S]{0,1500}?new\.via_latitudes is null/i.test(code),
+    `the ${label} trigger does not treat missing via coordinates as missing geometry`,
+  );
+}
+
+// Pořadí: helper musí existovat dřív, než ho použije krok 6.
+assert(
+  geometryMigration.indexOf("carrier_route_via_coordinates_valid") > -1
+    && bboxFixMigration.indexOf("create or replace function public.carrier_route_via_coordinates_valid") > -1,
+  "the helper is created by the step that sorts before the step that uses it",
+);
 
 // ── Krok 3: prostorový předvýběr v RPC ──────────────────────────────────────
 assert(/create or replace function public\.get_route_matching_candidates_internal/i.test(rpcMigration), "the RPC is replaced without dropping (no privilege window)");
@@ -64,6 +124,10 @@ assert(/to_regprocedure\('public\.get_route_matching_candidates_internal\(uuid,u
 assert(/pg_get_functiondef[\s\S]*like '%bbox_%'[\s\S]*raise exception/i.test(cleanupBody), "it refuses to clean up while the RPC still reads bbox_* columns");
 assert(/pg_get_functiondef[\s\S]*like '%roadlink_haversine_meters%'[\s\S]*raise exception/i.test(cleanupBody), "it refuses to clean up while the RPC still uses the haversine helper");
 assert(/cr\.route_line is null/i.test(cleanupBody) && /v_missing_geometry > 0/i.test(cleanupBody), "it refuses to drop the bounding box while some complete routes lack geometry");
+assert(
+  /public\.carrier_route_via_coordinates_valid\(\s*cr\.via_place_ids/i.test(cleanupBody),
+  "the cleanup checks exactly the routes the geometry trigger can derive — same predicate, same set",
+);
 assert(/amname = 'gist'/i.test(cleanupBody) && /indisvalid/i.test(cleanupBody) && /indisready/i.test(cleanupBody), "it requires a valid, ready GiST index on carrier_routes");
 assert(/do \$\$[\s\S]*\$\$;/i.test(cleanupBody), "the preconditions are a single fail-loud block that aborts the whole transaction");
 
@@ -103,6 +167,7 @@ assert(/návratová cesta|rollback/i.test(cleanupMigration), "the one-way nature
 
 // Pořadí souborů musí odpovídat pořadí nasazení.
 const names = [
+  "20261005145000_matching_bbox_without_via.sql",
   "20261005150000_enable_postgis.sql",
   "20261005160000_carrier_route_spatial_line.sql",
   "20261005170000_matching_spatial_preselection.sql",
