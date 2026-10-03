@@ -47,3 +47,5 @@ scripts/adb-e2e-runner.mjs
 !.roadlink/deployment-runbook-regression.js
 !.roadlink/spatial-index-proof-regression.js
 !.roadlink/sql-editor-bundle-regression.js
+# Report z nasazování — patří do repo, aby šlo dohledat, ktery krok selhal a proč
+!.roadlink/freebuff-report.md
