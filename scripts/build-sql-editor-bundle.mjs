@@ -256,18 +256,28 @@ const steps = [
 -- dostupný: ZASTAVTE celé nasazení a kroky 6–7 NEPUŠTĚJTE. Kroky 3 a 4 fungují
 -- i bez PostGIS, jen je předvýběr pomalejší.
 --
--- Když geography_ty_p nebo geography_linestring není ANO, NEJDE pokračovat.`,
+-- Když geography_ty_p_existuje nebo prostorove_funkce_ok není ANO, NEJDE pokračovat.`,
     checks: [
       { label: "extension_v_extensions", condition: "ext_schema = 'extensions'" },
       { label: "geography_ty_p_existuje", condition: "geography_ok" },
-      { label: "geography_linestring_ok", condition: "linestring_ok" },
+      { label: "prostorove_funkce_ok", condition: "spatial_fns_ok" },
       { label: "nic_v_public_schematu", condition: "leaky = 0" },
     ],
     from: `  CROSS JOIN LATERAL (
     SELECT
       (SELECT extnamespace::regnamespace::text FROM pg_extension WHERE extname='postgis') AS ext_schema,
-      (to_regtype('extensions.geography') IS NOT NULL) AS geography_ok,
-      (to_regtype('extensions.geography linestring') IS NOT NULL) AS linestring_ok,
+      -- Typ i funkce se ověřují přes katalog. Regtype vstup s typmodem
+      -- odděleným mezerou je syntakticky chybný a spadl by na parse chybě,
+      -- ne na nálezu typu.
+      (SELECT EXISTS (
+         SELECT 1 FROM pg_type t
+         JOIN pg_namespace n ON n.oid = t.typnamespace
+         WHERE n.nspname='extensions' AND t.typname='geography' AND t.typtype='b'
+       )) AS geography_ok,
+      (SELECT count(*) FROM pg_proc p
+         JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname='extensions'
+           AND p.proname IN ('st_dwithin','st_makeline','st_makepoint','st_distance')) = 4 AS spatial_fns_ok,
       (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
          WHERE n.nspname='public' AND c.relname LIKE 'spatial_%') AS leaky
   ) AS c`,

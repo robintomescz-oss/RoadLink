@@ -13,10 +13,21 @@ const bboxFixMigration = read("supabase/migrations/20261005145000_matching_bbox_
 const cleanupMigration = read("supabase/migrations/20261005180000_matching_spatial_cleanup.sql");
 const cleanupBody = cleanupMigration.replace(/--[^\n]*/g, "");
 
+// Kontroly nad SQL běží na kódu BEZ KOMENTÁŘŮ. Migrace tu chybu výslovně
+// popisuje v komentáři (doslova uvádí chybný výraz jako příklad toho, co se
+// opravuje), takže hledání v surovém textu by našlo právě vysvětlení.
+const code = (sql) => sql.replace(/--[^\n]*/g, "");
+const extensionCode = code(extensionMigration);
+
 // ── Krok 1: extension ───────────────────────────────────────────────────────
 assert(/create extension if not exists postgis schema extensions/i.test(extensionMigration), "PostGIS is enabled idempotently into the extensions schema");
 assert(/from pg_extension where extname = 'postgis'/i.test(extensionMigration), "the migration verifies PostGIS is actually installed");
-assert(/to_regtype\('extensions\.geography linestring'\)/i.test(extensionMigration), "the migration verifies the LineString geography type exists");
+assert(
+  !/to_regtype\('extensions\.geography linestring'\)/i.test(extensionCode),
+  "the migration does not parse a space-separated typmod through regtype input, which is a syntax error rather than a type check",
+);
+assert(/pg_type t/i.test(extensionCode) && /typname = 'geography'/i.test(extensionCode), "the migration verifies the geography type through the catalog");
+assert(/st_dwithin/i.test(extensionCode), "the migration verifies the spatial functions the later steps actually call");
 assert(/raise exception/i.test(extensionMigration), "a missing extension fails loudly instead of degrading silently");
 assert(!/\b(delete|truncate|drop)\b/i.test(extensionMigration.replace(/--[^\n]*/g, "")), "enabling the extension mutates no data");
 
@@ -187,7 +198,8 @@ assert(!/route_line|bbox_|via_latitudes|via_longitudes/i.test(publicFeed), "the 
 const smoke = read("supabase/smoke/matching_spatial_smoke.sql");
 const smokeBody = smoke.replace(/--[^\n]*/g, "");
 assert(!/\b(insert into|update |delete from|truncate|create table|drop)\b/i.test(smokeBody), "the smoke test is read-only");
-assert(/to_regtype\('extensions\.geography linestring'\)/i.test(smoke), "the smoke test verifies the spatial type is installed");
+assert(!/to_regtype\('extensions\.geography linestring'\)/i.test(code(smoke)), "the smoke test avoids the invalid space-separated typmod regtype input");
+assert(/st_dwithin/i.test(smoke) && /pg_type/i.test(smoke), "the smoke test verifies the spatial type and functions through the catalog");
 assert(/pg_extension where extname = 'postgis'/i.test(smoke), "the smoke test verifies the extension is installed");
 assert(/amname = 'gist'/i.test(smoke) && /indisvalid/i.test(smoke), "the smoke test verifies a usable GiST index");
 assert(/pg_get_functiondef/i.test(smoke) && /like '%bbox_%'/i.test(smoke), "the smoke test still fails when the RPC depends on bbox columns (historical check, valid before the cleanup)");

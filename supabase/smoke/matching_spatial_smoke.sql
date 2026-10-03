@@ -41,9 +41,26 @@ begin
     raise exception 'CHYBA: PostGIS není nainstalována. Aplikuj 20261005150000_enable_postgis.sql.';
   end if;
 
-  if to_regtype('extensions.geography') is null
-     or to_regtype('extensions.geography linestring') is null then
-    raise exception 'CHYBA: chybí typ extensions.geography (linestring). Zkontroluj krok 1.';
+  -- `to_regtype('extensions.geography linestring')` se NESMÍ používat: regtype
+  -- vstup s typmodem odděleným mezerou je syntakticky chybný a selhal by na
+  -- parse chybě místo toho, aby ohlásil chybějící typ. Kontrola jde přes katalog.
+  if not exists (
+    select 1
+    from pg_type t
+    join pg_namespace n on n.oid = t.typnamespace
+    where n.nspname = 'extensions' and t.typname = 'geography' and t.typtype = 'b'
+  ) then
+    raise exception 'CHYBA: chybí typ extensions.geography. Zkontroluj krok 5.';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'extensions'
+      and p.proname in ('st_dwithin', 'st_makeline', 'st_makepoint', 'st_distance')
+  ) then
+    raise exception 'CHYBA: chybí prostorové funkce v schématu extensions. Zkontroluj krok 5.';
   end if;
 
   if not exists (

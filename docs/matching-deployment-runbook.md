@@ -251,9 +251,21 @@ select extname, extnamespace::regnamespace::text as schema
 from pg_extension where extname = 'postgis';
 -- očekáváno: postgis | extensions
 
--- B) Prostorové typy existují.
-select to_regtype('extensions.geography') is not null as geography_ok,
-       to_regtype('extensions.geography linestring') is not null as linestring_ok;
+-- B) Prostorový typ a funkce, které používají kroky 6 a 7, existují.
+--    POZOR: `to_regtype('extensions.geography linestring')` se nesmí používat —
+--    regtype vstup s typmodem odděleným mezerou je syntakticky chybný a dotaz
+--    by spadl na parse chybě, ne na zjištění, že typ chybí. Kontrola jde
+--    přes katalog.
+select exists (
+         select 1 from pg_type t
+         join pg_namespace n on n.oid = t.typnamespace
+         where n.nspname = 'extensions' and t.typname = 'geography' and t.typtype = 'b'
+       ) as geography_ok,
+       (select count(*) from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'extensions'
+          and p.proname in ('st_dwithin','st_makeline','st_makepoint','st_distance')
+       ) = 4 as spatial_functions_ok;
 -- očekáváno: obě true
 
 -- C) PostGIS nezanechal nic v public schématu (konvence repozitáře).

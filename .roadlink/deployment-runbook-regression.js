@@ -61,6 +61,14 @@ const sqlBlocks = [...runbook.matchAll(sqlPattern)].map((match) => match[1]);
 assert(sqlBlocks.length >= steps.length + 1, "the runbook has a baseline block, one check per step and a rollback block");
 const allSql = sqlBlocks.join("\n");
 
+// Runbook používá vysvětlující komentář, ve kterém záměrně uvádí chybný tvar
+// varování. Kontrola nad SQL proto musí nejdřív komentáře odstranit, jinak by
+// našla právě to varování, které poučuje, aby se tvar nepoužíval.
+const allSqlCode = allSql
+  .split("\n")
+  .filter((line) => !line.trim().startsWith("--"))
+  .join("\n");
+
 for (const fragment of [
   "information_schema.columns",
   "information_schema.routine_privileges",
@@ -78,7 +86,11 @@ assert(/ST_MakePoint|ST_NPoints/.test(allSql), "geometry is inspected with PostG
 
 // ── Zastávky a podmínky pokračování ────────────────────────────────────────
 assert(/STOP|ZASTAVKA/i.test(runbook), "the runbook tells the operator when to stop");
-assert(allSql.includes("to_regtype('extensions.geography linestring')"), "the PostGIS step verifies the LineString geography type");
+// `to_regtype('extensions.geography linestring')` je syntakticky chybný vstup:
+// regtype nepřijímá typmod oddělený mezerou a skončí to parse chybou dřív, než
+// se něco zjistí o typu. Kontrola musí jít přes katalog.
+assert(!allSqlCode.includes("to_regtype('extensions.geography linestring')"), "no step parses a space-separated typmod through regtype input");
+assert(allSql.includes("st_dwithin"), "the PostGIS step verifies the spatial functions the later steps call");
 assert(allSql.includes("still_bbox") && allSql.includes("still_haversine"), "step 6 proves the RPC no longer reads the transitional structures");
 assert(allSql.includes("bbox_columns_left") && allSql.includes("haversine_gone"), "step 7 proves the transitional structures are gone");
 assert(allSql.includes("grantee"), "the runbook checks execute privileges");
