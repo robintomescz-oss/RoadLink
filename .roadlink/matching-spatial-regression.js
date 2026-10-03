@@ -112,6 +112,17 @@ assert(
 );
 assert(/ST_NPoints\(cr\.route_line::extensions\.geometry\)/i.test(bundle6), "the bundle casts route_line to geometry before counting vertices");
 
+// Chyba, která se projevila po úspěšném kroku: kontrola vyžadovala
+// ST_MakeLine(geography[]), tedy variantu, která v PostGIS ZÁMĚRNĚ neexistuje
+// a kvůli níž se trigger převádí na geometry. Kontrola tak vyžadovala přesně
+// to, co krok opravuje, a zelenou instalaci označila za rozbitou. Musí se ptát
+// na variantu, kterou trigger skutečně volá.
+assert(
+  !/ST_MakeLine[\s\S]{0,200}geography\[\]/i.test(code(bundle6).replace(/--[^\n]*/g, "")),
+  "the ST_MakeLine check asks for the geometry overload the trigger uses, not for a geography one that cannot exist",
+);
+assert(/'extensions\.geometry\[\]'::regtype/i.test(bundle6), "the ST_MakeLine check looks up the geometry[] overload");
+
 // ── PRŮJEZDNÉ BODY NEJSOU POVINNÉ ────────────────────────────────────────────
 // Toto je nejsubtlnější chyba celého řetězce: triggery braly `via_latitudes IS
 // NULL` jako „chybí souřadnice“, a tím považovaly trasu BEZ průjezdných bodů za

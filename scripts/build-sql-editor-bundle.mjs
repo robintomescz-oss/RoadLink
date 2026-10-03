@@ -303,7 +303,7 @@ const steps = [
       { label: "typ_je_extensions_geography", condition: "udt_schema = 'extensions' AND udt_name = 'geography'" },
       { label: "bez_chybejici_geometrie", condition: "missing = 0" },
       { label: "gist_index_platny", condition: "gist_ok = 1" },
-      { label: "st_makeline_ma_geometrii", condition: "makeline_ok" },
+      { label: "st_makeline_ma_variantu_geometry", condition: "makeline_ok" },
       { label: "pocet_bodu_souhlasí", condition: "npoints_ok" },
       { label: "geometrie_bez_via_existuje", condition: "npoints_bez_via_ok" },
       { label: "jen_service_role_z_anon", condition: noAnon },
@@ -316,15 +316,19 @@ const steps = [
          WHERE table_schema='public' AND table_name='carrier_routes' AND column_name='route_line') AS udt_name,
       (SELECT count(*) FROM public.carrier_routes
          WHERE ${ENDPOINTS_OK} AND ${VIA_OK} AND route_line IS NULL) AS missing,
-      -- ST_MakeLine existuje POUZE pro geometry. Bez této kontroly by se chybějící
-      -- varianta projevila až výjimkou uvnitř triggeru, tedy jako selhání celého kroku
-      -- místo přesného sloupce v tabulce.
+      -- ST_MakeLine v PostGIS existuje POUZE pro geometry (ST_MakeLine(geometry[])
+      -- a ST_MakeLine(geometry, geometry)). Trigger proto staví vrcholy jako
+      -- geometry[] a hotovou čáru převádí na geography přetypováním.
+      --
+      -- Kontrola tedy NEHLEDÁ variantu pro geography — ta záměrně neexistuje
+      -- a její vyžadování by bylo přesně tou chybou, kterou trigger opravuje.
+      -- Ověřuje se správná varianta, kterou trigger skutečně volá.
       (SELECT EXISTS (
          SELECT 1
          FROM pg_proc p
          JOIN pg_namespace n ON n.oid = p.pronamespace
          WHERE n.nspname='extensions' AND p.proname='st_makeline'
-           AND 'extensions.geography[]'::regtype = ANY(p.proargtypes)
+           AND 'extensions.geometry[]'::regtype = ANY(p.proargtypes)
        )) AS makeline_ok,
       (SELECT count(*) FROM pg_index i
          JOIN pg_class c ON c.oid = i.indexrelid
