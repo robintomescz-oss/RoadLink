@@ -205,12 +205,16 @@ for (const { name, content } of stepFiles) {
 assert(!read("scripts/run-regressions.mjs").includes("build-sql-editor-bundle"), "the generator is not part of the regression runner");
 assert(read("scripts/run-regressions.mjs").includes("sql-editor-bundle-regression"), "the bundle regression is registered");
 
-// ── Report z nasazování patří do repozitáře ─────────────────────────────────
-// Bez toho se ztrácí záznam, který krok selhal a proč. Report smí být
-// trackovaný, ale nesmí v repu vysypat tajné údaje: seznam cílových projektů
-// a čísla řádků jsou v pořádku, hesla ani connection string ne.
+// ── Report z nasazování zůstává jen lokálně ────────────────────────────────
+// Report je pracovní záznam agenta, ne zdrojový kód: zůstává na disku uživatele,
+// ale nesmí být trackovaný ani součástí PR nebo historie. Přesto se v něm nesmí
+// vysypat tajné údaje: seznam cílových projektů a čísla řádků jsou v pořádku,
+// hesla ani connection string ne.
 const gitignore = read(".gitignore");
-assert(gitignore.includes("!.roadlink/freebuff-report.md"), "the deployment report is explicitly allowlisted for tracking");
+assert(
+  gitignore.includes("/.roadlink/freebuff-report.md") && !gitignore.includes("!.roadlink/freebuff-report.md"),
+  "the deployment report is explicitly ignored instead of being tracked",
+);
 const report = read(".roadlink/freebuff-report.md");
 assert(/##\s*9\./.test(report), "the report has a section on what actually happened during the rollout");
 assert(/bez_bbox_tras_s_ukoncene/.test(report), "the report records the check that failed during the rollout");
