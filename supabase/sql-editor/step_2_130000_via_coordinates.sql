@@ -7,15 +7,19 @@
 --
 -- JAK POUŽÍT
 --   Supabase Dashboard → SQL Editor → New query → vložte CELÝ tento soubor → Run.
---   Skript se má dokončit bez chyby a na konci vypsat NOTICE s výsledkem.
 --
---   • Migrace je v jedné transakci. Když selže, odroluje se celá a databáze
---     zůstane beze změny.
---   • KROK je bezpečné pustit opakovaně (idempotentní).
---   • PO TOMTO KROKU nic jiného nespouštějte — nejdřív zkontrolujte výstup.
+--   POSLEDNÍ TABULKA JE VÝSLEDEK. Má sloupec 'zavre_kontrola':
+--     ANO → krok prokl, pokračujte dalším souborem.
+--     NE  → něco nesedí. DALŠÍ KROK NEPUŠTĚJTE, pošlete mi tabulku.
 --
--- Bezpečnost: tento soubor upravuje databázi. Před spuštěním si udělejte
--- bod obnovy v Supabase Dashboardu → Database → Backups.
+--   Výstup RAISE NOTICE SQL Editor nezobrazuje, proto je kontrola na konci
+--   souboru shrnující SELECT.
+--
+--   Každý krok je v jedné transakci. Když selže, odroluje se celý a databáze
+--   zůstane beze změny. Kroky jsou idempotentní.
+--
+-- Bezpečnost: tento soubor upravuje databázi. Před spuštěním si udělejte bod
+-- obnovy v Supabase Dashboardu → Database → Backups.
 -- Volná kapacita: soukromé souřadnice průjezdních bodů + matching RPC s polohou
 --
 -- Proč: matching potřebuje k polohovému předvýběru kandidátů a k seřazení
@@ -245,40 +249,42 @@ comment on function public.get_route_matching_candidates_internal(uuid, uuid, in
   'Internal candidate preselection for google-route-matches. Returns private place IDs and coordinates only to service_role; never expose directly to mobile clients.';
 
 commit;
-
--- ══ KONTROLA KROKU 2 (read-only) ═══════════════════════════════════════════
-
--- A) Sloupce jsou přítomné a mají správný typ.
-select column_name, data_type
-from information_schema.columns
-where table_schema = 'public' and table_name = 'carrier_routes'
-  and column_name in ('via_latitudes', 'via_longitudes')
-order by column_name;
--- očekáváno: oba řádky, double precision[]
-
--- B) Validační trigger existuje a je zapnutý.
-select tgname, tgenabled
-from pg_trigger
-where tgrelid = 'public.carrier_routes'::regclass
-  and tgname = 'carrier_routes_via_places_validate';
--- očekáváno: jeden řádek, tgenabled = O
-
--- C) Tři omezení jsou založená.
-select conname from pg_constraint
-where conrelid = 'public.carrier_routes'::regclass
-  and conname in (
-    'carrier_routes_via_latitudes_len',
-    'carrier_routes_via_longitudes_len',
-    'carrier_routes_via_coordinates_together'
-  )
-order by conname;
--- očekáváno: 3 řádky
-
--- D) Oprávnění. 'postgres' je vlastník funkce, takže EXECUTE má vždy.
---    Očekáváno jsou dva řádky: 'postgres' a 'service_role'.
---    'anon' ani 'authenticated' tam NESMÍ být — jinak by klienti mohli RPC
---    volat a dostávat soukromá data.
-select grantee from information_schema.routine_privileges
-where routine_schema = 'public'
-  and routine_name = 'get_route_matching_candidates_internal'
-order by grantee;
+A) Sloupce, validační trigger a tři omezení musí existovat.
+--   Sloupec 'jen_service_role_z_anon': 'postgres' je vlastník funkce a EXECUTE
+--   má vždy, takže jeho přítomnost je správná. Rozhodující je nepřítomnost
+--   'anon' a 'authenticated' — ti by si mohli RPC volat a číst soukromá data.
+-- ══ VÝSLEDek KROKU ══════════════════════════════════════════════════════════
+--
+-- Tohle je jediná tabulka, kterou SQL Editor zobrazí. Zkontrolujte sloupec
+-- 'zavre_kontrola' a přesvědčte se, že vše je ANO.
+SELECT
+  CASE WHEN souradnicove_sloupce = 2 THEN 'ANO' ELSE 'NE' END AS souradnicove_sloupce,
+  CASE WHEN trigger_zapnut = 1 THEN 'ANO' ELSE 'NE' END AS validacni_trigger_zapnut,
+  CASE WHEN omezeni = 3 THEN 'ANO' ELSE 'NE' END AS tri_omezeni,
+  CASE WHEN v_def like '%route_via_latitudes%' THEN 'ANO' ELSE 'NE' END AS rpc_vraci_souradnice,
+  CASE WHEN not exists (select 1 from information_schema.routine_privileges where routine_schema='public' and routine_name='get_route_matching_candidates_internal' and grantee in ('anon','authenticated')) THEN 'ANO' ELSE 'NE' END AS jen_service_role_z_anon
+  ,
+  CASE WHEN (souradnicove_sloupce = 2)
+    AND (trigger_zapnut = 1)
+    AND (omezeni = 3)
+    AND (v_def like '%route_via_latitudes%')
+    AND (not exists (select 1 from information_schema.routine_privileges where routine_schema='public' and routine_name='get_route_matching_candidates_internal' and grantee in ('anon','authenticated')))
+    THEN 'ANO — krok uspel'
+    ELSE 'NE — NEPOUŠTĚJTE DALŠÍ KROK, poslete mi tuto tabulku'
+  END AS zavre_kontrola
+FROM (SELECT 1) AS t
+  CROSS JOIN LATERAL (
+    SELECT COALESCE(pg_get_functiondef(to_regprocedure('public.get_route_matching_candidates_internal(uuid,uuid,integer)')), '') AS v_def
+  ) AS f
+  CROSS JOIN LATERAL (
+    SELECT
+      (SELECT count(*) FROM information_schema.columns
+         WHERE table_schema='public' AND table_name='carrier_routes'
+           AND column_name IN ('via_latitudes','via_longitudes')) AS souradnicove_sloupce,
+      (SELECT count(*) FROM pg_trigger
+         WHERE tgrelid='public.carrier_routes'::regclass
+           AND tgname='carrier_routes_via_places_validate' AND tgenabled='O') AS trigger_zapnut,
+      (SELECT count(*) FROM pg_constraint
+         WHERE conrelid='public.carrier_routes'::regclass
+           AND conname IN ('carrier_routes_via_latitudes_len','carrier_routes_via_longitudes_len','carrier_routes_via_coordinates_together')) AS omezeni
+  ) AS c;

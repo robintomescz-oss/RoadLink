@@ -7,15 +7,19 @@
 --
 -- JAK POUŽÍT
 --   Supabase Dashboard → SQL Editor → New query → vložte CELÝ tento soubor → Run.
---   Skript se má dokončit bez chyby a na konci vypsat NOTICE s výsledkem.
 --
---   • Migrace je v jedné transakci. Když selže, odroluje se celá a databáze
---     zůstane beze změny.
---   • KROK je bezpečné pustit opakovaně (idempotentní).
---   • PO TOMTO KROKU nic jiného nespouštějte — nejdřív zkontrolujte výstup.
+--   POSLEDNÍ TABULKA JE VÝSLEDEK. Má sloupec 'zavre_kontrola':
+--     ANO → krok prokl, pokračujte dalším souborem.
+--     NE  → něco nesedí. DALŠÍ KROK NEPUŠTĚJTE, pošlete mi tabulku.
 --
--- Bezpečnost: tento soubor upravuje databázi. Před spuštěním si udělejte
--- bod obnovy v Supabase Dashboardu → Database → Backups.
+--   Výstup RAISE NOTICE SQL Editor nezobrazuje, proto je kontrola na konci
+--   souboru shrnující SELECT.
+--
+--   Každý krok je v jedné transakci. Když selže, odroluje se celý a databáze
+--   zůstane beze změny. Kroky jsou idempotentní.
+--
+-- Bezpečnost: tento soubor upravuje databázi. Před spuštěním si udělejte bod
+-- obnovy v Supabase Dashboardu → Database → Backups.
 -- Krok 1 ze 3: prostorová extension (PostGIS)
 --
 -- Proč: dosud se ohraničující obdélník trasy (`bbox_*`) ukládal do čtyř
@@ -64,27 +68,33 @@ comment on extension postgis is
 
 commit;
 
--- ══ KONTROLA KROKU 4 (read-only) ═══════════════════════════════════════════
---
 -- Tento krok je ZASTÁVKA. Pokud skript skončí chybou, PostGIS není v plánu
--- dostupný. V takovém případě ZASTAVTE celé nasazení a nepusťte kroky 5–7.
--- Krok 3 (bbox) funguje i bez PostGIS, jen je pomalejší.
-
--- A) Extension je nainstalovaná ve schématu extensions.
-select extname, extnamespace::regnamespace::text as schema
-from pg_extension
-where extname = 'postgis';
--- očekáváno: postgis | extensions
-
--- B) Prostorové typy existují.
-select to_regtype('extensions.geography') is not null as geography_ok,
-       to_regtype('extensions.geography linestring') is not null as linestring_ok;
--- očekáváno: obě true
---   Pokud je geography_ok = false, ZASTAVTE. Nepouštějte krok 5.
-
--- C) PostGIS nezanechal nic v public schématu.
-select n.nspname, c.relname
-from pg_class c
-join pg_namespace n on n.oid = c.relnamespace
-where n.nspname = 'public' and c.relname like 'spatial_%';
--- očekáváno: 0 řádků
+-- dostupný: ZASTAVTE celé nasazení a kroky 5–7 NEPUŠTĚJTE. Krok 3 funguje
+-- i bez PostGIS, jen je pomalejší.
+--
+-- Když geography_ty_p nebo geography_linestring není ANO, NEJDE pokračovat.-- ══ VÝSLEDek KROKU ══════════════════════════════════════════════════════════
+--
+-- Tohle je jediná tabulka, kterou SQL Editor zobrazí. Zkontrolujte sloupec
+-- 'zavre_kontrola' a přesvědčte se, že vše je ANO.
+SELECT
+  CASE WHEN ext_schema = 'extensions' THEN 'ANO' ELSE 'NE' END AS extension_v_extensions,
+  CASE WHEN geography_ok THEN 'ANO' ELSE 'NE' END AS geography_ty_p_existuje,
+  CASE WHEN linestring_ok THEN 'ANO' ELSE 'NE' END AS geography_linestring_ok,
+  CASE WHEN leaky = 0 THEN 'ANO' ELSE 'NE' END AS nic_v_public_schematu
+  ,
+  CASE WHEN (ext_schema = 'extensions')
+    AND (geography_ok)
+    AND (linestring_ok)
+    AND (leaky = 0)
+    THEN 'ANO — krok uspel'
+    ELSE 'NE — NEPOUŠTĚJTE DALŠÍ KROK, poslete mi tuto tabulku'
+  END AS zavre_kontrola
+FROM (SELECT 1) AS t
+  CROSS JOIN LATERAL (
+    SELECT
+      (SELECT extnamespace::regnamespace::text FROM pg_extension WHERE extname='postgis') AS ext_schema,
+      (to_regtype('extensions.geography') IS NOT NULL) AS geography_ok,
+      (to_regtype('extensions.geography linestring') IS NOT NULL) AS linestring_ok,
+      (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+         WHERE n.nspname='public' AND c.relname LIKE 'spatial_%') AS leaky
+  ) AS c;

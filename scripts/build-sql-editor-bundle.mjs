@@ -11,6 +11,13 @@
  *
  * Balíček NIKDY neobsahuje krok 20261005180000 (cleanup): ten je jednosměrný
  * a patří až po ověřeném produkčním chodu.
+ *
+ * ── PROČ SHRNUJÍCÍ TABULKA, NE NOTICE ──────────────────────────────────────
+ *
+ * Supabase SQL Editor nezobrazuje výstup `RAISE NOTICE`. Kontrola, která píše
+ * jen do NOTICE, je pro operátora neviditelná: chybu by viděl, ale úspěch ne.
+ * Proto každý krok končí SELECTem, který vrací jednu řádku se sloupcem
+ * `zavre_kontrola`, kde je ANO nebo NE. Operátor nemůže nic přehlédnout.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -29,16 +36,51 @@ const header = (order, file, title, purpose) => `-- ═════════�
 --
 -- JAK POUŽÍT
 --   Supabase Dashboard → SQL Editor → New query → vložte CELÝ tento soubor → Run.
---   Skript se má dokončit bez chyby a na konci vypsat NOTICE s výsledkem.
 --
---   • Migrace je v jedné transakci. Když selže, odroluje se celá a databáze
---     zůstane beze změny.
---   • KROK je bezpečné pustit opakovaně (idempotentní).
---   • PO TOMTO KROKU nic jiného nespouštějte — nejdřív zkontrolujte výstup.
+--   POSLEDNÍ TABULKA JE VÝSLEDEK. Má sloupec 'zavre_kontrola':
+--     ANO → krok prokl, pokračujte dalším souborem.
+--     NE  → něco nesedí. DALŠÍ KROK NEPUŠTĚJTE, pošlete mi tabulku.
 --
--- Bezpečnost: tento soubor upravuje databázi. Před spuštěním si udělejte
--- bod obnovy v Supabase Dashboardu → Database → Backups.
+--   Výstup RAISE NOTICE SQL Editor nezobrazuje, proto je kontrola na konci
+--   souboru shrnující SELECT.
+--
+--   Každý krok je v jedné transakci. Když selže, odroluje se celý a databáze
+--   zůstane beze změny. Kroky jsou idempotentní.
+--
+-- Bezpečnost: tento soubor upravuje databázi. Před spuštěním si udělejte bod
+-- obnovy v Supabase Dashboardu → Database → Backups.
 `;
+
+const PRIVILEGES_NOTE = `
+--   Sloupec 'jen_service_role_z_anon': 'postgres' je vlastník funkce a EXECUTE
+--   má vždy, takže jeho přítomnost je správná. Rozhodující je nepřítomnost
+--   'anon' a 'authenticated' — ti by si mohli RPC volat a číst soukromá data.
+`;
+
+/** Jednotlivé sloupce shrnující tabulky: ANO/NE podle podmínky. */
+const summary = (checks, fromClause) => `-- ══ VÝSLEDek KROKU ══════════════════════════════════════════════════════════
+--
+-- Tohle je jediná tabulka, kterou SQL Editor zobrazí. Zkontrolujte sloupec
+-- 'zavre_kontrola' a přesvědčte se, že vše je ANO.
+SELECT
+${checks
+  .map((check, index) => `  CASE WHEN ${check.condition} THEN 'ANO' ELSE 'NE' END AS ${check.label}${index === checks.length - 1 ? "" : ","}`)
+  .join("\n")}
+  ,
+  CASE WHEN ${checks.map((check) => `(${check.condition})`).join("\n    AND ")}
+    THEN 'ANO — krok uspel'
+    ELSE 'NE — NEPOUŠTĚJTE DALŠÍ KROK, poslete mi tuto tabulku'
+  END AS zavre_kontrola
+FROM (SELECT 1) AS t
+${fromClause};
+`;
+
+const noAnon = "not exists (select 1 from information_schema.routine_privileges where routine_schema='public' and routine_name='get_route_matching_candidates_internal' and grantee in ('anon','authenticated'))";
+
+/** Vybrané rpc z katalogu, aby kontrola fungovala i na čisté databázi. */
+const RPC_DEF = `  CROSS JOIN LATERAL (
+    SELECT COALESCE(pg_get_functiondef(to_regprocedure('public.get_route_matching_candidates_internal(uuid,uuid,integer)')), '') AS v_def
+  ) AS f`;
 
 const steps = [
   {
@@ -47,52 +89,14 @@ const steps = [
     out: "step_1_120000_via_routes.sql",
     title: "Zahrnutí průjezdných bodů do matchingu",
     purpose: "zruší vylučování tras s průjezdnými body; RPC začne vracet route_via_place_ids",
-    verify: `
--- ══ KONTROLA KROKU 1 (read-only) ═══════════════════════════════════════════
-
--- A) Via body jsou předávány a výhybková podmínka je pryč.
-do $$
-declare
-  v_def text;
-begin
-  select pg_get_functiondef(to_regprocedure('public.get_route_matching_candidates_internal(uuid,uuid,integer)'))
-    into v_def;
-
-  if v_def is null then
-    raise exception 'CHYBA: RPC po kroku 1 neexistuje.';
-  end if;
-
-  if v_def like '%route_via_place_ids%' then
-    raise notice 'A) OK: RPC vrací route_via_place_ids.';
-  else
-    raise exception 'CHYBA: RPC nevrací route_via_place_ids.';
-  end if;
-
-  if v_def like '%cr.via_place_ids is not null%' then
-    raise exception 'CHYBA: RPC stále vylučuje trasy s průjezdními body.';
-  end if;
-
-  raise notice 'A) OK: trasy s průjezdními body nejsou vylučovány.';
-end;
-$$;
-
--- B) Oprávnění. Řádek 'postgres' je vlastník funkce, EXECUTE má vždy a je
---    v pořádku. Rozhodující je, že NEJSOU 'anon' ani 'authenticated':
---    ti by si mohli RPC volat a dostávat soukromá data. Pokud tam jsou,
---    migrace se neaplikovala celá — STOP a napište mi to.
-select grantee, privilege_type
-from information_schema.routine_privileges
-where routine_schema = 'public'
-  and routine_name = 'get_route_matching_candidates_internal'
-order by grantee;
-
--- C) Vyhodnoťte B): očekáváno jsou dva řádky.
---    'postgres' je VLASTNÍK funkce a EXECUTE má vždy — to je správné.
---    Důležité je, že NEJSOU přítomné
---    'anon' ani 'authenticated'. Pokud se některý z nich objeví, ZASTAVTE
---    a napište mi to: znamenalo by to, že klienti mohou volat RPC
---    a dostávají soukromá data.
-`,
+    detail: `A) Via body jsou předávány a výhybková podmínka je pryč.${PRIVILEGES_NOTE}`,
+    checks: [
+      { label: "rpc_vraci_via_place_ids", condition: "v_def like '%route_via_place_ids%'" },
+      { label: "via_trasy_neni_vylouceno", condition: "v_def not like '%cr.via_place_ids is not null%'" },
+      { label: "rpc_vracia_vsechny_pole", condition: "v_def like '%route_via_place_ids%'" },
+      { label: "jen_service_role_z_anon", condition: noAnon },
+    ],
+    from: RPC_DEF,
   },
   {
     order: 2,
@@ -100,44 +104,29 @@ order by grantee;
     out: "step_2_130000_via_coordinates.sql",
     title: "Soukromé souřadnice průjezdných bodů",
     purpose: "přidá via_latitudes/via_longitudes, validační trigger a RPC s polohou",
-    verify: `
--- ══ KONTROLA KROKU 2 (read-only) ═══════════════════════════════════════════
-
--- A) Sloupce jsou přítomné a mají správný typ.
-select column_name, data_type
-from information_schema.columns
-where table_schema = 'public' and table_name = 'carrier_routes'
-  and column_name in ('via_latitudes', 'via_longitudes')
-order by column_name;
--- očekáváno: oba řádky, double precision[]
-
--- B) Validační trigger existuje a je zapnutý.
-select tgname, tgenabled
-from pg_trigger
-where tgrelid = 'public.carrier_routes'::regclass
-  and tgname = 'carrier_routes_via_places_validate';
--- očekáváno: jeden řádek, tgenabled = O
-
--- C) Tři omezení jsou založená.
-select conname from pg_constraint
-where conrelid = 'public.carrier_routes'::regclass
-  and conname in (
-    'carrier_routes_via_latitudes_len',
-    'carrier_routes_via_longitudes_len',
-    'carrier_routes_via_coordinates_together'
-  )
-order by conname;
--- očekáváno: 3 řádky
-
--- D) Oprávnění. 'postgres' je vlastník funkce, takže EXECUTE má vždy.
---    Očekáváno jsou dva řádky: 'postgres' a 'service_role'.
---    'anon' ani 'authenticated' tam NESMÍ být — jinak by klienti mohli RPC
---    volat a dostávat soukromá data.
-select grantee from information_schema.routine_privileges
-where routine_schema = 'public'
-  and routine_name = 'get_route_matching_candidates_internal'
-order by grantee;
-`,
+    detail: `A) Sloupce, validační trigger a tři omezení musí existovat.${PRIVILEGES_NOTE}`,
+    checks: [
+      { label: "souradnicove_sloupce", condition: "souradnicove_sloupce = 2" },
+      { label: "validacni_trigger_zapnut", condition: "trigger_zapnut = 1" },
+      { label: "tri_omezeni", condition: "omezeni = 3" },
+      { label: "rpc_vraci_souradnice", condition: "v_def like '%route_via_latitudes%'" },
+      { label: "jen_service_role_z_anon", condition: noAnon },
+    ],
+    from: `  CROSS JOIN LATERAL (
+    SELECT COALESCE(pg_get_functiondef(to_regprocedure('public.get_route_matching_candidates_internal(uuid,uuid,integer)')), '') AS v_def
+  ) AS f
+  CROSS JOIN LATERAL (
+    SELECT
+      (SELECT count(*) FROM information_schema.columns
+         WHERE table_schema='public' AND table_name='carrier_routes'
+           AND column_name IN ('via_latitudes','via_longitudes')) AS souradnicove_sloupce,
+      (SELECT count(*) FROM pg_trigger
+         WHERE tgrelid='public.carrier_routes'::regclass
+           AND tgname='carrier_routes_via_places_validate' AND tgenabled='O') AS trigger_zapnut,
+      (SELECT count(*) FROM pg_constraint
+         WHERE conrelid='public.carrier_routes'::regclass
+           AND conname IN ('carrier_routes_via_latitudes_len','carrier_routes_via_longitudes_len','carrier_routes_via_coordinates_together')) AS omezeni
+  ) AS c`,
   },
   {
     order: 3,
@@ -145,41 +134,35 @@ order by grantee;
     out: "step_3_140000_bbox_preselection.sql",
     title: "Polohový předvýběr kandidátů (přechodné bbox)",
     purpose: "přidá bbox_* sloupce, btree indexy, roadlink_haversine_meters a RPC s polohovým filtrem",
-    verify: `
--- ══ KONTROLA KROKU 3 (read-only) ═══════════════════════════════════════════
-
--- A) Obdélník se dopočítal u všech tras s úplnými souřadnicemi.
-select count(*) as total,
-       count(*) filter (where bbox_min_lat is null) as without_bbox
-from public.carrier_routes
-where from_lat is not null and from_lng is not null
-  and to_lat is not null and to_lng is not null;
--- očekáváno: without_bbox = 0
-
--- B) Oba btree indexy jsou platné a připravené.
-select c.relname, i.indisvalid, i.indisready
-from pg_index i
-join pg_class c on c.oid = i.indexrelid
-where i.indrelid = 'public.carrier_routes'::regclass
-  and c.relname like 'carrier_routes_bbox%'
-order by c.relname;
--- očekáváno: 2 řádky, vše true
-
--- C) Helper existuje a je immutable.
-select proname, provolatile
-from pg_proc
-where oid = to_regprocedure('public.roadlink_haversine_meters(double precision,double precision,double precision,double precision)');
--- očekáváno: roadlink_haversine_meters | i
-
--- D) Oprávnění. 'postgres' je vlastník funkce, takže EXECUTE má vždy.
---    Očekáváno jsou dva řádky: 'postgres' a 'service_role'.
---    'anon' ani 'authenticated' tam NESMÍ být — jinak by klienti mohli RPC
---    volat a dostávat soukromá data.
-select grantee from information_schema.routine_privileges
-where routine_schema = 'public'
-  and routine_name = 'get_route_matching_candidates_internal'
-order by grantee;
-`,
+    detail: `
+-- A) NEJDŮLEŽITĚJŠÍ KROK PRO ZBÝVAJÍCÍ ŘETĚZEC. Obdélník se musí dopočítat
+--    u VŠECH tras s úplnými souřadnicemi; jinak na stavbě stojí celý zbytek.
+-- B) Oba btree indexy musí být platné a připravené.${PRIVILEGES_NOTE}`,
+    checks: [
+      { label: "bez_bbox_tras_s_ukoncene", condition: "bez_bbox = 0" },
+      { label: "dva_btree_indexy_platne", condition: "platne_indexy = 2" },
+      { label: "haversine_helper_existuje", condition: "helper = 1" },
+      { label: "rpc_uz_nepouzi_bbox_pred", condition: "v_def not like '%bbox%'" },
+      { label: "jen_service_role_z_anon", condition: noAnon },
+    ],
+    from: `  CROSS JOIN LATERAL (
+    SELECT COALESCE(pg_get_functiondef(to_regprocedure('public.get_route_matching_candidates_internal(uuid,uuid,integer)')), '') AS v_def
+  ) AS f
+  CROSS JOIN LATERAL (
+    SELECT
+      (SELECT count(*) FROM public.carrier_routes
+         WHERE from_lat IS NOT NULL AND from_lng IS NOT NULL
+           AND to_lat IS NOT NULL AND to_lng IS NOT NULL
+           AND bbox_min_lat IS NULL) AS bez_bbox,
+      (SELECT count(*) FROM pg_proc
+         WHERE pronamespace='public'::regnamespace
+           AND proname='roadlink_haversine_meters') AS helper,
+      (SELECT count(*) FROM pg_index i
+         JOIN pg_class c ON c.oid = i.indexrelid
+         WHERE i.indrelid='public.carrier_routes'::regclass
+           AND c.relname LIKE 'carrier_routes_bbox%'
+           AND i.indisvalid AND i.indisready) AS platne_indexy
+  ) AS c`,
   },
   {
     order: 4,
@@ -187,32 +170,26 @@ order by grantee;
     out: "step_4_150000_enable_postgis.sql",
     title: "Zapnutí PostGIS — ZASTÁVKA",
     purpose: "create extension if not exists postgis do schématu extensions",
-    verify: `
--- ══ KONTROLA KROKU 4 (read-only) ═══════════════════════════════════════════
---
+    detail: `
 -- Tento krok je ZASTÁVKA. Pokud skript skončí chybou, PostGIS není v plánu
--- dostupný. V takovém případě ZASTAVTE celé nasazení a nepusťte kroky 5–7.
--- Krok 3 (bbox) funguje i bez PostGIS, jen je pomalejší.
-
--- A) Extension je nainstalovaná ve schématu extensions.
-select extname, extnamespace::regnamespace::text as schema
-from pg_extension
-where extname = 'postgis';
--- očekáváno: postgis | extensions
-
--- B) Prostorové typy existují.
-select to_regtype('extensions.geography') is not null as geography_ok,
-       to_regtype('extensions.geography linestring') is not null as linestring_ok;
--- očekáváno: obě true
---   Pokud je geography_ok = false, ZASTAVTE. Nepouštějte krok 5.
-
--- C) PostGIS nezanechal nic v public schématu.
-select n.nspname, c.relname
-from pg_class c
-join pg_namespace n on n.oid = c.relnamespace
-where n.nspname = 'public' and c.relname like 'spatial_%';
--- očekáváno: 0 řádků
-`,
+-- dostupný: ZASTAVTE celé nasazení a kroky 5–7 NEPUŠTĚJTE. Krok 3 funguje
+-- i bez PostGIS, jen je pomalejší.
+--
+-- Když geography_ty_p nebo geography_linestring není ANO, NEJDE pokračovat.`,
+    checks: [
+      { label: "extension_v_extensions", condition: "ext_schema = 'extensions'" },
+      { label: "geography_ty_p_existuje", condition: "geography_ok" },
+      { label: "geography_linestring_ok", condition: "linestring_ok" },
+      { label: "nic_v_public_schematu", condition: "leaky = 0" },
+    ],
+    from: `  CROSS JOIN LATERAL (
+    SELECT
+      (SELECT extnamespace::regnamespace::text FROM pg_extension WHERE extname='postgis') AS ext_schema,
+      (to_regtype('extensions.geography') IS NOT NULL) AS geography_ok,
+      (to_regtype('extensions.geography linestring') IS NOT NULL) AS linestring_ok,
+      (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+         WHERE n.nspname='public' AND c.relname LIKE 'spatial_%') AS leaky
+  ) AS c`,
   },
   {
     order: 5,
@@ -220,46 +197,40 @@ where n.nspname = 'public' and c.relname like 'spatial_%';
     out: "step_5_160000_route_line.sql",
     title: "Skutečná prostorová geometrie trasy",
     purpose: "přidá route_line geography(LineString,4326), BEFORE trigger, dopočet a GiST index",
-    verify: `
--- ══ KONTROLA KROKU 5 (read-only) ═══════════════════════════════════════════
-
--- A) Sloupec existuje se správným typem.
-select udt_schema, udt_name
-from information_schema.columns
-where table_schema = 'public' and table_name = 'carrier_routes'
-  and column_name = 'route_line';
--- očekáváno: extensions | geography
-
--- B) Geometrie je dopočítaná u všech tras s úplnými souřadnicemi.
---    Přesně to je podmínka, kterou požaduje úklid v kroku 7.
-select count(*) as total,
-       count(*) filter (where route_line is null) as missing
-from public.carrier_routes
-where from_lat is not null and from_lng is not null
-  and to_lat is not null and to_lng is not null
-  and via_latitudes is not null and via_longitudes is not null
-  and cardinality(via_latitudes) = cardinality(via_place_ids)
-  and cardinality(via_longitudes) = cardinality(via_place_ids);
--- očekáváno: missing = 0
-
--- C) GiST index je platný a připravený.
-select c.relname, i.indisvalid, i.indisready, am.amname
-from pg_index i
-join pg_class c on c.oid = i.indexrelid
-join pg_am am on am.oid = c.relam
-where i.indrelid = 'public.carrier_routes'::regclass
-  and am.amname = 'gist';
--- očekáváno: carrier_routes_route_line_gist_idx | t | t | gist
-
--- D) Geometrie má správný počet bodů: odjezd + via + cíl.
-select cardinality(via_place_ids) as via_count,
-       extensions.ST_NPoints(route_line) as npoints,
-       extensions.ST_NPoints(route_line) = cardinality(via_place_ids) + 2 as matches
-from public.carrier_routes
-where cardinality(via_place_ids) > 0 and route_line is not null
-limit 5;
--- očekáváno: matches = true ve všech řádcích
-`,
+    detail: `
+-- A) 'bez_chybejici_geometrie' je přesně podmínka, kterou požaduje úklid v
+--    kroku 7. Kdyby nebylo ANO, krok 7 NEAPLIKUJTE.
+-- B) 'pocet_bodu_souhlasi' ověřuje, že lomená čára má odjezd + via + cíl.${PRIVILEGES_NOTE}`,
+    checks: [
+      { label: "typ_je_extensions_geography", condition: "udt_schema = 'extensions' AND udt_name = 'geography'" },
+      { label: "bez_chybejici_geometrie", condition: "missing = 0" },
+      { label: "gist_index_platny", condition: "gist_ok = 1" },
+      { label: "pocet_bodu_souhlasí", condition: "npoints_ok" },
+      { label: "jen_service_role_z_anon", condition: noAnon },
+    ],
+    from: `  CROSS JOIN LATERAL (
+    SELECT
+      (SELECT udt_schema FROM information_schema.columns
+         WHERE table_schema='public' AND table_name='carrier_routes' AND column_name='route_line') AS udt_schema,
+      (SELECT udt_name FROM information_schema.columns
+         WHERE table_schema='public' AND table_name='carrier_routes' AND column_name='route_line') AS udt_name,
+      (SELECT count(*) FROM public.carrier_routes
+         WHERE from_lat IS NOT NULL AND from_lng IS NOT NULL
+           AND to_lat IS NOT NULL AND to_lng IS NOT NULL
+           AND via_latitudes IS NOT NULL AND via_longitudes IS NOT NULL
+           AND cardinality(via_latitudes) = cardinality(via_place_ids)
+           AND cardinality(via_longitudes) = cardinality(via_place_ids)
+           AND route_line IS NULL) AS missing,
+      (SELECT count(*) FROM pg_index i
+         JOIN pg_class c ON c.oid = i.indexrelid
+         JOIN pg_am am ON am.oid = c.relam
+         WHERE i.indrelid='public.carrier_routes'::regclass
+           AND am.amname='gist' AND i.indisvalid AND i.indisready) AS gist_ok,
+      (SELECT COALESCE(bool_and(
+                extensions.ST_NPoints(cr.route_line) = cardinality(cr.via_place_ids) + 2), true)
+         FROM public.carrier_routes cr
+         WHERE cardinality(cr.via_place_ids) > 0 AND cr.route_line IS NOT NULL) AS npoints_ok
+  ) AS c`,
   },
   {
     order: 6,
@@ -267,107 +238,60 @@ limit 5;
     out: "step_6_170000_spatial_preselection.sql",
     title: "Předvýběr kandidátů přes prostorový index",
     purpose: "RPC přepsaná přes create or replace: filtr ST_DWithin a řazení ST_Distance",
-    verify: `
--- ══ KONTROLA KROKU 6 (read-only) ═══════════════════════════════════════════
-
--- A) RPC je prostorový a přechodné struktury už nepoužívá.
-do $$
-declare
-  v_def text;
-begin
-  select pg_get_functiondef(to_regprocedure('public.get_route_matching_candidates_internal(uuid,uuid,integer)'))
-    into v_def;
-
-  if v_def like '%ST_DWithin%' then
-    raise notice 'A) OK: RPC používá prostorový filtr ST_DWithin.';
-  else
-    raise exception 'CHYBA: RPC neobsahuje ST_DWithin.';
-  end if;
-
-  if v_def like '%bbox_%' or v_def like '%roadlink_haversine_meters%' then
-    raise exception 'CHYBA: RPC stále používá bbox_* nebo roadlink_haversine_meters.';
-  end if;
-
-  raise notice 'A) OK: RPC je prostorový, bbox_* ani helper už nepoužívá.';
-end;
-$$;
-
--- B) Oprávnění se nezměnila (create or replace negrantuje nikomu nové).
---    'postgres' je vlastník funkce a EXECUTE má vždy; očekáváno jsou dva řádky.
---    'anon' ani 'authenticated' tam NESMÍ být.
-select grantee from information_schema.routine_privileges
-where routine_schema = 'public'
-  and routine_name = 'get_route_matching_candidates_internal'
-order by grantee;
-
--- C) Plán dotazu. RPC filtruje cr.id = p_route_id, tedy JEDNU trasu, proto
---    na carrier_routes očekáváme Index Scan po primárním klíči a ŽÁDNÝ GiST.
---    GiST v plánu RPC chybí správně — nemá co hledat při jediném řádku.
---    Skutečné úzké místo je spojení s tow_requests.
-explain (analyze, buffers)
-select * from public.get_route_matching_candidates_internal(
-  (select cr.id from public.carrier_routes cr where cr.status = 'open' order by cr.created_at desc limit 1),
-  (select cr.driver_id from public.carrier_routes cr where cr.status = 'open' order by cr.created_at desc limit 1),
-  5
-);
-
--- D) Smlouva odpovědi: limit dodržen, pořadí podle vzdálenosti neklesá,
---    cizí trasa se nevrátí.
-do $$
-declare
-  v_route record;
-  v_rows jsonb;
-  v_item jsonb;
-  v_count integer;
-  v_prev double precision := null;
-  v_seen_null boolean := false;
-begin
-  select cr.id, cr.driver_id
-    into v_route
-  from public.carrier_routes cr
-  where cr.status = 'open' and cr.route_line is not null and cr.available_spaces > 0
-  order by cr.created_at desc
-  limit 1;
-
-  if v_route is null then
-    raise notice 'D) PŘESKOČENO: žádná otevřená trasa s geometrií.';
-    return;
-  end if;
-
-  select coalesce(jsonb_agg(to_jsonb(s)), '[]'::jsonb)
-    into v_rows
-  from public.get_route_matching_candidates_internal(v_route.id, v_route.driver_id, 5) as s;
-
-  v_count := jsonb_array_length(v_rows);
-
-  if v_count > 5 then
-    raise exception 'CHYBA: RPC vrátilo % řádků, limit je 5.', v_count;
-  end if;
-
-  for v_item in select * from jsonb_array_elements(v_rows)
-  loop
-    if (v_item ->> 'route_proximity_meters') is null then
-      v_seen_null := true;
-    else
-      if v_seen_null then
-        raise exception 'CHYBA: kandidát s vypočtenou vzdáleností následuje za kandidátem bez vzdálenosti.';
-      end if;
-      if v_prev is not null
-         and (v_item ->> 'route_proximity_meters')::double precision < v_prev then
-        raise exception 'CHYBA: pořadí podle vzdálenosti od trasy je porušeno.';
-      end if;
-      v_prev := (v_item ->> 'route_proximity_meters')::double precision;
-    end if;
-
-    if (v_item ->> 'route_id') is distinct from v_route.id::text then
-      raise exception 'CHYBA: RPC vrátilo kandidáta k jiné trase.';
-    end if;
-  end loop;
-
-  raise notice 'D) OK: RPC vrátilo % kandidátů (limit 5), smlouva dodržena.', v_count;
-end;
-$$;
-`,
+    detail: `
+-- A) RPC musí být prostorový a přechodné struktury už nesmí používat.
+-- B) Smlouva odpovědi: limit 5, pořadí podle vzdálenosti neklesá a žádný
+--    kandidát nepatří jiné trase. Když žádná otevřená trasa s geometrií není,
+--    kontrola se přeskočí a vrací ANO.
+-- C) Plán dotazu: RPC filtruje cr.id = p_route_id (JEDNA trasa), takže na
+--    carrier_routes očekáváme Index Scan po primárním klíči a ŽÁDNÝ GiST.
+--    GiST v plánu RPC chybí správně — nemá co hledat při jediném řádku.${PRIVILEGES_NOTE}`,
+    checks: [
+      { label: "rpc_pouzi_v_prostorovy_filter", condition: "v_def like '%ST_DWithin%'" },
+      { label: "rpc_uz_nepouzi_bbox", condition: "v_def not like '%bbox_%'" },
+      { label: "rpc_uz_nepouzi_haversine", condition: "v_def not like '%roadlink_haversine_meters%'" },
+      { label: "smlouva_limit_ok", condition: "limit_ok" },
+      { label: "smlouva_vlastnictvi_ok", condition: "own_ok" },
+      { label: "smlouva_poradi_ok", condition: "order_ok" },
+      { label: "jen_service_role_z_anon", condition: noAnon },
+    ],
+    from: `  CROSS JOIN LATERAL (
+    SELECT COALESCE(pg_get_functiondef(to_regprocedure('public.get_route_matching_candidates_internal(uuid,uuid,integer)')), '') AS v_def
+  ) AS f
+  CROSS JOIN LATERAL (
+    WITH r AS (
+      SELECT cr.id AS id, cr.driver_id AS driver_id
+      FROM public.carrier_routes cr
+      WHERE cr.status = 'open'
+        AND cr.route_line IS NOT NULL
+        AND cr.available_spaces > 0
+      ORDER BY cr.created_at DESC
+      LIMIT 1
+    ), raw AS (
+      SELECT to_jsonb(t.s) AS row_json, t.o AS ord
+      FROM r
+      CROSS JOIN LATERAL public.get_route_matching_candidates_internal(r.id, r.driver_id, 5)
+        WITH ORDINALITY AS t(s, o)
+    ), chk AS (
+      SELECT
+        (row_json ->> 'route_proximity_meters')::double precision AS dist,
+        lag((row_json ->> 'route_proximity_meters')::double precision) OVER (ORDER BY ord) AS prev_dist,
+        (row_json ->> 'route_id') = (SELECT id::text FROM r) AS own_ok
+      FROM raw
+    )
+    SELECT
+      (SELECT count(*) <= 5 FROM chk) AS limit_ok,
+      (SELECT COALESCE(bool_and(own_ok), true) FROM chk) AS own_ok,
+      (
+        SELECT COALESCE(bool_and(
+                 CASE
+                   WHEN prev_dist IS NULL THEN true
+                   WHEN dist IS NULL THEN true
+                   ELSE dist >= prev_dist
+                 END), true)
+        FROM chk
+      ) AS order_ok
+  ) AS c`,
   },
 ];
 
@@ -378,69 +302,69 @@ const preflight = `-- ═══════════════════�
 -- Cílový projekt: RoadLink (vbmxnrhmdjmqrsdtgjkn)
 --
 -- Vložte do SQL Editoru a spusťte. Musí doběhnout bez chyby a bez změn.
--- Teprve potom spouštějte jednotlivé kroky.
+-- Teprve potom spouštějte jednotlivé kroky. Zkontrolujte sloupec
+-- 'zavre_kontrola' a řádky 'is_spatial' / 'has_via' / 'has_proximity'.
 
--- A) Které kroky už jsou v databázi aplikované?
-select proname,
-       pg_get_functiondef(oid) like '%ST_DWithin%' as is_spatial,
-       pg_get_functiondef(oid) like '%route_via_place_ids%' as has_via,
-       pg_get_functiondef(oid) like '%route_proximity_meters%' as has_proximity
-from pg_proc
-where pronamespace = 'public'::regnamespace
-  and proname = 'get_route_matching_candidates_internal';
+SELECT
+  CASE WHEN f.proname IS NOT NULL THEN 'ANO' ELSE 'NE' END AS rpc_existuje,
+  CASE
+    WHEN f.proname IS NULL THEN 'ANO — zacnete krokem 1'
+    WHEN pg_get_functiondef(f.oid) LIKE '%ST_DWithin%' THEN 'ANO — krok 6 uz prosel'
+    ELSE 'NE — krok 6 jeste neprosel'
+  END AS is_spatial,
+  CASE
+    WHEN f.proname IS NULL THEN 'NE'
+    WHEN pg_get_functiondef(f.oid) LIKE '%route_via_place_ids%' THEN 'ANO — kroky 1 a 2 prosel'
+    ELSE 'NE — kroky 1 a 2 jeste neprosel'
+  END AS has_via,
+  CASE
+    WHEN f.proname IS NULL THEN 'NE'
+    WHEN pg_get_functiondef(f.oid) LIKE '%route_proximity_meters%' THEN 'ANO — krok 3 prosel'
+    ELSE 'NE — krok 3 jeste neprosel'
+  END AS has_proximity,
+  CASE WHEN NOT EXISTS (
+         SELECT 1 FROM information_schema.routine_privileges
+         WHERE routine_schema='public' AND routine_name='get_route_matching_candidates_internal'
+           AND grantee IN ('anon','authenticated')
+       ) THEN 'ANO — anon ani authenticated nemaji pristup'
+       ELSE 'NE — ZASTAVTE, nektery z nich ma pristup!' END AS soukromi,
+  -- 'postgres' je vlastník funkce, takže jeho EXECUTE je v pořádku a očekáváme
+  -- ho. 'anon' ani 'authenticated' tam být nesmějí — to je sloupec soukromi.
+  CASE
+    WHEN col.new_columns = 0 THEN 'ANO — cisty start, zacnete krokem 1'
+    WHEN col.new_columns IS NULL THEN 'ANO — tabulka carrier_routes jeste neexistuje'
+    ELSE 'NE — neco uz bylo aplikovano, NEZACÍNAJTE OD KROKU 1'
+  END AS sloupce_stav,
+  CASE
+    WHEN f.proname IS NULL OR col.new_columns = 0 THEN 'ANO — muzete zacit krokem 1'
+    ELSE 'NE — nejdrive mi poslete tento vystup, rozhodneme odkud pokracovat'
+  END AS zavre_kontrola
+FROM (SELECT 1) AS t
+LEFT JOIN LATERAL (
+  SELECT proname, oid
+  FROM pg_proc
+  WHERE pronamespace='public'::regnamespace
+    AND proname='get_route_matching_candidates_internal'
+  LIMIT 1
+) AS f ON true
+CROSS JOIN LATERAL (
+  SELECT count(*) AS new_columns
+  FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='carrier_routes'
+    AND column_name IN ('via_latitudes','via_longitudes','bbox_min_lat','bbox_max_lat',
+                        'bbox_min_lng','bbox_max_lng','route_line')
+) AS col;
 
--- B) Které nové sloupce už existují?
-select column_name, data_type
-from information_schema.columns
-where table_schema = 'public' and table_name = 'carrier_routes'
-  and (column_name like 'via_%'
-    or column_name like 'bbox_%'
-    or column_name = 'route_line')
-order by column_name;
+-- Objemy pro interpretaci plánu později. Počet sloupců se zjišťuje přes
+-- information_schema, ne přímým čtením dat: na čisté databázi by přímý dotaz
+-- na route_line skončil chybou "column does not exist".
+SELECT
+  (SELECT count(*) FROM public.carrier_routes) AS routes_total,
+  (SELECT count(*) FROM public.tow_requests) AS requests_total,
+  (SELECT count(*) FROM public.tow_requests WHERE status='open') AS requests_open;
 
--- C) Objem dat (pro správnou interpretaci plánů později).
---    POZOR: ptáme se na POCET sloupců misto na jejich hodnoty. Sloupec
---    route_line ani via_* na čisté databázi ještě nemusí existovat a přímý
---    dotaz na něj by skončil chybou „column does not exist“.
-select
-  (select count(*) from public.carrier_routes) as routes_total,
-  (select count(*) from public.tow_requests) as requests_total,
-  (select count(*) from public.tow_requests where status = 'open') as requests_open,
-  (select count(*) from information_schema.columns
-     where table_schema = 'public' and table_name = 'carrier_routes'
-       and column_name in (
-         'via_latitudes', 'via_longitudes',
-         'bbox_min_lat', 'bbox_max_lat', 'bbox_min_lng', 'bbox_max_lng',
-         'route_line'
-       )) as new_columns_present;
-
--- D) Oprávnění interního RPC — musí být jen service_role.
-select grantee, privilege_type
-from information_schema.routine_privileges
-where routine_schema = 'public'
-  and routine_name = 'get_route_matching_candidates_internal'
-order by grantee;
-
--- E) Záloha. V Dashboardu → Database → Backups si ověřte, že existuje
---    bod obnovy. Migrace 1–3 mění návratový typ RPC, takže je potřeba
---    mít kam se vrátit.
---
--- JAK ČÍST VÝSTUP
---   A) je prázdné  → RPC zatím neexistuje, začínáte od kroku 1.
---      je tam řádek → některý krok už prošel. NEZACÍNAJTE ODKUD UŽ BYLO.
---      Zmínka v A) vám řekne, kam až je hotovo:
---        is_spatial = true      → krok 6 prošel
---        has_via = true         → kroky 1 a 2 prošly
---        has_proximity = true   → krok 3 prošel
---   B) prázdné     → čistý start, od kroku 1.
---   C) new_columns_present
---      0            → čistý start, začínáte krokem 1.
---      1–7 a B) je prázdné → částečně aplikované. NEZACÍNAJTE od kroku 1;
---                       napište mi výstup a rozhodneme, odkud pokračovat.
---   D) 'postgres' + 'service_role' = v pořádku. 'postgres' je vlastník
---      funkce, takže EXECUTE má vždy.
---      Když tam bude anon nebo authenticated, ZASTAVTE a napište mi to —
---      to by znamenalo, že klienti mohou volat RPC a dostávat soukromá data.
+-- Záloha. V Dashboardu → Database → Backups si ověřte, že existuje bod obnovy.
+-- Migrace 1–3 mění návratový typ RPC, takže je potřeba mít kam se vrátit.
 `;
 
 const bundleIndex = `-- ══════════════════════════════════════════════════════════════════════════════
@@ -453,44 +377,49 @@ const bundleIndex = `-- ══════════════════�
 --
 -- Cílový projekt: RoadLink (vbmxnrhmdjmqrsdtgjkn)
 --
--- POŘADÍ — vložujte soubory po řadě, JEDEN na dotaz, pokaždé čekejte na
--- výsledek a zkontrolujte ho. Každý soubor má na konci kontrolní dotazy
--- s očekávaným výsledkem.
+-- JAK ČÍST VÝSTUP
+--   SQL Editor nezobrazuje RAISE NOTICE. Každý step proto končí SELECTem,
+--   který vrací jednu řádku se sloupcem 'zavre_kontrola':
+--     ANO → krok prokl, pokračujte dalším souborem.
+--     NE  → něco nesedí. DALŠÍ KROK NEPUŠTĚJTE, pošlete mi tabulku.
 --
---   00_preflight_readonly.sql      kontrola předem, nic nemění
+-- POŘADÍ — jeden soubor na dotaz, pokaždé čekejte na výsledek:
+--
+--   00_preflight_readonly.sql         kontrola předem, nic nemění
 --   step_1_120000_via_routes.sql
 --   step_2_130000_via_coordinates.sql
---   step_3_140000_bbox_preselection.sql
---   step_4_150000_enable_postgis.sql      ZASTÁVKA pokud selže
+--   step_3_140000_bbox_preselection.sql    NEJDŮLEŽITĚJŠÍ pro zbytek řetězce
+--   step_4_150000_enable_postgis.sql        ZASTÁVKA pokud selže
 --   step_5_160000_route_line.sql
 --   step_6_170000_spatial_preselection.sql
 --
+-- Tabulka oprávnění se vrací v každém kroku a je pokaždé stejná. Stačí
+-- zkontrolovat sloupec 'jen_service_role_z_anon': postgres jako vlastník
+-- funkce je v pořádku, anon ani authenticated tam být nesmějí.
+--
 -- CO TU ZAMYŠLENĚ NENÍ
 --   krok 20261005180000 (spatial_cleanup). Je jednosměrný — odstraňuje
---   bbox_* sloupce a nepřehrává se. Patří až po ověřeném provozu
---   v produkci, nejdříve za pár dní reálných dotazů.
+--   bbox_* sloupce a nepřehrává se. Patří až po ověřeném provozu v produkci,
+--   nejdříve za pár dní reálných dotazů.
 --
---   Edge Function google-route-matches se nasazuje až PO zeleném
---   smoke testu z kroku 6.
+--   Edge Function google-route-matches se nasazuje až PO zeleném výsledku
+--   kroku 6.
 --
 -- VYHRA
---   Každý krok je v jedné transakci. Selhání = automatický rollback,
---   databáze zůstane beze změny. Kroky jsou idempotentní, opakované
---   spuštění je bezpečné.
+--   Každý krok je v jedné transakci. Selhání = automatický rollback, databáze
+--   zůstane beze změny. Kroky jsou idempotentní.
 `;
 
 function build() {
   const outputs = new Map();
-
   outputs.set("00_preflight_readonly.sql", preflight);
 
   for (const step of steps) {
     const source = fs.readFileSync(path.join(migrationsDir, step.file), "utf8").replace(/\r\n/g, "\n").trim();
-    outputs.set(step.out, `${header(step.order, step.file, step.title, step.purpose)}${source}\n${step.verify}`);
+    outputs.set(step.out, `${header(step.order, step.file, step.title, step.purpose)}${source}\n${step.detail}${summary(step.checks, step.from)}`);
   }
 
   outputs.set("README.md", bundleIndex);
-
   return outputs;
 }
 
@@ -509,10 +438,7 @@ function main() {
     if (!checkOnly) fs.writeFileSync(target, content, "utf8");
   }
 
-  // Cizí soubory v adresáři by znamenaly, že balíček není čistý.
-  const stale = fs.existsSync(outDir)
-    ? fs.readdirSync(outDir).filter((name) => !outputs.has(name))
-    : [];
+  const stale = fs.existsSync(outDir) ? fs.readdirSync(outDir).filter((name) => !outputs.has(name)) : [];
 
   if (checkOnly) {
     if (changes.length || stale.length) {

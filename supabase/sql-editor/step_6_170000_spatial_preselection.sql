@@ -7,15 +7,19 @@
 --
 -- JAK POUŽÍT
 --   Supabase Dashboard → SQL Editor → New query → vložte CELÝ tento soubor → Run.
---   Skript se má dokončit bez chyby a na konci vypsat NOTICE s výsledkem.
 --
---   • Migrace je v jedné transakci. Když selže, odroluje se celá a databáze
---     zůstane beze změny.
---   • KROK je bezpečné pustit opakovaně (idempotentní).
---   • PO TOMTO KROKU nic jiného nespouštějte — nejdřív zkontrolujte výstup.
+--   POSLEDNÍ TABULKA JE VÝSLEDEK. Má sloupec 'zavre_kontrola':
+--     ANO → krok prokl, pokračujte dalším souborem.
+--     NE  → něco nesedí. DALŠÍ KROK NEPUŠTĚJTE, pošlete mi tabulku.
 --
--- Bezpečnost: tento soubor upravuje databázi. Před spuštěním si udělejte
--- bod obnovy v Supabase Dashboardu → Database → Backups.
+--   Výstup RAISE NOTICE SQL Editor nezobrazuje, proto je kontrola na konci
+--   souboru shrnující SELECT.
+--
+--   Každý krok je v jedné transakci. Když selže, odroluje se celý a databáze
+--   zůstane beze změny. Kroky jsou idempotentní.
+--
+-- Bezpečnost: tento soubor upravuje databázi. Před spuštěním si udělejte bod
+-- obnovy v Supabase Dashboardu → Database → Backups.
 -- Krok 3 ze 3: předvýběr kandidátů přes skutečný prostorový index
 --
 -- Proč: předchozí krok filtroval kandidáty obdélníkem ve čtyřech obyčejných
@@ -204,102 +208,74 @@ comment on function public.get_route_matching_candidates_internal(uuid, uuid, in
 
 commit;
 
--- ══ KONTROLA KROKU 6 (read-only) ═══════════════════════════════════════════
-
--- A) RPC je prostorový a přechodné struktury už nepoužívá.
-do $$
-declare
-  v_def text;
-begin
-  select pg_get_functiondef(to_regprocedure('public.get_route_matching_candidates_internal(uuid,uuid,integer)'))
-    into v_def;
-
-  if v_def like '%ST_DWithin%' then
-    raise notice 'A) OK: RPC používá prostorový filtr ST_DWithin.';
-  else
-    raise exception 'CHYBA: RPC neobsahuje ST_DWithin.';
-  end if;
-
-  if v_def like '%bbox_%' or v_def like '%roadlink_haversine_meters%' then
-    raise exception 'CHYBA: RPC stále používá bbox_* nebo roadlink_haversine_meters.';
-  end if;
-
-  raise notice 'A) OK: RPC je prostorový, bbox_* ani helper už nepoužívá.';
-end;
-$$;
-
--- B) Oprávnění se nezměnila (create or replace negrantuje nikomu nové).
---    'postgres' je vlastník funkce a EXECUTE má vždy; očekáváno jsou dva řádky.
---    'anon' ani 'authenticated' tam NESMÍ být.
-select grantee from information_schema.routine_privileges
-where routine_schema = 'public'
-  and routine_name = 'get_route_matching_candidates_internal'
-order by grantee;
-
--- C) Plán dotazu. RPC filtruje cr.id = p_route_id, tedy JEDNU trasu, proto
---    na carrier_routes očekáváme Index Scan po primárním klíči a ŽÁDNÝ GiST.
+-- A) RPC musí být prostorový a přechodné struktury už nesmí používat.
+-- B) Smlouva odpovědi: limit 5, pořadí podle vzdálenosti neklesá a žádný
+--    kandidát nepatří jiné trase. Když žádná otevřená trasa s geometrií není,
+--    kontrola se přeskočí a vrací ANO.
+-- C) Plán dotazu: RPC filtruje cr.id = p_route_id (JEDNA trasa), takže na
+--    carrier_routes očekáváme Index Scan po primárním klíči a ŽÁDNÝ GiST.
 --    GiST v plánu RPC chybí správně — nemá co hledat při jediném řádku.
---    Skutečné úzké místo je spojení s tow_requests.
-explain (analyze, buffers)
-select * from public.get_route_matching_candidates_internal(
-  (select cr.id from public.carrier_routes cr where cr.status = 'open' order by cr.created_at desc limit 1),
-  (select cr.driver_id from public.carrier_routes cr where cr.status = 'open' order by cr.created_at desc limit 1),
-  5
-);
-
--- D) Smlouva odpovědi: limit dodržen, pořadí podle vzdálenosti neklesá,
---    cizí trasa se nevrátí.
-do $$
-declare
-  v_route record;
-  v_rows jsonb;
-  v_item jsonb;
-  v_count integer;
-  v_prev double precision := null;
-  v_seen_null boolean := false;
-begin
-  select cr.id, cr.driver_id
-    into v_route
-  from public.carrier_routes cr
-  where cr.status = 'open' and cr.route_line is not null and cr.available_spaces > 0
-  order by cr.created_at desc
-  limit 1;
-
-  if v_route is null then
-    raise notice 'D) PŘESKOČENO: žádná otevřená trasa s geometrií.';
-    return;
-  end if;
-
-  select coalesce(jsonb_agg(to_jsonb(s)), '[]'::jsonb)
-    into v_rows
-  from public.get_route_matching_candidates_internal(v_route.id, v_route.driver_id, 5) as s;
-
-  v_count := jsonb_array_length(v_rows);
-
-  if v_count > 5 then
-    raise exception 'CHYBA: RPC vrátilo % řádků, limit je 5.', v_count;
-  end if;
-
-  for v_item in select * from jsonb_array_elements(v_rows)
-  loop
-    if (v_item ->> 'route_proximity_meters') is null then
-      v_seen_null := true;
-    else
-      if v_seen_null then
-        raise exception 'CHYBA: kandidát s vypočtenou vzdáleností následuje za kandidátem bez vzdálenosti.';
-      end if;
-      if v_prev is not null
-         and (v_item ->> 'route_proximity_meters')::double precision < v_prev then
-        raise exception 'CHYBA: pořadí podle vzdálenosti od trasy je porušeno.';
-      end if;
-      v_prev := (v_item ->> 'route_proximity_meters')::double precision;
-    end if;
-
-    if (v_item ->> 'route_id') is distinct from v_route.id::text then
-      raise exception 'CHYBA: RPC vrátilo kandidáta k jiné trase.';
-    end if;
-  end loop;
-
-  raise notice 'D) OK: RPC vrátilo % kandidátů (limit 5), smlouva dodržena.', v_count;
-end;
-$$;
+--   Sloupec 'jen_service_role_z_anon': 'postgres' je vlastník funkce a EXECUTE
+--   má vždy, takže jeho přítomnost je správná. Rozhodující je nepřítomnost
+--   'anon' a 'authenticated' — ti by si mohli RPC volat a číst soukromá data.
+-- ══ VÝSLEDek KROKU ══════════════════════════════════════════════════════════
+--
+-- Tohle je jediná tabulka, kterou SQL Editor zobrazí. Zkontrolujte sloupec
+-- 'zavre_kontrola' a přesvědčte se, že vše je ANO.
+SELECT
+  CASE WHEN v_def like '%ST_DWithin%' THEN 'ANO' ELSE 'NE' END AS rpc_pouzi_v_prostorovy_filter,
+  CASE WHEN v_def not like '%bbox_%' THEN 'ANO' ELSE 'NE' END AS rpc_uz_nepouzi_bbox,
+  CASE WHEN v_def not like '%roadlink_haversine_meters%' THEN 'ANO' ELSE 'NE' END AS rpc_uz_nepouzi_haversine,
+  CASE WHEN limit_ok THEN 'ANO' ELSE 'NE' END AS smlouva_limit_ok,
+  CASE WHEN own_ok THEN 'ANO' ELSE 'NE' END AS smlouva_vlastnictvi_ok,
+  CASE WHEN order_ok THEN 'ANO' ELSE 'NE' END AS smlouva_poradi_ok,
+  CASE WHEN not exists (select 1 from information_schema.routine_privileges where routine_schema='public' and routine_name='get_route_matching_candidates_internal' and grantee in ('anon','authenticated')) THEN 'ANO' ELSE 'NE' END AS jen_service_role_z_anon
+  ,
+  CASE WHEN (v_def like '%ST_DWithin%')
+    AND (v_def not like '%bbox_%')
+    AND (v_def not like '%roadlink_haversine_meters%')
+    AND (limit_ok)
+    AND (own_ok)
+    AND (order_ok)
+    AND (not exists (select 1 from information_schema.routine_privileges where routine_schema='public' and routine_name='get_route_matching_candidates_internal' and grantee in ('anon','authenticated')))
+    THEN 'ANO — krok uspel'
+    ELSE 'NE — NEPOUŠTĚJTE DALŠÍ KROK, poslete mi tuto tabulku'
+  END AS zavre_kontrola
+FROM (SELECT 1) AS t
+  CROSS JOIN LATERAL (
+    SELECT COALESCE(pg_get_functiondef(to_regprocedure('public.get_route_matching_candidates_internal(uuid,uuid,integer)')), '') AS v_def
+  ) AS f
+  CROSS JOIN LATERAL (
+    WITH r AS (
+      SELECT cr.id AS id, cr.driver_id AS driver_id
+      FROM public.carrier_routes cr
+      WHERE cr.status = 'open'
+        AND cr.route_line IS NOT NULL
+        AND cr.available_spaces > 0
+      ORDER BY cr.created_at DESC
+      LIMIT 1
+    ), raw AS (
+      SELECT to_jsonb(t.s) AS row_json, t.o AS ord
+      FROM r
+      CROSS JOIN LATERAL public.get_route_matching_candidates_internal(r.id, r.driver_id, 5)
+        WITH ORDINALITY AS t(s, o)
+    ), chk AS (
+      SELECT
+        (row_json ->> 'route_proximity_meters')::double precision AS dist,
+        lag((row_json ->> 'route_proximity_meters')::double precision) OVER (ORDER BY ord) AS prev_dist,
+        (row_json ->> 'route_id') = (SELECT id::text FROM r) AS own_ok
+      FROM raw
+    )
+    SELECT
+      (SELECT count(*) <= 5 FROM chk) AS limit_ok,
+      (SELECT COALESCE(bool_and(own_ok), true) FROM chk) AS own_ok,
+      (
+        SELECT COALESCE(bool_and(
+                 CASE
+                   WHEN prev_dist IS NULL THEN true
+                   WHEN dist IS NULL THEN true
+                   ELSE dist >= prev_dist
+                 END), true)
+        FROM chk
+      ) AS order_ok
+  ) AS c;

@@ -7,15 +7,19 @@
 --
 -- JAK POUŽÍT
 --   Supabase Dashboard → SQL Editor → New query → vložte CELÝ tento soubor → Run.
---   Skript se má dokončit bez chyby a na konci vypsat NOTICE s výsledkem.
 --
---   • Migrace je v jedné transakci. Když selže, odroluje se celá a databáze
---     zůstane beze změny.
---   • KROK je bezpečné pustit opakovaně (idempotentní).
---   • PO TOMTO KROKU nic jiného nespouštějte — nejdřív zkontrolujte výstup.
+--   POSLEDNÍ TABULKA JE VÝSLEDEK. Má sloupec 'zavre_kontrola':
+--     ANO → krok prokl, pokračujte dalším souborem.
+--     NE  → něco nesedí. DALŠÍ KROK NEPUŠTĚJTE, pošlete mi tabulku.
 --
--- Bezpečnost: tento soubor upravuje databázi. Před spuštěním si udělejte
--- bod obnovy v Supabase Dashboardu → Database → Backups.
+--   Výstup RAISE NOTICE SQL Editor nezobrazuje, proto je kontrola na konci
+--   souboru shrnující SELECT.
+--
+--   Každý krok je v jedné transakci. Když selže, odroluje se celý a databáze
+--   zůstane beze změny. Kroky jsou idempotentní.
+--
+-- Bezpečnost: tento soubor upravuje databázi. Před spuštěním si udělejte bod
+-- obnovy v Supabase Dashboardu → Database → Backups.
 -- Matching v2: trasy s průjezdními body se účastní párování
 --
 -- Proč: migrace `20261001090000_matching_excludes_via_routes.sql` kandidáty pro
@@ -126,48 +130,28 @@ comment on function public.get_route_matching_candidates_internal(uuid, uuid, in
   'Internal candidate preselection for google-route-matches. Returns private place IDs (including via points) only to service_role; never expose directly to mobile clients. Preselection uses status, date, vehicle type and capacity only.';
 
 commit;
-
--- ══ KONTROLA KROKU 1 (read-only) ═══════════════════════════════════════════
-
--- A) Via body jsou předávány a výhybková podmínka je pryč.
-do $$
-declare
-  v_def text;
-begin
-  select pg_get_functiondef(to_regprocedure('public.get_route_matching_candidates_internal(uuid,uuid,integer)'))
-    into v_def;
-
-  if v_def is null then
-    raise exception 'CHYBA: RPC po kroku 1 neexistuje.';
-  end if;
-
-  if v_def like '%route_via_place_ids%' then
-    raise notice 'A) OK: RPC vrací route_via_place_ids.';
-  else
-    raise exception 'CHYBA: RPC nevrací route_via_place_ids.';
-  end if;
-
-  if v_def like '%cr.via_place_ids is not null%' then
-    raise exception 'CHYBA: RPC stále vylučuje trasy s průjezdními body.';
-  end if;
-
-  raise notice 'A) OK: trasy s průjezdními body nejsou vylučovány.';
-end;
-$$;
-
--- B) Oprávnění. Řádek 'postgres' je vlastník funkce, EXECUTE má vždy a je
---    v pořádku. Rozhodující je, že NEJSOU 'anon' ani 'authenticated':
---    ti by si mohli RPC volat a dostávat soukromá data. Pokud tam jsou,
---    migrace se neaplikovala celá — STOP a napište mi to.
-select grantee, privilege_type
-from information_schema.routine_privileges
-where routine_schema = 'public'
-  and routine_name = 'get_route_matching_candidates_internal'
-order by grantee;
-
--- C) Vyhodnoťte B): očekáváno jsou dva řádky.
---    'postgres' je VLASTNÍK funkce a EXECUTE má vždy — to je správné.
---    Důležité je, že NEJSOU přítomné
---    'anon' ani 'authenticated'. Pokud se některý z nich objeví, ZASTAVTE
---    a napište mi to: znamenalo by to, že klienti mohou volat RPC
---    a dostávají soukromá data.
+A) Via body jsou předávány a výhybková podmínka je pryč.
+--   Sloupec 'jen_service_role_z_anon': 'postgres' je vlastník funkce a EXECUTE
+--   má vždy, takže jeho přítomnost je správná. Rozhodující je nepřítomnost
+--   'anon' a 'authenticated' — ti by si mohli RPC volat a číst soukromá data.
+-- ══ VÝSLEDek KROKU ══════════════════════════════════════════════════════════
+--
+-- Tohle je jediná tabulka, kterou SQL Editor zobrazí. Zkontrolujte sloupec
+-- 'zavre_kontrola' a přesvědčte se, že vše je ANO.
+SELECT
+  CASE WHEN v_def like '%route_via_place_ids%' THEN 'ANO' ELSE 'NE' END AS rpc_vraci_via_place_ids,
+  CASE WHEN v_def not like '%cr.via_place_ids is not null%' THEN 'ANO' ELSE 'NE' END AS via_trasy_neni_vylouceno,
+  CASE WHEN v_def like '%route_via_place_ids%' THEN 'ANO' ELSE 'NE' END AS rpc_vracia_vsechny_pole,
+  CASE WHEN not exists (select 1 from information_schema.routine_privileges where routine_schema='public' and routine_name='get_route_matching_candidates_internal' and grantee in ('anon','authenticated')) THEN 'ANO' ELSE 'NE' END AS jen_service_role_z_anon
+  ,
+  CASE WHEN (v_def like '%route_via_place_ids%')
+    AND (v_def not like '%cr.via_place_ids is not null%')
+    AND (v_def like '%route_via_place_ids%')
+    AND (not exists (select 1 from information_schema.routine_privileges where routine_schema='public' and routine_name='get_route_matching_candidates_internal' and grantee in ('anon','authenticated')))
+    THEN 'ANO — krok uspel'
+    ELSE 'NE — NEPOUŠTĚJTE DALŠÍ KROK, poslete mi tuto tabulku'
+  END AS zavre_kontrola
+FROM (SELECT 1) AS t
+  CROSS JOIN LATERAL (
+    SELECT COALESCE(pg_get_functiondef(to_regprocedure('public.get_route_matching_candidates_internal(uuid,uuid,integer)')), '') AS v_def
+  ) AS f;

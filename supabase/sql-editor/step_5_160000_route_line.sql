@@ -7,15 +7,19 @@
 --
 -- JAK POUŽÍT
 --   Supabase Dashboard → SQL Editor → New query → vložte CELÝ tento soubor → Run.
---   Skript se má dokončit bez chyby a na konci vypsat NOTICE s výsledkem.
 --
---   • Migrace je v jedné transakci. Když selže, odroluje se celá a databáze
---     zůstane beze změny.
---   • KROK je bezpečné pustit opakovaně (idempotentní).
---   • PO TOMTO KROKU nic jiného nespouštějte — nejdřív zkontrolujte výstup.
+--   POSLEDNÍ TABULKA JE VÝSLEDEK. Má sloupec 'zavre_kontrola':
+--     ANO → krok prokl, pokračujte dalším souborem.
+--     NE  → něco nesedí. DALŠÍ KROK NEPUŠTĚJTE, pošlete mi tabulku.
 --
--- Bezpečnost: tento soubor upravuje databázi. Před spuštěním si udělejte
--- bod obnovy v Supabase Dashboardu → Database → Backups.
+--   Výstup RAISE NOTICE SQL Editor nezobrazuje, proto je kontrola na konci
+--   souboru shrnující SELECT.
+--
+--   Každý krok je v jedné transakci. Když selže, odroluje se celý a databáze
+--   zůstane beze změny. Kroky jsou idempotentní.
+--
+-- Bezpečnost: tento soubor upravuje databázi. Před spuštěním si udělejte bod
+-- obnovy v Supabase Dashboardu → Database → Backups.
 -- Krok 2 ze 3: skutečná prostorová geometrie trasy
 --
 -- Proč: `bbox_*` z kroku předchozího (20261005140000) jsou čtyři obyčejné
@@ -113,41 +117,52 @@ create index if not exists carrier_routes_route_line_gist_idx
 
 commit;
 
--- ══ KONTROLA KROKU 5 (read-only) ═══════════════════════════════════════════
-
--- A) Sloupec existuje se správným typem.
-select udt_schema, udt_name
-from information_schema.columns
-where table_schema = 'public' and table_name = 'carrier_routes'
-  and column_name = 'route_line';
--- očekáváno: extensions | geography
-
--- B) Geometrie je dopočítaná u všech tras s úplnými souřadnicemi.
---    Přesně to je podmínka, kterou požaduje úklid v kroku 7.
-select count(*) as total,
-       count(*) filter (where route_line is null) as missing
-from public.carrier_routes
-where from_lat is not null and from_lng is not null
-  and to_lat is not null and to_lng is not null
-  and via_latitudes is not null and via_longitudes is not null
-  and cardinality(via_latitudes) = cardinality(via_place_ids)
-  and cardinality(via_longitudes) = cardinality(via_place_ids);
--- očekáváno: missing = 0
-
--- C) GiST index je platný a připravený.
-select c.relname, i.indisvalid, i.indisready, am.amname
-from pg_index i
-join pg_class c on c.oid = i.indexrelid
-join pg_am am on am.oid = c.relam
-where i.indrelid = 'public.carrier_routes'::regclass
-  and am.amname = 'gist';
--- očekáváno: carrier_routes_route_line_gist_idx | t | t | gist
-
--- D) Geometrie má správný počet bodů: odjezd + via + cíl.
-select cardinality(via_place_ids) as via_count,
-       extensions.ST_NPoints(route_line) as npoints,
-       extensions.ST_NPoints(route_line) = cardinality(via_place_ids) + 2 as matches
-from public.carrier_routes
-where cardinality(via_place_ids) > 0 and route_line is not null
-limit 5;
--- očekáváno: matches = true ve všech řádcích
+-- A) 'bez_chybejici_geometrie' je přesně podmínka, kterou požaduje úklid v
+--    kroku 7. Kdyby nebylo ANO, krok 7 NEAPLIKUJTE.
+-- B) 'pocet_bodu_souhlasi' ověřuje, že lomená čára má odjezd + via + cíl.
+--   Sloupec 'jen_service_role_z_anon': 'postgres' je vlastník funkce a EXECUTE
+--   má vždy, takže jeho přítomnost je správná. Rozhodující je nepřítomnost
+--   'anon' a 'authenticated' — ti by si mohli RPC volat a číst soukromá data.
+-- ══ VÝSLEDek KROKU ══════════════════════════════════════════════════════════
+--
+-- Tohle je jediná tabulka, kterou SQL Editor zobrazí. Zkontrolujte sloupec
+-- 'zavre_kontrola' a přesvědčte se, že vše je ANO.
+SELECT
+  CASE WHEN udt_schema = 'extensions' AND udt_name = 'geography' THEN 'ANO' ELSE 'NE' END AS typ_je_extensions_geography,
+  CASE WHEN missing = 0 THEN 'ANO' ELSE 'NE' END AS bez_chybejici_geometrie,
+  CASE WHEN gist_ok = 1 THEN 'ANO' ELSE 'NE' END AS gist_index_platny,
+  CASE WHEN npoints_ok THEN 'ANO' ELSE 'NE' END AS pocet_bodu_souhlasí,
+  CASE WHEN not exists (select 1 from information_schema.routine_privileges where routine_schema='public' and routine_name='get_route_matching_candidates_internal' and grantee in ('anon','authenticated')) THEN 'ANO' ELSE 'NE' END AS jen_service_role_z_anon
+  ,
+  CASE WHEN (udt_schema = 'extensions' AND udt_name = 'geography')
+    AND (missing = 0)
+    AND (gist_ok = 1)
+    AND (npoints_ok)
+    AND (not exists (select 1 from information_schema.routine_privileges where routine_schema='public' and routine_name='get_route_matching_candidates_internal' and grantee in ('anon','authenticated')))
+    THEN 'ANO — krok uspel'
+    ELSE 'NE — NEPOUŠTĚJTE DALŠÍ KROK, poslete mi tuto tabulku'
+  END AS zavre_kontrola
+FROM (SELECT 1) AS t
+  CROSS JOIN LATERAL (
+    SELECT
+      (SELECT udt_schema FROM information_schema.columns
+         WHERE table_schema='public' AND table_name='carrier_routes' AND column_name='route_line') AS udt_schema,
+      (SELECT udt_name FROM information_schema.columns
+         WHERE table_schema='public' AND table_name='carrier_routes' AND column_name='route_line') AS udt_name,
+      (SELECT count(*) FROM public.carrier_routes
+         WHERE from_lat IS NOT NULL AND from_lng IS NOT NULL
+           AND to_lat IS NOT NULL AND to_lng IS NOT NULL
+           AND via_latitudes IS NOT NULL AND via_longitudes IS NOT NULL
+           AND cardinality(via_latitudes) = cardinality(via_place_ids)
+           AND cardinality(via_longitudes) = cardinality(via_place_ids)
+           AND route_line IS NULL) AS missing,
+      (SELECT count(*) FROM pg_index i
+         JOIN pg_class c ON c.oid = i.indexrelid
+         JOIN pg_am am ON am.oid = c.relam
+         WHERE i.indrelid='public.carrier_routes'::regclass
+           AND am.amname='gist' AND i.indisvalid AND i.indisready) AS gist_ok,
+      (SELECT COALESCE(bool_and(
+                extensions.ST_NPoints(cr.route_line) = cardinality(cr.via_place_ids) + 2), true)
+         FROM public.carrier_routes cr
+         WHERE cardinality(cr.via_place_ids) > 0 AND cr.route_line IS NOT NULL) AS npoints_ok
+  ) AS c;

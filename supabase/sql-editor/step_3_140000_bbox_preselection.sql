@@ -7,15 +7,19 @@
 --
 -- JAK POUŽÍT
 --   Supabase Dashboard → SQL Editor → New query → vložte CELÝ tento soubor → Run.
---   Skript se má dokončit bez chyby a na konci vypsat NOTICE s výsledkem.
 --
---   • Migrace je v jedné transakci. Když selže, odroluje se celá a databáze
---     zůstane beze změny.
---   • KROK je bezpečné pustit opakovaně (idempotentní).
---   • PO TOMTO KROKU nic jiného nespouštějte — nejdřív zkontrolujte výstup.
+--   POSLEDNÍ TABULKA JE VÝSLEDEK. Má sloupec 'zavre_kontrola':
+--     ANO → krok prokl, pokračujte dalším souborem.
+--     NE  → něco nesedí. DALŠÍ KROK NEPUŠTĚJTE, pošlete mi tabulku.
 --
--- Bezpečnost: tento soubor upravuje databázi. Před spuštěním si udělejte
--- bod obnovy v Supabase Dashboardu → Database → Backups.
+--   Výstup RAISE NOTICE SQL Editor nezobrazuje, proto je kontrola na konci
+--   souboru shrnující SELECT.
+--
+--   Každý krok je v jedné transakci. Když selže, odroluje se celý a databáze
+--   zůstane beze změny. Kroky jsou idempotentní.
+--
+-- Bezpečnost: tento soubor upravuje databázi. Před spuštěním si udělejte bod
+-- obnovy v Supabase Dashboardu → Database → Backups.
 -- Polohový předvýběr kandidátů v SQL (bbox + pořadí podle blízkosti)
 --
 -- Proč: dosud Edge Function načítala široké okno kandidátů (20) a nejbližší
@@ -381,36 +385,47 @@ comment on function public.get_route_matching_candidates_internal(uuid, uuid, in
 
 commit;
 
--- ══ KONTROLA KROKU 3 (read-only) ═══════════════════════════════════════════
-
--- A) Obdélník se dopočítal u všech tras s úplnými souřadnicemi.
-select count(*) as total,
-       count(*) filter (where bbox_min_lat is null) as without_bbox
-from public.carrier_routes
-where from_lat is not null and from_lng is not null
-  and to_lat is not null and to_lng is not null;
--- očekáváno: without_bbox = 0
-
--- B) Oba btree indexy jsou platné a připravené.
-select c.relname, i.indisvalid, i.indisready
-from pg_index i
-join pg_class c on c.oid = i.indexrelid
-where i.indrelid = 'public.carrier_routes'::regclass
-  and c.relname like 'carrier_routes_bbox%'
-order by c.relname;
--- očekáváno: 2 řádky, vše true
-
--- C) Helper existuje a je immutable.
-select proname, provolatile
-from pg_proc
-where oid = to_regprocedure('public.roadlink_haversine_meters(double precision,double precision,double precision,double precision)');
--- očekáváno: roadlink_haversine_meters | i
-
--- D) Oprávnění. 'postgres' je vlastník funkce, takže EXECUTE má vždy.
---    Očekáváno jsou dva řádky: 'postgres' a 'service_role'.
---    'anon' ani 'authenticated' tam NESMÍ být — jinak by klienti mohli RPC
---    volat a dostávat soukromá data.
-select grantee from information_schema.routine_privileges
-where routine_schema = 'public'
-  and routine_name = 'get_route_matching_candidates_internal'
-order by grantee;
+-- A) NEJDŮLEŽITĚJŠÍ KROK PRO ZBÝVAJÍCÍ ŘETĚZEC. Obdélník se musí dopočítat
+--    u VŠECH tras s úplnými souřadnicemi; jinak na stavbě stojí celý zbytek.
+-- B) Oba btree indexy musí být platné a připravené.
+--   Sloupec 'jen_service_role_z_anon': 'postgres' je vlastník funkce a EXECUTE
+--   má vždy, takže jeho přítomnost je správná. Rozhodující je nepřítomnost
+--   'anon' a 'authenticated' — ti by si mohli RPC volat a číst soukromá data.
+-- ══ VÝSLEDek KROKU ══════════════════════════════════════════════════════════
+--
+-- Tohle je jediná tabulka, kterou SQL Editor zobrazí. Zkontrolujte sloupec
+-- 'zavre_kontrola' a přesvědčte se, že vše je ANO.
+SELECT
+  CASE WHEN bez_bbox = 0 THEN 'ANO' ELSE 'NE' END AS bez_bbox_tras_s_ukoncene,
+  CASE WHEN platne_indexy = 2 THEN 'ANO' ELSE 'NE' END AS dva_btree_indexy_platne,
+  CASE WHEN helper = 1 THEN 'ANO' ELSE 'NE' END AS haversine_helper_existuje,
+  CASE WHEN v_def not like '%bbox%' THEN 'ANO' ELSE 'NE' END AS rpc_uz_nepouzi_bbox_pred,
+  CASE WHEN not exists (select 1 from information_schema.routine_privileges where routine_schema='public' and routine_name='get_route_matching_candidates_internal' and grantee in ('anon','authenticated')) THEN 'ANO' ELSE 'NE' END AS jen_service_role_z_anon
+  ,
+  CASE WHEN (bez_bbox = 0)
+    AND (platne_indexy = 2)
+    AND (helper = 1)
+    AND (v_def not like '%bbox%')
+    AND (not exists (select 1 from information_schema.routine_privileges where routine_schema='public' and routine_name='get_route_matching_candidates_internal' and grantee in ('anon','authenticated')))
+    THEN 'ANO — krok uspel'
+    ELSE 'NE — NEPOUŠTĚJTE DALŠÍ KROK, poslete mi tuto tabulku'
+  END AS zavre_kontrola
+FROM (SELECT 1) AS t
+  CROSS JOIN LATERAL (
+    SELECT COALESCE(pg_get_functiondef(to_regprocedure('public.get_route_matching_candidates_internal(uuid,uuid,integer)')), '') AS v_def
+  ) AS f
+  CROSS JOIN LATERAL (
+    SELECT
+      (SELECT count(*) FROM public.carrier_routes
+         WHERE from_lat IS NOT NULL AND from_lng IS NOT NULL
+           AND to_lat IS NOT NULL AND to_lng IS NOT NULL
+           AND bbox_min_lat IS NULL) AS bez_bbox,
+      (SELECT count(*) FROM pg_proc
+         WHERE pronamespace='public'::regnamespace
+           AND proname='roadlink_haversine_meters') AS helper,
+      (SELECT count(*) FROM pg_index i
+         JOIN pg_class c ON c.oid = i.indexrelid
+         WHERE i.indrelid='public.carrier_routes'::regclass
+           AND c.relname LIKE 'carrier_routes_bbox%'
+           AND i.indisvalid AND i.indisready) AS platne_indexy
+  ) AS c;

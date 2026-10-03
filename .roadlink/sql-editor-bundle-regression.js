@@ -68,8 +68,8 @@ for (const { name, content } of stepFiles) {
   assert(/commit;\s*$/im.test(content), `${name} commits the transaction`);
 
   // Na konci je čitelná kontrola s očekávaným výsledkem.
-  assert(/KONTROLA KROKU \d/.test(content), `${name} ends with verification queries`);
-  assert(/očekáváno/i.test(content), `${name} states the expected result`);
+  assert(/VÝSLEDek KROKU/.test(content), `${name} ends with a visible result table`);
+  assert(/zavre_kontrola/.test(content), `${name} states pass or fail explicitly`);
 }
 
 // Kontrolní dotazy jsou read-only: nejsou součástí transakce zápisových kroků.
@@ -80,7 +80,7 @@ assert(
   "the preflight script only reads",
 );
 assert(/is_spatial/.test(preflight) && /has_via/.test(preflight) && /has_proximity/.test(preflight), "the preflight says which steps are already applied");
-assert(/NEZACÍNAJTE ODKUD UŽ BYLO/.test(preflight), "the preflight warns not to restart from the beginning");
+assert(/NEZACÍNAJTE OD KROKU 1|NEZACÍNAJTE ODKUD UŽ BYLO/.test(preflight), "the preflight warns not to restart from the beginning");
 
 // Preflight běží PŘED jakoukoli migrací, takže se nesmí dotazovat na sloupce,
 // které ještě nemusí existovat — dotaz by skončil „column does not exist“
@@ -108,7 +108,7 @@ for (const column of missingColumns) {
   });
   assert.deepStrictEqual(offending, [], `the preflight never reads ${column} directly, so it works on a clean database`);
 }
-assert(/new_columns_present/.test(preflight), "the preflight reports how many new columns already exist");
+assert(/new_columns|sloupce_stav/.test(preflight), "the preflight reports how many new columns already exist");
 
 // ── Zastávky jsou zřetelné ─────────────────────────────────────────────────
 const step4 = readBundle("step_4_150000_enable_postgis.sql");
@@ -118,7 +118,7 @@ assert(/ZASTAVTE celé nasazení/.test(step4), "it says to stop the rollout if P
 const readme = readBundle("README.md");
 assert(/NEUPRAVUJTE JE RUČNĚ/.test(readme), "the bundle is marked as generated");
 assert(/spatial_cleanup/.test(readme) && /jednosměrný/.test(readme), "the README explains that the cleanup is excluded because it is one-way");
-assert(/výsledek tam je popsaný|po každém kroku|po řadě/i.test(readme), "the README requires checking the output after each step");
+assert(/zavre_kontrola/.test(readme) && /pokaždé čekejte na výsledek/i.test(readme), "the README requires checking the result row after each step");
 
 // ── Oprávnění jsou kontrolována po každém kroku, kde RPC přepisujeme ──────
 for (const { name, content } of stepFiles) {
@@ -131,6 +131,70 @@ for (const { name, content } of stepFiles) {
 // ── Balíček nesmí být součástí běžného nasazování ───────────────────────────
 assert(!read("scripts/run-regressions.mjs").includes("build-sql-editor-bundle"), "the generator is not part of the regression runner");
 assert(read("scripts/run-regressions.mjs").includes("sql-editor-bundle-regression"), "the bundle regression is registered");
+
+// ── Oprávnění: vlastník ≠ nebezpečná role ───────────────────────────────────
+// `postgres` je vlastníkem funkce, takže EXECUTE má vždy a jeho přítomnost je
+// správná. Nepřítomnost `anon` a `authenticated` je to, co chrání soukromí.
+// Zadání nesmí zaměnit tyto dvě věci — jinak by operátor na správném výstupu
+// viděl "něco je špatně" a zastavil, nebo naopak přehlédl skutečný problém.
+for (const { name, content } of stepFiles) {
+  if (!/routine_privileges/.test(content)) continue;
+  assert(/'postgres'|vlastník/i.test(content), `${name} explains that postgres is the function owner`);
+  assert(/NEJSOU|NE/.test(content) || /anon/.test(content), `${name} names the roles that must be absent`);
+  assert(!/očekáváno je JEDEN řádek se service_role/i.test(content), `${name} does not claim only one row is expected`);
+}
+
+assert(/vlastník funkce/.test(preflight), "the preflight explains that postgres owns the function");
+assert(/anon.*authenticated|authenticated.*anon/.test(preflight), "the preflight names the roles that must not have access");
+assert(/soukromi/.test(preflight), "the preflight has an explicit privacy column");
+
+// ── Výsledek musí být VIDITELNÝ, ne v NOTICE ───────────────────────────────
+// Supabase SQL Editor nezobrazuje RAISE NOTICE. Kontrola založená jen na NOTICE
+// je pro operátora neviditelná: chybu by viděl, úspěch ne. Každý step proto
+// musí končit SELECTem, jehož sloupec říká ANO/NE.
+for (const { name, content } of stepFiles) {
+  const marker = "VÝSLEDek KROKU";
+  const index = content.lastIndexOf(marker);
+  assert(index > -1, `${name} has a result section`);
+
+  const tail = content.slice(index);
+  const sqlTail = tail.split("\n").filter((line) => line.trim().indexOf("--") !== 0).join("\n");
+
+  assert(/zavre_kontrola/.test(tail), `${name} ends with a zavre_kontrola column`);
+  assert(/'ANO/.test(tail), `${name} says ANO when the checks pass`);
+  assert(/NEPOUŠTĚJTE|NEPSOTUJTE|nepouštějte/i.test(tail), `${name} says what to do when a check fails`);
+
+  // Závorky v shrnujícím dotazu musí být vyvážené: jinak by celý krok selhal
+  // na syntaktické chybě ještě před tím, než by cokoliv zkontroloval.
+  let depth = 0;
+  let insideString = false;
+  let sawCloseTooEarly = false;
+  for (let i = 0; i < sqlTail.length; i += 1) {
+    const ch = sqlTail[i];
+    if (insideString) {
+      if (ch === String.fromCharCode(39)) {
+        if (sqlTail[i + 1] === String.fromCharCode(39)) i += 1;
+        else insideString = false;
+      }
+    } else if (ch === String.fromCharCode(39)) insideString = true;
+    else if (ch === "(") depth += 1;
+    else if (ch === ")") {
+      depth -= 1;
+      if (depth < 0) sawCloseTooEarly = true;
+    }
+  }
+  assert.strictEqual(depth, 0, `${name} has balanced parentheses in its result query`);
+  assert(!sawCloseTooEarly, `${name} has no unmatched closing parenthesis`);
+  assert(!insideString, `${name} has no unterminated string literal`);
+
+  // Výsledný dotaz musí být poslední příkaz souboru, jinak by SQL Editor
+  // zobrazil něco jiného a operátor by četl nesprávnou tabulku.
+  const statements = content.split(";").map((part) => part.trim()).filter(Boolean);
+  const lastStatement = statements[statements.length - 1];
+  assert(/zavre_kontrola/.test(lastStatement), `${name} ends with the result query`);
+}
+
+assert(/zavre_kontrola/.test(preflight), "the preflight also ends with a visible result row");
 
 // ── Balíček je synchronizovaný s migracemi ─────────────────────────────────
 // Až na konci: bezpečnostní kontroly výše musí běžet vždy. Kdyby tato kontrola
@@ -146,20 +210,5 @@ try {
   console.error("Balíček není synchronizovaný s migracemi. Spusťte node scripts/build-sql-editor-bundle.mjs");
   assert.fail(detail);
 }
-
-// ── Oprávnění: vlastník ≠ nebezpečná role ───────────────────────────────────
-// `postgres` je vlastníkem funkce, takže EXECUTE má vždy a jeho přítomnost je
-// správná. Nepřítomnost `anon` a `authenticated` je to, co chrání soukromí.
-// Zadání nesmí zaměnit tyto dvě věci — jinak by operátor na správném výstupu
-// viděl "něco je špatně" a zastavil, nebo naopak přehlédl skutečný problém.
-for (const { name, content } of stepFiles) {
-  if (!/routine_privileges/.test(content)) continue;
-  assert(/'postgres'|vlastník/i.test(content), `${name} explains that postgres is the function owner`);
-  assert(/NEJSOU|NE/.test(content) || /anon/.test(content), `${name} names the roles that must be absent`);
-  assert(!/očekáváno je JEDEN řádek se service_role/i.test(content), `${name} does not claim only one row is expected`);
-}
-
-assert(/'postgres' \+ 'service_role' = v pořádku|'postgres' \+ 'service_role'/.test(preflight), "the preflight says postgres plus service_role is correct");
-assert(/anon nebo authenticated/.test(preflight), "the preflight says anon or authenticated means stop");
 
 console.log("ALL SQL EDITOR BUNDLE REGRESSION CHECKS PASSED");

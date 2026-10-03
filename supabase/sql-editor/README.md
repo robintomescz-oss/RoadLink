@@ -8,27 +8,34 @@
 --
 -- Cílový projekt: RoadLink (vbmxnrhmdjmqrsdtgjkn)
 --
--- POŘADÍ — vložujte soubory po řadě, JEDEN na dotaz, pokaždé čekejte na
--- výsledek a zkontrolujte ho. Každý soubor má na konci kontrolní dotazy
--- s očekávaným výsledkem.
+-- JAK ČÍST VÝSTUP
+--   SQL Editor nezobrazuje RAISE NOTICE. Každý step proto končí SELECTem,
+--   který vrací jednu řádku se sloupcem 'zavre_kontrola':
+--     ANO → krok prokl, pokračujte dalším souborem.
+--     NE  → něco nesedí. DALŠÍ KROK NEPUŠTĚJTE, pošlete mi tabulku.
 --
---   00_preflight_readonly.sql      kontrola předem, nic nemění
+-- POŘADÍ — jeden soubor na dotaz, pokaždé čekejte na výsledek:
+--
+--   00_preflight_readonly.sql         kontrola předem, nic nemění
 --   step_1_120000_via_routes.sql
 --   step_2_130000_via_coordinates.sql
---   step_3_140000_bbox_preselection.sql
---   step_4_150000_enable_postgis.sql      ZASTÁVKA pokud selže
+--   step_3_140000_bbox_preselection.sql    NEJDŮLEŽITĚJŠÍ pro zbytek řetězce
+--   step_4_150000_enable_postgis.sql        ZASTÁVKA pokud selže
 --   step_5_160000_route_line.sql
 --   step_6_170000_spatial_preselection.sql
 --
+-- Tabulka oprávnění se vrací v každém kroku a je pokaždé stejná. Stačí
+-- zkontrolovat sloupec 'jen_service_role_z_anon': postgres jako vlastník
+-- funkce je v pořádku, anon ani authenticated tam být nesmějí.
+--
 -- CO TU ZAMYŠLENĚ NENÍ
 --   krok 20261005180000 (spatial_cleanup). Je jednosměrný — odstraňuje
---   bbox_* sloupce a nepřehrává se. Patří až po ověřeném provozu
---   v produkci, nejdříve za pár dní reálných dotazů.
+--   bbox_* sloupce a nepřehrává se. Patří až po ověřeném provozu v produkci,
+--   nejdříve za pár dní reálných dotazů.
 --
---   Edge Function google-route-matches se nasazuje až PO zeleném
---   smoke testu z kroku 6.
+--   Edge Function google-route-matches se nasazuje až PO zeleném výsledku
+--   kroku 6.
 --
 -- VYHRA
---   Každý krok je v jedné transakci. Selhání = automatický rollback,
---   databáze zůstane beze změny. Kroky jsou idempotentní, opakované
---   spuštění je bezpečné.
+--   Každý krok je v jedné transakci. Selhání = automatický rollback, databáze
+--   zůstane beze změny. Kroky jsou idempotentní.

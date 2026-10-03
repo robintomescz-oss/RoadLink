@@ -5,66 +5,66 @@
 -- Cílový projekt: RoadLink (vbmxnrhmdjmqrsdtgjkn)
 --
 -- Vložte do SQL Editoru a spusťte. Musí doběhnout bez chyby a bez změn.
--- Teprve potom spouštějte jednotlivé kroky.
+-- Teprve potom spouštějte jednotlivé kroky. Zkontrolujte sloupec
+-- 'zavre_kontrola' a řádky 'is_spatial' / 'has_via' / 'has_proximity'.
 
--- A) Které kroky už jsou v databázi aplikované?
-select proname,
-       pg_get_functiondef(oid) like '%ST_DWithin%' as is_spatial,
-       pg_get_functiondef(oid) like '%route_via_place_ids%' as has_via,
-       pg_get_functiondef(oid) like '%route_proximity_meters%' as has_proximity
-from pg_proc
-where pronamespace = 'public'::regnamespace
-  and proname = 'get_route_matching_candidates_internal';
+SELECT
+  CASE WHEN f.proname IS NOT NULL THEN 'ANO' ELSE 'NE' END AS rpc_existuje,
+  CASE
+    WHEN f.proname IS NULL THEN 'ANO — zacnete krokem 1'
+    WHEN pg_get_functiondef(f.oid) LIKE '%ST_DWithin%' THEN 'ANO — krok 6 uz prosel'
+    ELSE 'NE — krok 6 jeste neprosel'
+  END AS is_spatial,
+  CASE
+    WHEN f.proname IS NULL THEN 'NE'
+    WHEN pg_get_functiondef(f.oid) LIKE '%route_via_place_ids%' THEN 'ANO — kroky 1 a 2 prosel'
+    ELSE 'NE — kroky 1 a 2 jeste neprosel'
+  END AS has_via,
+  CASE
+    WHEN f.proname IS NULL THEN 'NE'
+    WHEN pg_get_functiondef(f.oid) LIKE '%route_proximity_meters%' THEN 'ANO — krok 3 prosel'
+    ELSE 'NE — krok 3 jeste neprosel'
+  END AS has_proximity,
+  CASE WHEN NOT EXISTS (
+         SELECT 1 FROM information_schema.routine_privileges
+         WHERE routine_schema='public' AND routine_name='get_route_matching_candidates_internal'
+           AND grantee IN ('anon','authenticated')
+       ) THEN 'ANO — anon ani authenticated nemaji pristup'
+       ELSE 'NE — ZASTAVTE, nektery z nich ma pristup!' END AS soukromi,
+  -- 'postgres' je vlastník funkce, takže jeho EXECUTE je v pořádku a očekáváme
+  -- ho. 'anon' ani 'authenticated' tam být nesmějí — to je sloupec soukromi.
+  CASE
+    WHEN col.new_columns = 0 THEN 'ANO — cisty start, zacnete krokem 1'
+    WHEN col.new_columns IS NULL THEN 'ANO — tabulka carrier_routes jeste neexistuje'
+    ELSE 'NE — neco uz bylo aplikovano, NEZACÍNAJTE OD KROKU 1'
+  END AS sloupce_stav,
+  CASE
+    WHEN f.proname IS NULL OR col.new_columns = 0 THEN 'ANO — muzete zacit krokem 1'
+    ELSE 'NE — nejdrive mi poslete tento vystup, rozhodneme odkud pokracovat'
+  END AS zavre_kontrola
+FROM (SELECT 1) AS t
+LEFT JOIN LATERAL (
+  SELECT proname, oid
+  FROM pg_proc
+  WHERE pronamespace='public'::regnamespace
+    AND proname='get_route_matching_candidates_internal'
+  LIMIT 1
+) AS f ON true
+CROSS JOIN LATERAL (
+  SELECT count(*) AS new_columns
+  FROM information_schema.columns
+  WHERE table_schema='public' AND table_name='carrier_routes'
+    AND column_name IN ('via_latitudes','via_longitudes','bbox_min_lat','bbox_max_lat',
+                        'bbox_min_lng','bbox_max_lng','route_line')
+) AS col;
 
--- B) Které nové sloupce už existují?
-select column_name, data_type
-from information_schema.columns
-where table_schema = 'public' and table_name = 'carrier_routes'
-  and (column_name like 'via_%'
-    or column_name like 'bbox_%'
-    or column_name = 'route_line')
-order by column_name;
+-- Objemy pro interpretaci plánu později. Počet sloupců se zjišťuje přes
+-- information_schema, ne přímým čtením dat: na čisté databázi by přímý dotaz
+-- na route_line skončil chybou "column does not exist".
+SELECT
+  (SELECT count(*) FROM public.carrier_routes) AS routes_total,
+  (SELECT count(*) FROM public.tow_requests) AS requests_total,
+  (SELECT count(*) FROM public.tow_requests WHERE status='open') AS requests_open;
 
--- C) Objem dat (pro správnou interpretaci plánů později).
---    POZOR: ptáme se na POCET sloupců misto na jejich hodnoty. Sloupec
---    route_line ani via_* na čisté databázi ještě nemusí existovat a přímý
---    dotaz na něj by skončil chybou „column does not exist“.
-select
-  (select count(*) from public.carrier_routes) as routes_total,
-  (select count(*) from public.tow_requests) as requests_total,
-  (select count(*) from public.tow_requests where status = 'open') as requests_open,
-  (select count(*) from information_schema.columns
-     where table_schema = 'public' and table_name = 'carrier_routes'
-       and column_name in (
-         'via_latitudes', 'via_longitudes',
-         'bbox_min_lat', 'bbox_max_lat', 'bbox_min_lng', 'bbox_max_lng',
-         'route_line'
-       )) as new_columns_present;
-
--- D) Oprávnění interního RPC — musí být jen service_role.
-select grantee, privilege_type
-from information_schema.routine_privileges
-where routine_schema = 'public'
-  and routine_name = 'get_route_matching_candidates_internal'
-order by grantee;
-
--- E) Záloha. V Dashboardu → Database → Backups si ověřte, že existuje
---    bod obnovy. Migrace 1–3 mění návratový typ RPC, takže je potřeba
---    mít kam se vrátit.
---
--- JAK ČÍST VÝSTUP
---   A) je prázdné  → RPC zatím neexistuje, začínáte od kroku 1.
---      je tam řádek → některý krok už prošel. NEZACÍNAJTE ODKUD UŽ BYLO.
---      Zmínka v A) vám řekne, kam až je hotovo:
---        is_spatial = true      → krok 6 prošel
---        has_via = true         → kroky 1 a 2 prošly
---        has_proximity = true   → krok 3 prošel
---   B) prázdné     → čistý start, od kroku 1.
---   C) new_columns_present
---      0            → čistý start, začínáte krokem 1.
---      1–7 a B) je prázdné → částečně aplikované. NEZACÍNAJTE od kroku 1;
---                       napište mi výstup a rozhodneme, odkud pokračovat.
---   D) 'postgres' + 'service_role' = v pořádku. 'postgres' je vlastník
---      funkce, takže EXECUTE má vždy.
---      Když tam bude anon nebo authenticated, ZASTAVTE a napište mi to —
---      to by znamenalo, že klienti mohou volat RPC a dostávat soukromá data.
+-- Záloha. V Dashboardu → Database → Backups si ověřte, že existuje bod obnovy.
+-- Migrace 1–3 mění návratový typ RPC, takže je potřeba mít kam se vrátit.
