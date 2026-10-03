@@ -124,7 +124,11 @@ FROM (SELECT 1) AS t
          JOIN pg_namespace n ON n.oid = t.typnamespace
          WHERE n.nspname='extensions' AND t.typname='geography' AND t.typtype='b'
        )) AS geography_ok,
-      (SELECT count(*) FROM pg_proc p
+      -- Počet PŘETÍŽENÍ nelze porovnávat: ST_MakePoint má v PostGIS pět
+      -- variant (2D, 3D, 4D, s měřítkem) a ST_DWithin/ST_Distance existují
+      -- pro geometry i geography. Porovnávat rows by tedy nikdy neplatilo.
+      -- Ptáme se na POČET JMEN, ne na počet řádků v katalogu.
+      (SELECT count(DISTINCT p.proname) FROM pg_proc p
          JOIN pg_namespace n ON n.oid = p.pronamespace
          WHERE n.nspname='extensions'
            AND p.proname IN ('st_dwithin','st_makeline','st_makepoint','st_distance')) = 4 AS spatial_fns_ok,

@@ -261,7 +261,11 @@ select exists (
          join pg_namespace n on n.oid = t.typnamespace
          where n.nspname = 'extensions' and t.typname = 'geography' and t.typtype = 'b'
        ) as geography_ok,
-       (select count(*) from pg_proc p
+       -- POZOR: porovnává se počet JMEN, ne počet řádků v katalogu.
+       -- ST_MakePoint má v PostGIS více přetížení (2D, 3D, 4D, s měřítkem)
+       -- a ST_DWithin/ST_Distance existují pro geometry i geography, takže
+       -- `count(*) = 4` by nikdy neplatilo.
+       (select count(distinct p.proname) from pg_proc p
         join pg_namespace n on n.oid = p.pronamespace
         where n.nspname = 'extensions'
           and p.proname in ('st_dwithin','st_makeline','st_makepoint','st_distance')

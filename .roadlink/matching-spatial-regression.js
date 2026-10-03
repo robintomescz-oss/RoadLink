@@ -28,6 +28,20 @@ assert(
 );
 assert(/pg_type t/i.test(extensionCode) && /typname = 'geography'/i.test(extensionCode), "the migration verifies the geography type through the catalog");
 assert(/st_dwithin/i.test(extensionCode), "the migration verifies the spatial functions the later steps actually call");
+
+// Přetížení funkcí nesmí být záměněna za počet existujících funkcí.
+// ST_MakePoint má v PostGIS pět variant (2D, 3D, 4D, s měřítkem) a
+// ST_DWithin/ST_Distance existují pro geometry i geography. Kontrola, která
+// porovnává `count(*) = 4`, by nikdy neplatila a operátora by zbytečně
+// zastavila na funkční instalaci.
+const bundle = read("supabase/sql-editor/step_5_150000_enable_postgis.sql");
+assert(
+  !/count\(\*\)\s*=\s*4/i.test(bundle),
+  "the spatial function check counts distinct names, not overloads — otherwise it can never pass",
+);
+assert(/count\(distinct p\.proname\)/i.test(bundle), "the spatial function check compares distinct function names");
+const runbookSpatial = code(read("docs/matching-deployment-runbook.md"));
+assert(!/count\(\*\)\s*=\s*4/i.test(runbookSpatial), "the runbook does not compare overload counts either");
 assert(/raise exception/i.test(extensionMigration), "a missing extension fails loudly instead of degrading silently");
 assert(!/\b(delete|truncate|drop)\b/i.test(extensionMigration.replace(/--[^\n]*/g, "")), "enabling the extension mutates no data");
 
