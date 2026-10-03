@@ -137,15 +137,18 @@ begin
     return new;
   end if;
 
-  v_points := extensions.ST_MakePoint(new.from_lng, new.from_lat)::extensions.geography
-    || extensions.ST_MakePoint(new.to_lng, new.to_lat)::extensions.geography;
-
-  if cardinality(new.via_latitudes) > 0 then
-    v_points := v_points || extensions.ST_MakeLine(array(
-      select extensions.ST_MakePoint(v.lng, v.lat)::extensions.geography
-      from unnest(new.via_longitudes, new.via_latitudes) as v(lng, lat)
-    ));
-  end if;
+  -- Vrcholy v pořadí cesty: odjezd → průjezdné body → cíl.
+  -- Operátor `||` na `geography` NESKLÁDÁ geometrie (je to textový/pole
+  -- operátor a WKB jako pole se nerozparsuje), proto se pole skládá přes
+  -- array_agg. `ST_MakeLine` se volí až jednou ze všech vrcholů — jinak by
+  -- vzniklo pole [bod, čára, bod] místo jednotlivých vrcholů.
+  v_points := array(
+    select extensions.ST_MakePoint(v.lng, v.lat)::extensions.geography
+    from unnest(
+      array[new.from_lng] || coalesce(new.via_longitudes, '{}'::double precision[]) || array[new.to_lng],
+      array[new.from_lat] || coalesce(new.via_latitudes, '{}'::double precision[]) || array[new.to_lat]
+    ) as v(lng, lat)
+  );
 
   new.route_line := extensions.ST_MakeLine(v_points);
 

@@ -78,16 +78,26 @@ begin
     return new;
   end if;
 
-  v_points := extensions.ST_MakePoint(new.from_lng, new.from_lat)::extensions.geography
-    || extensions.ST_MakePoint(new.to_lng, new.to_lat)::extensions.geography;
-
-  if cardinality(new.via_latitudes) > 0 then
-    -- Průjezdné body jsou mezi krajními body spojeny ve stejném pořadí.
-    v_points := v_points || extensions.ST_MakeLine(array(
-      select extensions.ST_MakePoint(v.lng, v.lat)::extensions.geography
-      from unnest(new.via_longitudes, new.via_latitudes) as v(lng, lat)
-    ));
-  end if;
+  -- Body se skládají v POŘADÍ cesty: odjezd → průjezdné body → cíl. Pole se
+  -- staví jako pole pomocí array_agg, ne přes `||`.
+  --
+  -- PROČ NE `||`: operátor `||` na typu `geography` v PostGIS NESKLÁDÁ
+  -- geometrie. Řadí se mezi textové/pole operátory, takže Postgres zkouší
+  -- parsovat WKB jako pole a končí `malformed array literal`. Stejný
+  -- operátor na poli `geography[]` skládá správně, a proto je potřeba, aby
+  -- obě strany byly pole.
+  --
+  -- PROČ NE ST_MakeLine U JEDNOTLIVÝCH ČÁSTÍ: ST_MakeLine vrací *lomenou
+  -- čáru*, ne bod. Poskládat z ní pole by dalo [bod, čára, bod] a ne
+  -- jednotlivé vrcholy. Vrcholy proto sbírá array_agg nad unnest a lomená
+  -- čára vznikne až jednou ze všech bodů.
+  v_points := array(
+    select extensions.ST_MakePoint(v.lng, v.lat)::extensions.geography
+    from unnest(
+      array[new.from_lng] || coalesce(new.via_longitudes, '{}'::double precision[]) || array[new.to_lng],
+      array[new.from_lat] || coalesce(new.via_latitudes, '{}'::double precision[]) || array[new.to_lat]
+    ) as v(lng, lat)
+  );
 
   new.route_line := extensions.ST_MakeLine(v_points);
 

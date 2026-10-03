@@ -50,12 +50,39 @@ assert(/add column if not exists route_line extensions\.geography\(linestring, 4
 assert(/create or replace function public\.assign_carrier_route_line\(\)/i.test(geometryMigration), "the geometry is derived by a trigger, never entered by hand");
 assert(/create trigger carrier_routes_route_line_assign[\s\S]*before insert or update/i.test(geometryMigration), "the trigger covers inserts and updates");
 assert(/using gist \(route_line\)/i.test(geometryMigration), "the route line has a GiST index");
-assert(/extensions\.ST_MakePoint\(new\.from_lng, new\.from_lat\)/i.test(geometryMigration), "origin is written as longitude, latitude");
+assert(/ST_MakePoint\(v\.lng, v\.lat\)/i.test(geometryMigration), "each vertex is written as longitude, latitude");
 assert(/extensions\.ST_MakeLine\(v_points\)/i.test(geometryMigration), "the whole route becomes one line, via points included");
+assert(!/from_lng, new\.from_lat/i.test(geometryMigration), "the origin is no longer assembled as a standalone point outside the vertex list");
 assert(/set search_path = ''/i.test(geometryMigration), "PostGIS functions are called with an empty search_path");
 assert(/revoke all[\s\S]*from anon[\s\S]*from authenticated/i.test(geometryMigration), "the geometry trigger is closed for clients");
 assert(!/\b(drop column|delete from|truncate|drop table)\b/i.test(geometryMigration), "the geometry migration destroys nothing");
 assert(!/route_line\s*:=/i.test(geometryMigration.replace(/new\.route_line :=/g, "")), "only the trigger writes the geometry");
+
+// ── Operátor `||` NESKLÁDÁ GEOMETRIE ─────────────────────────────────────────
+// Chyba, která se projevila až v produkci, protože trigger nikdo nespustil:
+// `geography || geography` v PostGIS není skládání lomené čáry. Operátor je
+// textový/pole operátor, takže Postgres zkouší parsovat WKB jako pole a skončí
+// `malformed array literal`. Lomená čára se skládá z POLE bodů, takže obě
+// strany musí být `geography[]` — proto array_agg a ne přímý `||` na skaláru.
+//
+// Druhá chyba na stejném místě: `ST_MakeLine(...)` vrací LOMENOU ČÁRU, ne
+// bod. Poskládat ji do pole bodů by dalo [bod, čára, bod] a ST_MakeLine by pak
+// dostal nesmyslný vstup. Vrcholy se sbírají přes unnest a čára vznikne jednou.
+for (const [label, migration] of [["route_line", geometryMigration], ["geometry", cleanupMigration]]) {
+  const body = code(migration);
+  const assignment = body.match(/v_points\s*:=[^;]+;/);
+  assert(assignment, `the ${label} trigger assigns v_points`);
+  assert(
+    !/extensions\.geography\s*\|\|/.test(assignment[0]),
+    `the ${label} trigger does not concatenate geography values with ||, which parses WKB as an array literal`,
+  );
+  assert(
+    !/ST_MakeLine/.test(assignment[0]),
+    `the ${label} trigger does not append ST_MakeLine output to the vertex array — that appends a whole line, not a vertex`,
+  );
+  assert(/array\(\s*select/i.test(assignment[0]), `the ${label} trigger builds the vertex array explicitly`);
+  assert(/unnest\(/i.test(assignment[0]), `the ${label} vertices come from unnest, so via points keep their order`);
+}
 
 // ── PRŮJEZDNÉ BODY NEJSOU POVINNÉ ────────────────────────────────────────────
 // Toto je nejsubtlnější chyba celého řetězce: triggery braly `via_latitudes IS
