@@ -207,4 +207,27 @@ assert(profileSource.includes('Spravovat moje vozidla'), 'personal vehicles card
 assert((profileSource.match(/navigateLegacy\("vehicles"\)/g) || []).length === 1, 'carrier vehicles action opens only the carrier screen');
 assert((profileSource.match(/navigateLegacy\("personalVehicles"\)/g) || []).length === 1, 'personal vehicles action opens only the personal screen');
 
+// ── 6. Přepravní vozidla: chybějící přepravní profil není chyba ──────────────
+// Uživatel bez aktivovaného carrier_profiles nesmí na obrazovce „Přepravní
+// vozidla“ dostat PGRST116 („Cannot coerce the result to a single JSON object“),
+// ale prázdný stav. Načtení proto používá maybeSingle() a null řeší tiše.
+const useProfileSource = read('hooks/useProfile.ts');
+const loadVehiclesBlock = useProfileSource.slice(
+  useProfileSource.indexOf('async function loadVehicles'),
+  useProfileSource.indexOf('function resetVehicleForm')
+);
+const loadVehiclesCode = loadVehiclesBlock
+  .split('\n')
+  .filter((line) => !line.trimStart().startsWith('//'))
+  .join('\n');
+assert(loadVehiclesBlock.length > 0, 'useProfile has a loadVehicles block');
+assert(loadVehiclesCode.includes('.maybeSingle()'), 'loadVehicles tolerates a missing carrier profile');
+assert(!loadVehiclesCode.includes('.single()'), 'loadVehicles never uses single() for carrier_profiles');
+assert(/if \(!carrier\)[\s\S]*?setVehicles\(\[\]\)/.test(loadVehiclesBlock), 'loadVehicles clears to the empty state without a carrier profile');
+assert(loadVehiclesBlock.indexOf('if (carrierError)') < loadVehiclesBlock.indexOf('Load carrier id:'), 'carrier-id error is logged only for real errors');
+assert(
+  !/\.from\("carrier_profiles"\)\s*\n\s*\.select\([^)]*\)\s*\n\s*\.eq\([^)]*\)\s*\n\s*\.single\(\)/.test(useProfileSource),
+  'no carrier_profiles lookup uses .single()'
+);
+
 console.log('\nVŠECHNY KONTROLY PROŠLY.');

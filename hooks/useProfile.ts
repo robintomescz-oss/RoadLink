@@ -240,14 +240,25 @@ export function useProfile({ userId, screen }: { userId: string | null; screen: 
     if (!userId) return;
 
     setVehiclesLoading(true);
+    // Uživatel bez aktivovaného přepravního profilu prostě nemá žádná přepravní
+    // vozidla — to není chyba. `.single()` by na 0 řádcích vrátil PGRST116
+    // („Cannot coerce the result to a single JSON object“) a zalogoval by
+    // zbytečný error; `maybeSingle()` nechá stav prázdný.
     const { data: carrier, error: carrierError } = await supabase
       .from("carrier_profiles")
       .select("id")
       .eq("user_id", userId)
-      .single();
+      .maybeSingle();
 
-    if (carrierError || !carrier) {
-      console.error("Load carrier id:", carrierError?.message || "Carrier profile not found");
+    if (carrierError) {
+      console.error("Load carrier id:", carrierError.message);
+      setVehiclesLoading(false);
+      return;
+    }
+
+    if (!carrier) {
+      // Bez přepravního profilu nejsou žádná přepravní vozidla (prázdný stav).
+      setVehicles([]);
       setVehiclesLoading(false);
       return;
     }
@@ -334,13 +345,16 @@ export function useProfile({ userId, screen }: { userId: string | null; screen: 
       return;
     }
 
+    // Bez aktivovaného přepravního profilu není kam vozidlo uložit. Používáme
+    // maybeSingle(), aby chybějící profil nevyvolal PGRST116, a stav uživatele
+    // nasměrujeme na aktivaci profilu místo vágního „nepodařilo se načíst“.
     const { data: carrier, error: carrierError } = await supabase
       .from("carrier_profiles")
       .select("id")
       .eq("user_id", userId)
-      .single();
+      .maybeSingle();
     if (carrierError || !carrier) {
-      Alert.alert("Chyba", "Profil přepravce se nepodařilo načíst.");
+      Alert.alert("Přepravní profil", "Nejdřív aktivujte přepravní profil v Profilu, pak můžete přidat vozidlo.");
       return;
     }
 
@@ -398,9 +412,9 @@ export function useProfile({ userId, screen }: { userId: string | null; screen: 
             .from("carrier_profiles")
             .select("id")
             .eq("user_id", userId)
-            .single();
+            .maybeSingle();
           if (carrierError || !carrier) {
-            Alert.alert("Chyba", "Profil přepravce se nepodařilo načíst.");
+            Alert.alert("Chyba", "Přepravní profil se nepodařilo načíst.");
             return;
           }
           const { error } = await supabase
