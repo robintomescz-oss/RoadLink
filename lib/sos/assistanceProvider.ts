@@ -1,4 +1,5 @@
 import type { SosLocationSummary, SosVehicleInput } from "./sosState";
+import { cancelOrder, type SosState } from "./sosState";
 import type { ProblemCategoryId } from "./sosContent";
 
 /**
@@ -14,6 +15,7 @@ import type { ProblemCategoryId } from "./sosContent";
  */
 
 export type AssistanceOrderRequest = {
+  offerId?: string;
   /** Stabilní klíč pro idempotenci na straně serveru. */
   clientRequestId: string;
   problemId: ProblemCategoryId | null;
@@ -26,6 +28,7 @@ export type AssistanceOrderRequest = {
 };
 
 export type AssistanceOffer = {
+  offerId: string;
   providerName: string | null;
   serviceScope: string;
   /** Skutečně potvrzená cena, nebo null když je jen odhad. */
@@ -50,6 +53,8 @@ export type AssistanceProvider = {
   id: string;
   isConfigured: () => boolean;
   requestOrder: (request: AssistanceOrderRequest) => Promise<AssistanceOrderResult>;
+  getOffer: (request: AssistanceOrderRequest) => Promise<AssistanceOffer>;
+  cancelOrder: (orderId: string) => Promise<{ cancelled: boolean; message?: string }>;
 };
 
 /**
@@ -59,6 +64,8 @@ export type AssistanceProvider = {
 export const noAssistanceProvider: AssistanceProvider = {
   id: "none",
   isConfigured: () => false,
+  async getOffer() { throw new Error("Nabídky asistence nejsou dostupné."); },
+  async cancelOrder() { return { cancelled: false, message: "Storno není dostupné." }; },
   async requestOrder(): Promise<AssistanceOrderResult> {
     return {
       status: "unavailable",
@@ -79,6 +86,16 @@ export function setAssistanceProvider(provider: AssistanceProvider): void {
 
 export function getAssistanceProvider(): AssistanceProvider {
   return activeProvider;
+}
+
+/** Stav zrušení se mění výhradně po potvrzení skutečným poskytovatelem. */
+export async function cancelConfirmedOrder(provider: AssistanceProvider, state: SosState): Promise<SosState> {
+  if (!state.order.orderId || provider.id !== state.order.providerName || !provider.isConfigured()) {
+    throw new Error("Poskytovatel objednávky není dostupný.");
+  }
+  const result = await provider.cancelOrder(state.order.orderId);
+  if (!result.cancelled) throw new Error(result.message || "Poskytovatel storno nepotvrdil.");
+  return cancelOrder(state);
 }
 
 /** Reset do výchozího stavu (vhodné pro testy). */

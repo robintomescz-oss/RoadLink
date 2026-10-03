@@ -17,7 +17,7 @@ import { useHardwareBackTo } from "../../hooks/useBackHandlers";
  * payloady, Supabase) zůstává beze změny.
  */
 export default function ProfileRoute() {
-  const { profileState, authState, userId, setTransportTab } = useAppContext();
+  const { profileState, authState, userId, setTransportTab, personalVehiclesState } = useAppContext();
   const {
     profile, profileLoading, profileEditing,
     profileFirstName, setProfileFirstName,
@@ -42,6 +42,8 @@ export default function ProfileRoute() {
     vehicles, vehiclesLoading,
     saveProfile, saveCarrierProfile, activateCarrierProfile, setProfileEditing,
   } = profileState;
+  // Osobní vozidla nejsou součástí přepravního profilu — stojí vedle něj.
+  const { personalVehicles, personalVehiclesLoading, personalVehiclesError } = personalVehiclesState;
   const { signOutLoading, signOutUser } = authState;
   const goBack = () => navigateLegacy("home");
 
@@ -232,14 +234,37 @@ export default function ProfileRoute() {
               </View>
             )}
 
-            {/* C. Vozidla */}
+            {/* C. Přepravní vozidla — zůstávají navázaná na přepravní profil */}
             <View style={styles.profileCard}>
-              <Text style={styles.profileCardHeading}>Vozidla</Text>
+              <Text style={styles.profileCardHeading}>Přepravní vozidla</Text>
               <Text style={styles.profileSummaryValue}>
                 {vehiclesLoading ? "Načítám vozidla…" : vehicles.length === 0 ? "Žádná vozidla" : vehicles.length === 1 ? "1 vozidlo" : `${vehicles.length} vozidel`}
               </Text>
+              <Text style={styles.profileCardHint}>Odtahová technika pro kapacitu, nabídky a shody.</Text>
               <TouchableOpacity style={styles.primary} onPress={() => navigateLegacy("vehicles")}>
-                <Text style={styles.primaryText}>Spravovat vozidla</Text>
+                <Text style={styles.primaryText}>Spravovat přepravní vozidla</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* C2. Moje vozidla — soukromá vozidla, jen pro SOS. */}
+            <View style={styles.profileCard}>
+              <Text style={styles.profileCardHeading}>Moje vozidla</Text>
+              {/* Chyba načtení se nesmí převést na „Žádné vozidlo“ — to by
+                  tvrdilo, že uživatel žádné nemá, a přitom je jen nelze načíst. */}
+              <Text style={styles.profileSummaryValue}>
+                {personalVehiclesLoading
+                  ? "Načítám moje vozidla…"
+                  : personalVehiclesError
+                  ? "Nepodařilo se načíst"
+                  : personalVehicles.length === 0
+                  ? "Žádné vozidlo"
+                  : personalVehicles.length === 1
+                  ? "1 vozidlo"
+                  : `${personalVehicles.length} vozidel`}
+              </Text>
+              <Text style={styles.profileCardHint}>Soukromá vozidla pro rychlé předvyplnění v SOS. Nejsou součástí přepravního trhu.</Text>
+              <TouchableOpacity style={styles.primary} onPress={() => navigateLegacy("personalVehicles")}>
+                <Text style={styles.primaryText}>Spravovat moje vozidla</Text>
               </TouchableOpacity>
             </View>
 

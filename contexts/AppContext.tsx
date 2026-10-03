@@ -14,8 +14,11 @@ import { useAuthSession } from "../hooks/useAuthSession";
 import { supabase } from "../lib/supabase";
 import { useLocation } from "../hooks/useLocation";
 import { useProfile } from "../hooks/useProfile";
+import { usePersonalVehicles } from "../hooks/usePersonalVehicles";
 import { useTransportData } from "../hooks/useTransportData";
 import type { OfferProviderProfile, RequestViewMode, TowOffer } from "../lib/types";
+import { createInitialSosState, type SosState } from "../lib/sos/sosState";
+import type { AssistanceOffer, AssistanceOrderRequest } from "../lib/sos/assistanceProvider";
 
 export type TransportTab = "all" | "requests" | "capacity" | "mine";
 
@@ -48,6 +51,10 @@ type TransportState = ReturnType<typeof useTransportData>;
 type ProfileState = ReturnType<typeof useProfile>;
 
 export type AppContextValue = {
+  sosState: SosState;
+  setSosState: React.Dispatch<React.SetStateAction<SosState>>;
+  sosBooking: { offer: AssistanceOffer; request: AssistanceOrderRequest; providerId: string } | null;
+  setSosBooking: React.Dispatch<React.SetStateAction<AppContextValue["sosBooking"]>>;
   // ── Jádro (sdílené napříč obrazovkami) ────────────────────────────────
   // Žádná `role`: RoadLink má jeden účet (viz ROADLINK_AGENT_RULES.md).
   userId: AuthState["userId"];
@@ -82,11 +89,15 @@ export type AppContextValue = {
   locationState: LocationState;
   transportState: TransportState;
   profileState: ProfileState;
+  /** Osobní vozidla (fáze 1): stav mimo obrazovku, aby přešel ze seznamu do formuláře. */
+  personalVehiclesState: ReturnType<typeof usePersonalVehicles>;
 };
 
 const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
+  const [sosState, setSosState] = useState<SosState>(createInitialSosState);
+  const [sosBooking, setSosBooking] = useState<AppContextValue["sosBooking"]>(null);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [requestViewMode, setRequestViewMode] = useState<RequestViewMode>("owner");
   const [transportTab, setTransportTab] = useState<TransportTab>("all");
@@ -145,6 +156,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   });
 
   const profileState = useProfile({ userId, screen: currentScreen });
+  const personalVehiclesState = usePersonalVehicles(userId);
 
   async function openProviderProfile(offer: TowOffer) {
     if (providerProfileLoading) return;
@@ -183,6 +195,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
 
   const value: AppContextValue = {
+    sosState, setSosState, sosBooking, setSosBooking,
     userId,
     activeJobId,
     setActiveJobId,
@@ -205,6 +218,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     locationState,
     transportState,
     profileState,
+    personalVehiclesState,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
