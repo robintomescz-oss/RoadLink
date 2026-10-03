@@ -120,7 +120,9 @@ language plpgsql
 set search_path = ''
 as $$
 declare
-  v_points extensions.geography[];
+  -- Vrcholy se sbírají jako `geometry`: PostGIS nemá ST_MakeLine pro
+  -- `geography`, výsledek se převádí až jedním přetypováním.
+  v_points extensions.geometry[];
 begin
   -- Neúplné nebo vadné souřadnice znamenají žádnou geometrii. Vstupní platnost
   -- přitom hlídá `carrier_routes_via_places_validate`; tady se jen odvozuje.
@@ -138,19 +140,25 @@ begin
   end if;
 
   -- Vrcholy v pořadí cesty: odjezd → průjezdné body → cíl.
-  -- Operátor `||` na `geography` NESKLÁDÁ geometrie (je to textový/pole
-  -- operátor a WKB jako pole se nerozparsuje), proto se pole skládá přes
-  -- array_agg. `ST_MakeLine` se volí až jednou ze všech vrcholů — jinak by
-  -- vzniklo pole [bod, čára, bod] místo jednotlivých vrcholů.
+  --
+  -- PostGIS definuje ST_MakeLine POUZE pro `geometry`; pro `geography` taková
+  -- varianta neexistuje. Lomená čára se sestaví v `geometry` a převede na
+  -- `geography` jedním přetypováním.
+  --
+  -- Operátor `||` na `geography` neskládá geometrie (je to textový/pole
+  -- operátor a WKB jako pole se nerozparsuje), proto se pole vrcholů skládá
+  -- přes array_agg; níže je `||` použito jen na `double precision[]`, kde je
+  -- správný. ST_MakeLine se volí až jednou ze všech vrcholů — jinak by vzniklo
+  -- pole [bod, čára, bod] místo jednotlivých vrcholů.
   v_points := array(
-    select extensions.ST_MakePoint(v.lng, v.lat)::extensions.geography
+    select extensions.ST_MakePoint(v.lng, v.lat)
     from unnest(
       array[new.from_lng] || coalesce(new.via_longitudes, '{}'::double precision[]) || array[new.to_lng],
       array[new.from_lat] || coalesce(new.via_latitudes, '{}'::double precision[]) || array[new.to_lat]
     ) as v(lng, lat)
   );
 
-  new.route_line := extensions.ST_MakeLine(v_points);
+  new.route_line := extensions.ST_MakeLine(v_points)::extensions.geography;
 
   return new;
 end;

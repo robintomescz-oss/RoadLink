@@ -82,7 +82,35 @@ for (const [label, migration] of [["route_line", geometryMigration], ["geometry"
   );
   assert(/array\(\s*select/i.test(assignment[0]), `the ${label} trigger builds the vertex array explicitly`);
   assert(/unnest\(/i.test(assignment[0]), `the ${label} vertices come from unnest, so via points keep their order`);
+
+  // PostGIS definuje ST_MakeLine POUZE pro `geometry`. Pro `geography` taková
+  // varianta neexistuje, takže `ST_MakeLine(pole geography)` spadne už při
+  // bindingu funkce: "function st_makeline(geography[]) does not exist".
+  // Vrcholy proto musí být `geometry` a převod na `geography` být viditelný.
+  assert(
+    !/ST_MakeLine\(v_points\)\s*;/i.test(body),
+    `the ${label} trigger converts the built line to geography explicitly`,
+  );
+  assert(
+    /ST_MakeLine\(v_points\)\s*::\s*extensions\.geography/i.test(body),
+    `the ${label} trigger casts the assembled line to geography`,
+  );
+  assert(
+    /v_points\s+extensions\.geometry\[\]/i.test(body),
+    `the ${label} vertex array is geometry[], because ST_MakeLine has no geography overload`,
+  );
 }
+
+// Stejná past čeká i ST_NPoints: existuje POUZE pro geometry
+// (integer ST_NPoints(geometry)), takže volání na sloupci `route_line`, který je
+// geography, skončí "function st_npoints(geography) does not exist". Kontroly
+// musí převést na geometry.
+const bundle6 = read("supabase/sql-editor/step_6_160000_route_line.sql");
+assert(
+  !/ST_NPoints\(\s*cr\.route_line\s*\)/i.test(bundle6) && !/ST_NPoints\(route_line\)/i.test(code(read("docs/matching-deployment-runbook.md"))),
+  "ST_NPoints is only defined for geometry, so every call casts route_line from geography",
+);
+assert(/ST_NPoints\(cr\.route_line::extensions\.geometry\)/i.test(bundle6), "the bundle casts route_line to geometry before counting vertices");
 
 // ── PRŮJEZDNÉ BODY NEJSOU POVINNÉ ────────────────────────────────────────────
 // Toto je nejsubtlnější chyba celého řetězce: triggery braly `via_latitudes IS

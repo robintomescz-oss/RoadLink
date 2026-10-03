@@ -65,7 +65,9 @@ language plpgsql
 set search_path = ''
 as $$
 declare
-  v_points extensions.geography[];
+  -- Vrcholy se sbírají jako `geometry`, ne `geography`: PostGIS nemá variantu
+  -- ST_MakeLine pro `geography` (jen pro `geometry`). Viz níže.
+  v_points extensions.geometry[];
 begin
   if new.from_lat is null
      or new.from_lng is null
@@ -78,28 +80,31 @@ begin
     return new;
   end if;
 
-  -- Body se skládají v POŘADÍ cesty: odjezd → průjezdné body → cíl. Pole se
-  -- staví jako pole pomocí array_agg, ne přes `||`.
+  -- Vrcholy se sbírají v POŘADÍ cesty: odjezd → průjezdné body → cíl.
   --
-  -- PROČ NE `||`: operátor `||` na typu `geography` v PostGIS NESKLÁDÁ
-  -- geometrie. Řadí se mezi textové/pole operátory, takže Postgres zkouší
-  -- parsovat WKB jako pole a končí `malformed array literal`. Stejný
-  -- operátor na poli `geography[]` skládá správně, a proto je potřeba, aby
-  -- obě strany byly pole.
+  -- PROČ `geometry` A NE `geography`: PostGIS definuje ST_MakeLine POUZE pro
+  -- `geometry` (přijímá geometry i geometry[]). Pro `geography` taková varianta
+  -- neexistuje a Postgres skončí `function st_makeline(geography[]) does not
+  -- exist`. Lomená čára se proto sestaví v `geometry` a výsledek se převede
+  -- na `geography` jedním přetypováním.
+  --
+  -- PROČ NE `||` NA SKALÁRECH: operátor `||` na `geography` neskládá
+  -- geometrie — je to textový/pole operátor a WKB jako pole se nerozparsuje
+  -- (`malformed array literal`). Níže se `||` používá jen na poli
+  -- `double precision[]`, kde je správný.
   --
   -- PROČ NE ST_MakeLine U JEDNOTLIVÝCH ČÁSTÍ: ST_MakeLine vrací *lomenou
-  -- čáru*, ne bod. Poskládat z ní pole by dalo [bod, čára, bod] a ne
-  -- jednotlivé vrcholy. Vrcholy proto sbírá array_agg nad unnest a lomená
-  -- čára vznikne až jednou ze všech bodů.
+  -- čáru*, ne vrchol. Poskládat ji do pole vrcholů by dalo [bod, čára, bod].
+  -- Vrcholy se proto sbírají přes unnest a čára vznikne až jednou ze všech.
   v_points := array(
-    select extensions.ST_MakePoint(v.lng, v.lat)::extensions.geography
+    select extensions.ST_MakePoint(v.lng, v.lat)
     from unnest(
       array[new.from_lng] || coalesce(new.via_longitudes, '{}'::double precision[]) || array[new.to_lng],
       array[new.from_lat] || coalesce(new.via_latitudes, '{}'::double precision[]) || array[new.to_lat]
     ) as v(lng, lat)
   );
 
-  new.route_line := extensions.ST_MakeLine(v_points);
+  new.route_line := extensions.ST_MakeLine(v_points)::extensions.geography;
 
   return new;
 end;
@@ -143,6 +148,7 @@ SELECT
   CASE WHEN udt_schema = 'extensions' AND udt_name = 'geography' THEN 'ANO' ELSE 'NE' END AS typ_je_extensions_geography,
   CASE WHEN missing = 0 THEN 'ANO' ELSE 'NE' END AS bez_chybejici_geometrie,
   CASE WHEN gist_ok = 1 THEN 'ANO' ELSE 'NE' END AS gist_index_platny,
+  CASE WHEN makeline_ok THEN 'ANO' ELSE 'NE' END AS st_makeline_ma_geometrii,
   CASE WHEN npoints_ok THEN 'ANO' ELSE 'NE' END AS pocet_bodu_souhlasí,
   CASE WHEN npoints_bez_via_ok THEN 'ANO' ELSE 'NE' END AS geometrie_bez_via_existuje,
   CASE WHEN not exists (select 1 from information_schema.routine_privileges where routine_schema='public' and routine_name='get_route_matching_candidates_internal' and grantee in ('anon','authenticated')) THEN 'ANO' ELSE 'NE' END AS jen_service_role_z_anon
@@ -150,6 +156,7 @@ SELECT
   CASE WHEN (udt_schema = 'extensions' AND udt_name = 'geography')
     AND (missing = 0)
     AND (gist_ok = 1)
+    AND (makeline_ok)
     AND (npoints_ok)
     AND (npoints_bez_via_ok)
     AND (not exists (select 1 from information_schema.routine_privileges where routine_schema='public' and routine_name='get_route_matching_candidates_internal' and grantee in ('anon','authenticated')))
@@ -165,18 +172,31 @@ FROM (SELECT 1) AS t
          WHERE table_schema='public' AND table_name='carrier_routes' AND column_name='route_line') AS udt_name,
       (SELECT count(*) FROM public.carrier_routes
          WHERE from_lat IS NOT NULL AND from_lng IS NOT NULL AND to_lat IS NOT NULL AND to_lng IS NOT NULL AND public.carrier_route_via_coordinates_valid(via_place_ids, via_latitudes, via_longitudes) AND route_line IS NULL) AS missing,
+      -- ST_MakeLine existuje POUZE pro geometry. Bez této kontroly by se chybějící
+      -- varianta projevila až výjimkou uvnitř triggeru, tedy jako selhání celého kroku
+      -- místo přesného sloupce v tabulce.
+      (SELECT EXISTS (
+         SELECT 1
+         FROM pg_proc p
+         JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname='extensions' AND p.proname='st_makeline'
+           AND 'extensions.geography[]'::regtype = ANY(p.proargtypes)
+       )) AS makeline_ok,
       (SELECT count(*) FROM pg_index i
          JOIN pg_class c ON c.oid = i.indexrelid
          JOIN pg_am am ON am.oid = c.relam
          WHERE i.indrelid='public.carrier_routes'::regclass
            AND am.amname='gist' AND i.indisvalid AND i.indisready) AS gist_ok,
+      -- ST_NPoints existuje POUZE pro geometry (integer ST_NPoints(geometry)),
+      -- pro geography nemá variantu. route_line je geography, takže se musí
+      -- převést na ::extensions.geometry.
       (SELECT COALESCE(bool_and(
-                extensions.ST_NPoints(cr.route_line) = cardinality(cr.via_place_ids) + 2), true)
+                extensions.ST_NPoints(cr.route_line::extensions.geometry) = cardinality(cr.via_place_ids) + 2), true)
          FROM public.carrier_routes cr
          WHERE cardinality(cr.via_place_ids) > 0 AND cr.route_line IS NOT NULL) AS npoints_ok,
       -- Trasa bez průjezdných bodů = lomená čára ze dvou krajních bodů.
       (SELECT COALESCE(bool_and(
-                extensions.ST_NPoints(cr.route_line) = 2
+                extensions.ST_NPoints(cr.route_line::extensions.geometry) = 2
                 AND cr.route_line IS NOT NULL), true)
          FROM public.carrier_routes cr
          WHERE coalesce(cardinality(cr.via_place_ids), 0) = 0

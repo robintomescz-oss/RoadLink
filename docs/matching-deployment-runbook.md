@@ -341,9 +341,11 @@ where i.indrelid = 'public.carrier_routes'::regclass and am.amname = 'gist';
 -- očekáváno: carrier_routes_route_line_gist_idx | t | t | gist
 
 -- D) Geometrie má správnou délku: lomená čára přes odjezd → via → cíl.
+-- POZOR: ST_NPoints existuje pouze pro geometry (integer ST_NPoints(geometry)),
+-- pro geography nemá variantu. route_line je geography, proto se převádí.
 select cardinality(via_place_ids) as via_count,
-       extensions.ST_NPoints(route_line) as expected,
-       extensions.ST_NPoints(route_line) = cardinality(via_place_ids) + 2 as matches
+       extensions.ST_NPoints(route_line::extensions.geometry) as expected,
+       extensions.ST_NPoints(route_line::extensions.geometry) = cardinality(via_place_ids) + 2 as matches
 from public.carrier_routes
 where cardinality(via_place_ids) > 0 and route_line is not null
 limit 5;

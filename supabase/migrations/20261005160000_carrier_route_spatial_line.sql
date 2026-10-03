@@ -43,7 +43,9 @@ language plpgsql
 set search_path = ''
 as $$
 declare
-  v_points extensions.geography[];
+  -- Vrcholy se sbírají jako `geometry`, ne `geography`: PostGIS nemá variantu
+  -- ST_MakeLine pro `geography` (jen pro `geometry`). Viz níže.
+  v_points extensions.geometry[];
 begin
   if new.from_lat is null
      or new.from_lng is null
@@ -56,28 +58,31 @@ begin
     return new;
   end if;
 
-  -- Body se skládají v POŘADÍ cesty: odjezd → průjezdné body → cíl. Pole se
-  -- staví jako pole pomocí array_agg, ne přes `||`.
+  -- Vrcholy se sbírají v POŘADÍ cesty: odjezd → průjezdné body → cíl.
   --
-  -- PROČ NE `||`: operátor `||` na typu `geography` v PostGIS NESKLÁDÁ
-  -- geometrie. Řadí se mezi textové/pole operátory, takže Postgres zkouší
-  -- parsovat WKB jako pole a končí `malformed array literal`. Stejný
-  -- operátor na poli `geography[]` skládá správně, a proto je potřeba, aby
-  -- obě strany byly pole.
+  -- PROČ `geometry` A NE `geography`: PostGIS definuje ST_MakeLine POUZE pro
+  -- `geometry` (přijímá geometry i geometry[]). Pro `geography` taková varianta
+  -- neexistuje a Postgres skončí `function st_makeline(geography[]) does not
+  -- exist`. Lomená čára se proto sestaví v `geometry` a výsledek se převede
+  -- na `geography` jedním přetypováním.
+  --
+  -- PROČ NE `||` NA SKALÁRECH: operátor `||` na `geography` neskládá
+  -- geometrie — je to textový/pole operátor a WKB jako pole se nerozparsuje
+  -- (`malformed array literal`). Níže se `||` používá jen na poli
+  -- `double precision[]`, kde je správný.
   --
   -- PROČ NE ST_MakeLine U JEDNOTLIVÝCH ČÁSTÍ: ST_MakeLine vrací *lomenou
-  -- čáru*, ne bod. Poskládat z ní pole by dalo [bod, čára, bod] a ne
-  -- jednotlivé vrcholy. Vrcholy proto sbírá array_agg nad unnest a lomená
-  -- čára vznikne až jednou ze všech bodů.
+  -- čáru*, ne vrchol. Poskládat ji do pole vrcholů by dalo [bod, čára, bod].
+  -- Vrcholy se proto sbírají přes unnest a čára vznikne až jednou ze všech.
   v_points := array(
-    select extensions.ST_MakePoint(v.lng, v.lat)::extensions.geography
+    select extensions.ST_MakePoint(v.lng, v.lat)
     from unnest(
       array[new.from_lng] || coalesce(new.via_longitudes, '{}'::double precision[]) || array[new.to_lng],
       array[new.from_lat] || coalesce(new.via_latitudes, '{}'::double precision[]) || array[new.to_lat]
     ) as v(lng, lat)
   );
 
-  new.route_line := extensions.ST_MakeLine(v_points);
+  new.route_line := extensions.ST_MakeLine(v_points)::extensions.geography;
 
   return new;
 end;

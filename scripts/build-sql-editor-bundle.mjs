@@ -303,6 +303,7 @@ const steps = [
       { label: "typ_je_extensions_geography", condition: "udt_schema = 'extensions' AND udt_name = 'geography'" },
       { label: "bez_chybejici_geometrie", condition: "missing = 0" },
       { label: "gist_index_platny", condition: "gist_ok = 1" },
+      { label: "st_makeline_ma_geometrii", condition: "makeline_ok" },
       { label: "pocet_bodu_souhlasí", condition: "npoints_ok" },
       { label: "geometrie_bez_via_existuje", condition: "npoints_bez_via_ok" },
       { label: "jen_service_role_z_anon", condition: noAnon },
@@ -315,18 +316,31 @@ const steps = [
          WHERE table_schema='public' AND table_name='carrier_routes' AND column_name='route_line') AS udt_name,
       (SELECT count(*) FROM public.carrier_routes
          WHERE ${ENDPOINTS_OK} AND ${VIA_OK} AND route_line IS NULL) AS missing,
+      -- ST_MakeLine existuje POUZE pro geometry. Bez této kontroly by se chybějící
+      -- varianta projevila až výjimkou uvnitř triggeru, tedy jako selhání celého kroku
+      -- místo přesného sloupce v tabulce.
+      (SELECT EXISTS (
+         SELECT 1
+         FROM pg_proc p
+         JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname='extensions' AND p.proname='st_makeline'
+           AND 'extensions.geography[]'::regtype = ANY(p.proargtypes)
+       )) AS makeline_ok,
       (SELECT count(*) FROM pg_index i
          JOIN pg_class c ON c.oid = i.indexrelid
          JOIN pg_am am ON am.oid = c.relam
          WHERE i.indrelid='public.carrier_routes'::regclass
            AND am.amname='gist' AND i.indisvalid AND i.indisready) AS gist_ok,
+      -- ST_NPoints existuje POUZE pro geometry (integer ST_NPoints(geometry)),
+      -- pro geography nemá variantu. route_line je geography, takže se musí
+      -- převést na ::extensions.geometry.
       (SELECT COALESCE(bool_and(
-                extensions.ST_NPoints(cr.route_line) = cardinality(cr.via_place_ids) + 2), true)
+                extensions.ST_NPoints(cr.route_line::extensions.geometry) = cardinality(cr.via_place_ids) + 2), true)
          FROM public.carrier_routes cr
          WHERE cardinality(cr.via_place_ids) > 0 AND cr.route_line IS NOT NULL) AS npoints_ok,
       -- Trasa bez průjezdných bodů = lomená čára ze dvou krajních bodů.
       (SELECT COALESCE(bool_and(
-                extensions.ST_NPoints(cr.route_line) = 2
+                extensions.ST_NPoints(cr.route_line::extensions.geometry) = 2
                 AND cr.route_line IS NOT NULL), true)
          FROM public.carrier_routes cr
          WHERE coalesce(cardinality(cr.via_place_ids), 0) = 0
