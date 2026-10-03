@@ -27,6 +27,8 @@ const {
   requestSnapshot,
   capacitySnapshot,
   normalizeViaPlaces,
+  moveViaPlace,
+  canAddViaPlace,
   MAX_VIA_PLACES,
 } = mod.exports;
 
@@ -117,6 +119,18 @@ const viaThree = normalizeViaPlaces({
 });
 assert.strictEqual(viaThree.length, 3, 'three via points are allowed');
 
+const viaWithCoordinates = normalizeViaPlaces({ viaPlaces: [{ placeId: 'a1', publicLabel: 'A', latitude: 50.1, longitude: 14.4 }] });
+assert.deepStrictEqual(
+  viaWithCoordinates,
+  [{ placeId: 'a1', publicLabel: 'A', latitude: 50.1, longitude: 14.4 }],
+  'private coordinates are preserved on a via point',
+);
+assert.deepStrictEqual(
+  normalizeViaPlaces({ viaPlaces: [{ placeId: 'a1', publicLabel: 'A', latitude: 50.1 }] }),
+  [{ placeId: 'a1', publicLabel: 'A' }],
+  'an incomplete coordinate pair is dropped',
+);
+
 assert.strictEqual(
   normalizeViaPlaces({
     viaPlaces: [{ placeId: 'a1', publicLabel: 'A' }, { placeId: 'b2', publicLabel: 'B' }, { placeId: 'c3', publicLabel: 'C' }, { placeId: 'd4', publicLabel: 'D' }],
@@ -148,5 +162,32 @@ assert.deepStrictEqual(
   [{ placeId: 'x', publicLabel: 'A' }],
   'a via point distinct from origin and destination is kept',
 );
+
+// ── Pořadí průjezdních bodů (matching respektuje pořadí) ─────────────────
+const ordered = [{ placeId: 'a1' }, { placeId: 'b2' }, { placeId: 'c3' }];
+assert.deepStrictEqual(
+  moveViaPlace(ordered, 2, 0).map((p) => p.placeId),
+  ['c3', 'a1', 'b2'],
+  'a via point can be moved to the top',
+);
+assert.deepStrictEqual(
+  moveViaPlace(ordered, 0, 2).map((p) => p.placeId),
+  ['b2', 'c3', 'a1'],
+  'a via point can be moved to the bottom',
+);
+assert.deepStrictEqual(moveViaPlace(ordered, 1, 1).map((p) => p.placeId), ['a1', 'b2', 'c3'], 'moving onto itself changes nothing');
+assert.deepStrictEqual(ordered.map((p) => p.placeId), ['a1', 'b2', 'c3'], 'reordering never mutates the input list');
+for (const [from, to] of [[-1, 0], [0, -1], [3, 0], [0, 3], [9, 9]]) {
+  assert.deepStrictEqual(moveViaPlace(ordered, from, to).map((p) => p.placeId), ['a1', 'b2', 'c3'], `an out-of-range move (${from}→${to}) is a no-op instead of a crash`);
+}
+assert.deepStrictEqual(moveViaPlace([], 0, 1), [], 'reordering an empty list stays empty');
+
+// ── Přidání průjezdného bodu: duplicita, odjezd a cíl se odmítají ──────────
+assert.strictEqual(canAddViaPlace({ viaPlaces: [], placeId: 'a1' }), true, 'an empty list accepts a new via point');
+assert.strictEqual(canAddViaPlace({ viaPlaces: ordered, placeId: 'd4' }), false, 'the limit of three blocks a fourth point');
+assert.strictEqual(canAddViaPlace({ viaPlaces: ordered, placeId: 'b2' }), false, 'a duplicate is refused');
+assert.strictEqual(canAddViaPlace({ viaPlaces: ordered, placeId: 'from', originPlaceId: 'from' }), false, 'the origin cannot also be a via point');
+assert.strictEqual(canAddViaPlace({ viaPlaces: ordered, placeId: 'to', destinationPlaceId: 'to' }), false, 'the destination cannot also be a via point');
+assert.strictEqual(canAddViaPlace({ viaPlaces: [], placeId: '   ' }), false, 'a blank place ID is refused');
 
 console.log('FORM TESTS PASSED');

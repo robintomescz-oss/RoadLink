@@ -2,7 +2,6 @@ import React from "react";
 import { ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "../../components/SafeAreaViewCompat";
 import { AppHeader as Header } from "../../components/AppHeader";
-import { AppBottomNav as BottomNav } from "../../components/AppBottomNav";
 import { styles } from "../../lib/appStyles";
 import { useAppContext } from "../../contexts/AppContext";
 import { navigateLegacy } from "../../navigation/navigationRef";
@@ -134,7 +133,6 @@ export default function VehicleFormRoute() {
           <Text style={styles.secondaryText}>Zpět na vozidla</Text>
         </TouchableOpacity>
       </ScrollView>
-      <BottomNav />
     </SafeAreaView>
   );
 }

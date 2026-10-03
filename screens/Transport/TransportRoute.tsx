@@ -537,6 +537,22 @@ export default function TransportRoute() {
         {transportTab === "capacity" ? publicRoutesSection : null}
         {transportTab === "mine" ? mineSection : null}
       </ScrollView>
+
+      {/* Vytvoření patří dovnitř modulu Trh. Akce je mimo ScrollView, takže
+          zůstává nad spodní lištou a na malém displeji se pod ni nepodjede. */}
+      <View style={styles.transportCreateBar}>
+        <TouchableOpacity
+          style={styles.transportCreateAction}
+          onPress={() => navigateLegacy("create")}
+          accessibilityRole="button"
+          accessibilityLabel="Vytvořit poptávku nebo kapacitu"
+          accessibilityHint="Otevře výběr mezi poptávkou přepravy a nabídkou volné kapacity"
+        >
+          <Text style={styles.transportCreateActionPlus}>+</Text>
+          <Text style={styles.transportCreateActionText}>Vytvořit poptávku nebo kapacitu</Text>
+        </TouchableOpacity>
+      </View>
+
       <BottomNav />
     </SafeAreaView>
   );
