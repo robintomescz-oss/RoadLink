@@ -298,9 +298,22 @@ where routine_schema = 'public' and routine_name = 'get_route_matching_candidate
 -- C) Je tu plán dotazu? Nahraďte <ROUTE_ID> skutečnou otevřenou trasou.
 explain (analyze, buffers)
 select * from public.get_route_matching_candidates_internal('<ROUTE_ID>'::uuid, '<DRIVER_ID>'::uuid, 5);
--- hledejte v Index Cond: carrier_routes_route_line_gist_idx
--- při Seq Scan je v datech málo tras — pro smoke běh OK, pro reálný objem ne.
+-- OČEKÁVANÝ plán: na carrier_routes `Index Scan using carrier_routes_pkey`.
+-- GiST v plánu RPC BUDE CHYBĚT — a to je správně: RPC filtruje
+-- `cr.id = p_route_id` (jedna trasa), takže prostorová podmínka se vyhodnocuje
+-- nad jediným řádkem. Hledejte spojení s tow_requests, ne prostorový index.
 ```
+
+Pak samostatná diagnostika použitelnosti indexu a výkonu předvýběru:
+
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/smoke/matching_spatial_index_proof.sql
+```
+
+Ta ověří zdraví indexu (`indisvalid`/`indisready`), reálné použití GiST při
+hledání napříč tabulkou, výkon předvýběru a obsahuje rozhodovací tabulku, kdy
+je `Seq Scan` správná volba. Vyhodí výjimku, jen když je index neplatný nebo
+nepřipravený.
 
 Pak spusťte celý read-only smoke test:
 

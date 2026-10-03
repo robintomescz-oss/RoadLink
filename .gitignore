@@ -45,3 +45,4 @@ scripts/adb-e2e-runner.mjs
 /supabase/.temp/
 !.roadlink/via-privacy-migrations-regression.js
 !.roadlink/deployment-runbook-regression.js
+!.roadlink/spatial-index-proof-regression.js

@@ -140,10 +140,14 @@ $$;
 -- ══ C) Plán dotazu ════════════════════════════════════════════════════════════
 
 -- C1) Izolovaná sonda na samotný prostorový index.
---     V plánu hledejte řádek `Index Cond` obsahující
---     `carrier_routes_route_line_gist_idx`. Je-li tam `Seq Scan`, je v datech
---     málo tras a planner si zvolil sekvenční sken — na reálném objemu musí
---     být GiST v plánu.
+--     Toto je JEDINÝ tvar dotazu, pro který GiST vzniká: hledáme trasy v okruhu
+--     napříč celou tabulkou. V plánu hledejte `Index Scan using
+--     carrier_routes_route_line_gist_idx` nebo `Bitmap Index Scan on` něj.
+--
+--     POZOR: `Seq Scan` zde NENÍ automaticky chyba. Při stovkách tras je
+--     sekvenční čtení rychlejší než hledání v indexu a plánovač se chová
+--     správně. Rozhodovací tabulka je v matching_spatial_index_proof.sql,
+--     sekce D.
 explain (analyze, buffers)
 select cr.id
 from public.carrier_routes as cr
@@ -155,8 +159,16 @@ where cr.route_line is not null
   );
 
 -- C2) Plán celého dotazu předvýběru (týž tvar jako RPC, bez limitu, aby byl
---     plán čitelný). Očekávejte `carrier_routes_route_line_gist_idx` v `Index Cond`
---     a hash/sort spojení s `tow_requests`.
+--     plán čitelný).
+--
+--     KLÍČOVÉ: RPC filtruje `cr.id = p_route_id`, tedy JEDNU trasu. Na
+--     `carrier_routes` proto očekávejte `Index Scan using carrier_routes_pkey`
+--     a žádný GiST. GiST zde nemá co hledat — prostorová podmínka se
+--     vyhodnocuje nad jediným řádkem.
+--
+--     Hledejte místo toho hash/sort spojení s `tow_requests`: skutečné úzké
+--     místo tohoto dotazu jsou poptávky, ne trasy. Jejich objem kontroluje
+--     sekce C v matching_spatial_index_proof.sql.
 explain (analyze, buffers)
 with test_route as (
   select cr.id, cr.driver_id, cr.max_deviation_km

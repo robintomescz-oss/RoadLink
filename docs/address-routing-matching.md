@@ -267,9 +267,16 @@ Dva nástroje, oba read-only:
    BUFFERS)` — izolovanou sondu i celého dotazu předvýběru — a nakonec
    automaticky ověří smlouvu RPC: limit, monotónní pořadí od nejbližšího
    kandidáta a to, že kandidáti bez vypočtené vzdálenosti jsou až na konci.
-   V `EXPLAIN` hledejte `carrier_routes_route_line_gist_idx` v `Index Cond`; při
-   `Seq Scan` je v datech málo tras a je to v pořádku pro smoke běh, ale na
-   reálném objemu musí být GiST v plánu. Kontrola „RPC nesahá na `bbox_*`“ je
+   V `EXPLAIN` je důležité rozlišit dvě situace. Izolovaná sonda (hledání
+   tras v okruhu napříč tabulkou) má v plánu `Index Scan`/`Bitmap Index Scan`
+   přes `carrier_routes_route_line_gist_idx`; `Seq Scan` tam znamená, že je v
+   datech málo tras a plánovač volí správně. **Plán samotného RPC ale GiST
+   nikdy neobsahuje** — RPC filtruje `cr.id = p_route_id`, tedy jednu trasu, a
+   prostorová podmínka se vyhodnocuje nad jediným řádkem; očekávaný je tedy
+   `Index Scan using carrier_routes_pkey`. Úzké místo předvýběru je spojení
+   s `tow_requests`, ne `carrier_routes`.
+   Podrobná diagnostika je v `supabase/smoke/matching_spatial_index_proof.sql`.
+   Kontrola „RPC nesahá na `bbox_*`“ je
    historická — po úklidu (`20261005180000`) je triviálně splněná, ale nijak
    neublíží, protože i pak má před úklidem co odhalit.
 2. **Živý harness RPC** — `.roadlink/matching-spatial-integration.mjs`
