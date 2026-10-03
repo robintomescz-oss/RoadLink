@@ -147,4 +147,19 @@ try {
   assert.fail(detail);
 }
 
+// ── Oprávnění: vlastník ≠ nebezpečná role ───────────────────────────────────
+// `postgres` je vlastníkem funkce, takže EXECUTE má vždy a jeho přítomnost je
+// správná. Nepřítomnost `anon` a `authenticated` je to, co chrání soukromí.
+// Zadání nesmí zaměnit tyto dvě věci — jinak by operátor na správném výstupu
+// viděl "něco je špatně" a zastavil, nebo naopak přehlédl skutečný problém.
+for (const { name, content } of stepFiles) {
+  if (!/routine_privileges/.test(content)) continue;
+  assert(/'postgres'|vlastník/i.test(content), `${name} explains that postgres is the function owner`);
+  assert(/NEJSOU|NE/.test(content) || /anon/.test(content), `${name} names the roles that must be absent`);
+  assert(!/očekáváno je JEDEN řádek se service_role/i.test(content), `${name} does not claim only one row is expected`);
+}
+
+assert(/'postgres' \+ 'service_role' = v pořádku|'postgres' \+ 'service_role'/.test(preflight), "the preflight says postgres plus service_role is correct");
+assert(/anon nebo authenticated/.test(preflight), "the preflight says anon or authenticated means stop");
+
 console.log("ALL SQL EDITOR BUNDLE REGRESSION CHECKS PASSED");

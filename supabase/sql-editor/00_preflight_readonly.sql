@@ -64,5 +64,7 @@ order by grantee;
 --      0            → čistý start, začínáte krokem 1.
 --      1–7 a B) je prázdné → částečně aplikované. NEZACÍNAJTE od kroku 1;
 --                       napište mi výstup a rozhodneme, odkud pokračovat.
---   D) jen service_role = v pořádku.
---      Když tam bude anon nebo authenticated, ZASTAVTE a napište mi to.
+--   D) 'postgres' + 'service_role' = v pořádku. 'postgres' je vlastník
+--      funkce, takže EXECUTE má vždy.
+--      Když tam bude anon nebo authenticated, ZASTAVTE a napište mi to —
+--      to by znamenalo, že klienti mohou volat RPC a dostávat soukromá data.

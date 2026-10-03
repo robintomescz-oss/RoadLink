@@ -76,16 +76,22 @@ begin
 end;
 $$;
 
--- B) Oprávnění: EXECUTE smí jen service_role. Pokud vidíte anon nebo
---    authenticated, migrace se neaplikovala celá — STOP.
+-- B) Oprávnění. Řádek 'postgres' je vlastník funkce, EXECUTE má vždy a je
+--    v pořádku. Rozhodující je, že NEJSOU 'anon' ani 'authenticated':
+--    ti by si mohli RPC volat a dostávat soukromá data. Pokud tam jsou,
+--    migrace se neaplikovala celá — STOP a napište mi to.
 select grantee, privilege_type
 from information_schema.routine_privileges
 where routine_schema = 'public'
   and routine_name = 'get_route_matching_candidates_internal'
 order by grantee;
 
--- C) Vyhodnoťte B): očekáváno je JEDEN řádek se service_role.
---    Pokud jsou tam i řádky s jiným grantee, migraci vracetejte.
+-- C) Vyhodnoťte B): očekáváno jsou dva řádky.
+--    'postgres' je VLASTNÍK funkce a EXECUTE má vždy — to je správné.
+--    Důležité je, že NEJSOU přítomné
+--    'anon' ani 'authenticated'. Pokud se některý z nich objeví, ZASTAVTE
+--    a napište mi to: znamenalo by to, že klienti mohou volat RPC
+--    a dostávají soukromá data.
 `,
   },
   {
@@ -123,7 +129,10 @@ where conrelid = 'public.carrier_routes'::regclass
 order by conname;
 -- očekáváno: 3 řádky
 
--- D) Oprávnění nadále jen service_role.
+-- D) Oprávnění. 'postgres' je vlastník funkce, takže EXECUTE má vždy.
+--    Očekáváno jsou dva řádky: 'postgres' a 'service_role'.
+--    'anon' ani 'authenticated' tam NESMÍ být — jinak by klienti mohli RPC
+--    volat a dostávat soukromá data.
 select grantee from information_schema.routine_privileges
 where routine_schema = 'public'
   and routine_name = 'get_route_matching_candidates_internal'
@@ -162,7 +171,10 @@ from pg_proc
 where oid = to_regprocedure('public.roadlink_haversine_meters(double precision,double precision,double precision,double precision)');
 -- očekáváno: roadlink_haversine_meters | i
 
--- D) Oprávnění nadále jen service_role.
+-- D) Oprávnění. 'postgres' je vlastník funkce, takže EXECUTE má vždy.
+--    Očekáváno jsou dva řádky: 'postgres' a 'service_role'.
+--    'anon' ani 'authenticated' tam NESMÍ být — jinak by klienti mohli RPC
+--    volat a dostávat soukromá data.
 select grantee from information_schema.routine_privileges
 where routine_schema = 'public'
   and routine_name = 'get_route_matching_candidates_internal'
@@ -281,11 +293,12 @@ end;
 $$;
 
 -- B) Oprávnění se nezměnila (create or replace negrantuje nikomu nové).
+--    'postgres' je vlastník funkce a EXECUTE má vždy; očekáváno jsou dva řádky.
+--    'anon' ani 'authenticated' tam NESMÍ být.
 select grantee from information_schema.routine_privileges
 where routine_schema = 'public'
   and routine_name = 'get_route_matching_candidates_internal'
 order by grantee;
--- očekáváno: service_role
 
 -- C) Plán dotazu. RPC filtruje cr.id = p_route_id, tedy JEDNU trasu, proto
 --    na carrier_routes očekáváme Index Scan po primárním klíči a ŽÁDNÝ GiST.
@@ -424,8 +437,10 @@ order by grantee;
 --      0            → čistý start, začínáte krokem 1.
 --      1–7 a B) je prázdné → částečně aplikované. NEZACÍNAJTE od kroku 1;
 --                       napište mi výstup a rozhodneme, odkud pokračovat.
---   D) jen service_role = v pořádku.
---      Když tam bude anon nebo authenticated, ZASTAVTE a napište mi to.
+--   D) 'postgres' + 'service_role' = v pořádku. 'postgres' je vlastník
+--      funkce, takže EXECUTE má vždy.
+--      Když tam bude anon nebo authenticated, ZASTAVTE a napište mi to —
+--      to by znamenalo, že klienti mohou volat RPC a dostávat soukromá data.
 `;
 
 const bundleIndex = `-- ══════════════════════════════════════════════════════════════════════════════

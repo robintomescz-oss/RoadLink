@@ -229,11 +229,12 @@ end;
 $$;
 
 -- B) Oprávnění se nezměnila (create or replace negrantuje nikomu nové).
+--    'postgres' je vlastník funkce a EXECUTE má vždy; očekáváno jsou dva řádky.
+--    'anon' ani 'authenticated' tam NESMÍ být.
 select grantee from information_schema.routine_privileges
 where routine_schema = 'public'
   and routine_name = 'get_route_matching_candidates_internal'
 order by grantee;
--- očekáváno: service_role
 
 -- C) Plán dotazu. RPC filtruje cr.id = p_route_id, tedy JEDNU trasu, proto
 --    na carrier_routes očekáváme Index Scan po primárním klíči a ŽÁDNÝ GiST.

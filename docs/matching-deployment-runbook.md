@@ -69,8 +69,10 @@ select grantee, privilege_type
 from information_schema.routine_privileges
 where routine_schema = 'public'
   and routine_name = 'get_route_matching_candidates_internal';
--- očekáváno: řádek jen pro service_role (postgres vlastníka nepočítejte).
---   Pokud vidíte anon nebo authenticated → STOP, migrace se neaplikovala celá.
+-- očekáváno: dva řádky — `postgres` (vlastník funkce, EXECUTE má vždy)
+--   a `service_role`.
+--   Pokud vidíte `anon` nebo `authenticated` → STOP. Znamenalo by to, že
+--   klienti mohou volat RPC a dostávají soukromá data.
 
 -- C) Limit je v tomto kroku ještě 5.
 select least(greatest(coalesce(5,5),1),5) as limit_ok;
@@ -293,7 +295,7 @@ select pg_get_functiondef(to_regprocedure('public.get_route_matching_candidates_
 -- B) Oprávnění se nezměnila (create or replace negrantuje nikomu nové).
 select grantee from information_schema.routine_privileges
 where routine_schema = 'public' and routine_name = 'get_route_matching_candidates_internal';
--- očekáváno: service_role
+-- očekáváno: postgres (vlastník) + service_role; anon/authenticated NE
 
 -- C) Je tu plán dotazu? Nahraďte <ROUTE_ID> skutečnou otevřenou trasou.
 explain (analyze, buffers)
@@ -381,7 +383,7 @@ where from_lat is not null and via_latitudes is not null
 -- D) RPC je beze změny a oprávnění jsou stejná.
 select grantee from information_schema.routine_privileges
 where routine_schema = 'public' and routine_name = 'get_route_matching_candidates_internal';
--- očekáváno: service_role
+-- očekáváno: postgres (vlastník) + service_role; anon/authenticated NE
 ```
 
 Pak **znovu celý smoke test** — musí doběhnout bez výjimky, i když je

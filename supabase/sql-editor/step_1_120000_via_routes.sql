@@ -155,13 +155,19 @@ begin
 end;
 $$;
 
--- B) Oprávnění: EXECUTE smí jen service_role. Pokud vidíte anon nebo
---    authenticated, migrace se neaplikovala celá — STOP.
+-- B) Oprávnění. Řádek 'postgres' je vlastník funkce, EXECUTE má vždy a je
+--    v pořádku. Rozhodující je, že NEJSOU 'anon' ani 'authenticated':
+--    ti by si mohli RPC volat a dostávat soukromá data. Pokud tam jsou,
+--    migrace se neaplikovala celá — STOP a napište mi to.
 select grantee, privilege_type
 from information_schema.routine_privileges
 where routine_schema = 'public'
   and routine_name = 'get_route_matching_candidates_internal'
 order by grantee;
 
--- C) Vyhodnoťte B): očekáváno je JEDEN řádek se service_role.
---    Pokud jsou tam i řádky s jiným grantee, migraci vracetejte.
+-- C) Vyhodnoťte B): očekáváno jsou dva řádky.
+--    'postgres' je VLASTNÍK funkce a EXECUTE má vždy — to je správné.
+--    Důležité je, že NEJSOU přítomné
+--    'anon' ani 'authenticated'. Pokud se některý z nich objeví, ZASTAVTE
+--    a napište mi to: znamenalo by to, že klienti mohou volat RPC
+--    a dostávají soukromá data.

@@ -406,7 +406,10 @@ from pg_proc
 where oid = to_regprocedure('public.roadlink_haversine_meters(double precision,double precision,double precision,double precision)');
 -- očekáváno: roadlink_haversine_meters | i
 
--- D) Oprávnění nadále jen service_role.
+-- D) Oprávnění. 'postgres' je vlastník funkce, takže EXECUTE má vždy.
+--    Očekáváno jsou dva řádky: 'postgres' a 'service_role'.
+--    'anon' ani 'authenticated' tam NESMÍ být — jinak by klienti mohli RPC
+--    volat a dostávat soukromá data.
 select grantee from information_schema.routine_privileges
 where routine_schema = 'public'
   and routine_name = 'get_route_matching_candidates_internal'
