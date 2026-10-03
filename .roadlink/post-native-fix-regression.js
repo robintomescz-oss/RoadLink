@@ -63,7 +63,11 @@ assert(profileSource.includes('setTransportTab("mine")') && profileSource.includ
 assert(profileSource.split('openMyTransport').length >= 3, 'both Moje actions share one transport/mine handler');
 
 const bottomNavSource = read('components/AppBottomNav.tsx');
-assert(bottomNavSource.includes('setTransportTab("mine")') && bottomNavSource.includes('navigateLegacy("transport")'), 'BottomNav Moje opens transport/mine');
+// Zjednodušení navigace (2026-10-03): `Moje` se ze spodní lišty odstranilo.
+// Do tabu Moje se dostává z profilu (openMyTransport výše) a z taby uvnitř
+// obrazovky Trh, kde login guard řeší odhlášeného uživatele.
+assert(!/key === "mine"/.test(bottomNavSource), 'BottomNav no longer routes a Moje key');
+assert(bottomNavSource.includes('navigateLegacy("home")'), 'BottomNav still routes Přehled to home');
 
 const homeRouteSource = read('screens/Home/HomeRoute.tsx');
 assert(homeRouteSource.includes('setTransportTab("all")') && homeRouteSource.includes('navigateLegacy("transport")'), 'Global Home Trh přepravy opens transport/all');

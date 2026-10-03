@@ -24,7 +24,7 @@ export default function VehiclesRoute() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Header title="Moje vozidla" />
+      <Header title="Přepravní vozidla" />
       <View style={styles.formBackHeader}>
         <TouchableOpacity style={styles.formBackButton} onPress={goBack} accessibilityLabel="Zpět na profil">
           <Text style={styles.formBackText}>‹ Profil</Text>
