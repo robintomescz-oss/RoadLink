@@ -273,7 +273,7 @@ Dva nástroje, oba read-only:
    datech málo tras a plánovač volí správně. **Plán samotného RPC ale GiST
    nikdy neobsahuje** — RPC filtruje `cr.id = p_route_id`, tedy jednu trasu, a
    prostorová podmínka se vyhodnocuje nad jediným řádkem; očekávaný je tedy
-   `Index Scan using carrier_routes_pkey`. Úzké místo předvýběru je spojení
+   `Index Scan` po primárním klíči. Úzké místo předvýběru je spojení
    s `tow_requests`, ne `carrier_routes`.
    Podrobná diagnostika je v `supabase/smoke/matching_spatial_index_proof.sql`.
    Kontrola „RPC nesahá na `bbox_*`“ je

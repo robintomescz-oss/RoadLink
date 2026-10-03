@@ -162,7 +162,7 @@ where cr.route_line is not null
 --     plán čitelný).
 --
 --     KLÍČOVÉ: RPC filtruje `cr.id = p_route_id`, tedy JEDNU trasu. Na
---     `carrier_routes` proto očekávejte `Index Scan using carrier_routes_pkey`
+--     `carrier_routes` proto očekávejte `Index Scan` po primárním klíči
 --     a žádný GiST. GiST zde nemá co hledat — prostorová podmínka se
 --     vyhodnocuje nad jediným řádkem.
 --

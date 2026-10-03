@@ -274,9 +274,10 @@ reset enable_bitmapscan;
 --       → equally dobrý výsledek; bitmap scan je pro větší podíl vybraných
 --         řádků typický a je často rychlejší než Index Scan.
 --
---   Plán RPC, kde na carrier_routes je Index Scan po `carrier_routes_pkey`
+--   Plán RPC, kde na carrier_routes je `Index Scan` po primárním klíči
 --       → OČEKÁVANÉ. RPC filtruje `cr.id = p_route_id`, tedy jednu trasu.
---         GiST zde nemá co hledat.
+--         GiST zde nemá co hledat. Název indexu zde záměrně neuvádíme —
+--         tabulka vznikla mimo repozitář a jeho jméno nelze ověřit.
 --
 -- Kdy je GiST opravdu potřeba:
 --   - tabulka má desítky tisíc tras a výše,

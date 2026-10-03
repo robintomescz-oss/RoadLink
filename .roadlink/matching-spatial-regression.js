@@ -129,7 +129,8 @@ assert(/pg_get_functiondef/i.test(smoke) && /like '%bbox_%'/i.test(smoke), "the 
 assert(/explain \(analyze, buffers\)/i.test(smoke), "the smoke test prints the query plan");
 assert(/carrier_routes_route_line_gist_idx/i.test(smoke), "the smoke test points at the GiST index inside the plan");
 assert(!/Index Cond[^\n]*carrier_routes_route_line_gist_idx/i.test(smoke), "the smoke test does not claim the GiST index appears in the RPC plan");
-assert(/cr\.id = p_route_id|pkey/i.test(smoke), "the smoke test explains that the RPC plans on one route and uses the primary key");
+assert(/cr\.id = p_route_id/i.test(smoke), "the smoke test explains that the RPC plans on one route");
+assert(/Index Scan/i.test(smoke), "the smoke test names the primary key scan as the expected plan");
 assert(/get_route_matching_candidates_internal/i.test(smoke), "the smoke test exercises the real RPC");
 assert(/route_line je null/i.test(smoke), "the smoke test asserts that routes with coordinates have a geometry");
 assert(/pořadí podle vzdálenosti od trasy je porušeno/i.test(smoke), "the smoke test asserts the ordering contract");

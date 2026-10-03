@@ -72,7 +72,8 @@ assert(!/hledejte `carrier_routes_route_line_gist_idx` v `Index Cond`/i.test(doc
 
 for (const [name, text] of [["smoke test", smoke], ["runbook", runbook], ["docs", docs]]) {
   assert(/cr\.id = p_route_id|jednu trasu|jedné trase|JEDNOU konkrétní trasou/i.test(text), `the ${name} explains that the RPC plans on a single route`);
-  assert(/carrier_routes_pkey/i.test(text), `the ${name} names the primary key scan as the expected plan`);
+  assert(/Index Scan/i.test(text), `the ${name} names the primary key scan as the expected plan`);
+  assert(!/carrier_routes_pkey/i.test(text), `the ${name} does not assert an unverifiable primary key index name`);
 }
 
 // Sada je odkázaná ze všech tří míst, kde se o plánu mluví.

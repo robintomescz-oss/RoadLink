@@ -298,7 +298,9 @@ where routine_schema = 'public' and routine_name = 'get_route_matching_candidate
 -- C) Je tu plán dotazu? Nahraďte <ROUTE_ID> skutečnou otevřenou trasou.
 explain (analyze, buffers)
 select * from public.get_route_matching_candidates_internal('<ROUTE_ID>'::uuid, '<DRIVER_ID>'::uuid, 5);
--- OČEKÁVANÝ plán: na carrier_routes `Index Scan using carrier_routes_pkey`.
+-- OČEKÁVANÝ plán: na carrier_routes `Index Scan` (primární klíč). Konkrétní
+-- název indexu zde záměrně neuvádíme — tabulka vznikla mimo repozitář a jeho
+-- jméno tu nelze ověřit. Důležité je, že jde o `Index Scan`, ne `Seq Scan`.
 -- GiST v plánu RPC BUDE CHYBĚT — a to je správně: RPC filtruje
 -- `cr.id = p_route_id` (jedna trasa), takže prostorová podmínka se vyhodnocuje
 -- nad jediným řádkem. Hledejte spojení s tow_requests, ne prostorový index.
@@ -358,11 +360,15 @@ select to_regprocedure('public.roadlink_haversine_meters(double precision,double
 -- očekáváno: true
 
 -- B) Je zbyl přesně JEDEN trigger odvozující geometrii.
+--    Závorky jsou povinné: `and` má vyšší precedenci než `or`, takže bez nich
+--    by poslední větve nebyly omezené na carrier_routes.
 select tgname from pg_trigger
 where tgrelid = 'public.carrier_routes'::regclass
   and not tgisinternal
-  and tgname like '%geometry%' or tgname like '%line%' or tgname like '%bbox%';
--- očekáváno: jen carrier_routes_route_geometry_assign
+  and (tgname like '%geometry%' or tgname like '%line%' or tgname like '%bbox%')
+order by tgname;
+-- očekáváno: právě jeden řádek — carrier_routes_route_geometry_assign
+--   (carrier_routes_via_places_validate je trigger vstupní validace, ne geometrie)
 
 -- C) Geometrie se stále odvozuje a data se nezměnila.
 select count(*) as total,
@@ -427,6 +433,21 @@ rollbacu vrací jiný počet sloupců. V takovém případě je rollback dvoustu
 
 1. nejdřív vrátit i Edge Function na předchozí verzi,
 2. teprve pak rollbackovat migrace.
+
+## Pořadí migrací vs. nasazení Edge Function
+
+Ověřeno staticky oběma směry, takže **okno mezi migrací a deployem není
+nebezpečné v žádném pořadí**:
+
+- **Nová Edge Function proti starému RPC** — chybějící `route_via_place_ids`
+  a `route_via_latitudes` jsou volitelná, `normalizeCandidate` je přijme jako
+  `[]`/`null` a kandidát projde. Matching pracuje jako přímá trasa.
+- **Stará Edge Function proti novému RPC** — nový RPC žádný sloupec neodebral,
+  jen přidal. Stará funkce čte jen to, co dostává.
+
+Jediný krok, který pořadí vyžaduje, je **`20261005180000` cleanup**: před ním
+musí být ověřený provoz, protože je jednosměrný. Zbytek řetězce je
+idempotentní a lze zastavit a opakovat.
 
 ## Shrnutí zastávek
 
