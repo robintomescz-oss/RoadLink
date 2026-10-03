@@ -386,11 +386,20 @@ where table_schema = 'public' and table_name = 'carrier_routes'
 order by column_name;
 
 -- C) Objem dat (pro správnou interpretaci plánů později).
+--    POZOR: ptáme se na POCET sloupců misto na jejich hodnoty. Sloupec
+--    route_line ani via_* na čisté databázi ještě nemusí existovat a přímý
+--    dotaz na něj by skončil chybou „column does not exist“.
 select
   (select count(*) from public.carrier_routes) as routes_total,
-  (select count(*) from public.carrier_routes where route_line is not null) as routes_with_geometry,
   (select count(*) from public.tow_requests) as requests_total,
-  (select count(*) from public.tow_requests where status = 'open') as requests_open;
+  (select count(*) from public.tow_requests where status = 'open') as requests_open,
+  (select count(*) from information_schema.columns
+     where table_schema = 'public' and table_name = 'carrier_routes'
+       and column_name in (
+         'via_latitudes', 'via_longitudes',
+         'bbox_min_lat', 'bbox_max_lat', 'bbox_min_lng', 'bbox_max_lng',
+         'route_line'
+       )) as new_columns_present;
 
 -- D) Oprávnění interního RPC — musí být jen service_role.
 select grantee, privilege_type
@@ -411,6 +420,10 @@ order by grantee;
 --        has_via = true         → kroky 1 a 2 prošly
 --        has_proximity = true   → krok 3 prošel
 --   B) prázdné     → čistý start, od kroku 1.
+--   C) new_columns_present
+--      0            → čistý start, začínáte krokem 1.
+--      1–7 a B) je prázdné → částečně aplikované. NEZACÍNAJTE od kroku 1;
+--                       napište mi výstup a rozhodneme, odkud pokračovat.
 --   D) jen service_role = v pořádku.
 --      Když tam bude anon nebo authenticated, ZASTAVTE a napište mi to.
 `;

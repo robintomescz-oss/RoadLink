@@ -19,12 +19,6 @@ const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 const bundleDir = path.join(root, "supabase/sql-editor");
 const readBundle = (name) => fs.readFileSync(path.join(bundleDir, name), "utf8");
 
-// ── Balíček je synchronizovaný s migracemi ─────────────────────────────────
-const check = execFileSync(process.execPath, ["scripts/build-sql-editor-bundle.mjs", "--check"], {
-  cwd: root,
-  encoding: "utf8",
-});
-assert(/synchronizovaný/i.test(check), "the SQL Editor bundle matches the migrations (run the generator)");
 
 // ── Očekávané soubory, žádný jiný ──────────────────────────────────────────
 const expected = [
@@ -88,6 +82,34 @@ assert(
 assert(/is_spatial/.test(preflight) && /has_via/.test(preflight) && /has_proximity/.test(preflight), "the preflight says which steps are already applied");
 assert(/NEZACÍNAJTE ODKUD UŽ BYLO/.test(preflight), "the preflight warns not to restart from the beginning");
 
+// Preflight běží PŘED jakoukoli migrací, takže se nesmí dotazovat na sloupce,
+// které ještě nemusí existovat — dotaz by skončil „column does not exist“
+// a kontrola by selhala právě tehdy, když je nejvíc potřeba.
+// Sloupce se zjišťují přes information_schema, ne přímým čtením dat.
+// Sloupce, ktere na ciste databazi jeste nemusi existovat.
+const missingColumns = ["route_line", "via_latitudes", "via_longitudes", "bbox_min_lat", "bbox_max_lat", "bbox_min_lng", "bbox_max_lng"];
+
+// Komentare oddelime radek po radku, bez regularniho vyrazu.
+const codeLines = preflight.split("\n");
+const sqlLines = codeLines.filter((line) => line.trim().indexOf("--") !== 0);
+
+// Název sloupce v uvozovkách (v `in (...)`) je bezpečný — takhle se katalog
+// ptá na existenci sloupce, ne čte jeho hodnoty. Vadá je přímý přístup
+// k datům mimo information_schema.
+const QUOTE = String.fromCharCode(39);
+
+for (const column of missingColumns) {
+  const asQuotedName = QUOTE + column + QUOTE;
+  const offending = sqlLines.filter((line) => {
+    if (!line.toLowerCase().includes(column)) return false;
+    if (line.toLowerCase().includes("information_schema")) return false;
+    if (line.includes(asQuotedName)) return false;
+    return true;
+  });
+  assert.deepStrictEqual(offending, [], `the preflight never reads ${column} directly, so it works on a clean database`);
+}
+assert(/new_columns_present/.test(preflight), "the preflight reports how many new columns already exist");
+
 // ── Zastávky jsou zřetelné ─────────────────────────────────────────────────
 const step4 = readBundle("step_4_150000_enable_postgis.sql");
 assert(/ZASTÁVKA/.test(step4), "the PostGIS step is marked as a stopping point");
@@ -109,5 +131,20 @@ for (const { name, content } of stepFiles) {
 // ── Balíček nesmí být součástí běžného nasazování ───────────────────────────
 assert(!read("scripts/run-regressions.mjs").includes("build-sql-editor-bundle"), "the generator is not part of the regression runner");
 assert(read("scripts/run-regressions.mjs").includes("sql-editor-bundle-regression"), "the bundle regression is registered");
+
+// ── Balíček je synchronizovaný s migracemi ─────────────────────────────────
+// Až na konci: bezpečnostní kontroly výše musí běžet vždy. Kdyby tato kontrola
+// selhala dřív, překryla by chybu, kterou má odhalit.
+try {
+  const check = execFileSync(process.execPath, ["scripts/build-sql-editor-bundle.mjs", "--check"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  assert(/synchronizovaný/i.test(check), "the SQL Editor bundle matches the migrations (run the generator)");
+} catch (error) {
+  const detail = error.stdout || error.message || String(error);
+  console.error("Balíček není synchronizovaný s migracemi. Spusťte node scripts/build-sql-editor-bundle.mjs");
+  assert.fail(detail);
+}
 
 console.log("ALL SQL EDITOR BUNDLE REGRESSION CHECKS PASSED");
