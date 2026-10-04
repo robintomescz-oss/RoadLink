@@ -322,30 +322,43 @@ assert(
 );
 assert(/ST_NPoints\(route_line::extensions\.geometry\)|ST_NPoints\(cr\.route_line::extensions\.geometry\)/i.test(smoke) === false, "the smoke test does not call ST_NPoints on geography");
 
-// ── Trvalá kontrola triggerů před odloženým úklidem ───────────────────────
-// Kontrola triggerů dřív žila jen v gitignorovaném scratchi, takže se mohla
-// ztratit. Teď je trvalou součástí repa a runbook krok 8 na ni odkazuje. Když
-// zmizí nebo zesílí, musí to být vidět v `npm run check`, ne až v produkci.
-const triggerCheck = read("supabase/smoke/carrier_routes_triggers.sql");
-const triggerCheckBody = triggerCheck.replace(/--[^\n]*/g, "");
+// ── Trvalý stav prostorové vrstvy (před úklidem i po něm) ───────────────────
+// Jeden skript nese tři věci, které dřív žily roztroušeně: předúklidovou
+// kontrolu triggerů, předpoklady migrace 180000 a rollback. Musí fungovat
+// v obou fázích a být read-only, jinak by šel spustit jako mutace omylem.
+const stateCheck = read("supabase/smoke/matching_spatial_state.sql");
+const stateCheckBody = stateCheck.replace(/--[^\n]*/g, "");
 // Pro kontrolu read-only se navíc odstraní řetězcové literály: výstupní text
 // obsahuje „BEFORE INSERT OR UPDATE FOR EACH ROW“, což by jinak vypadalo jako
 // příkaz UPDATE.
-const triggerCheckCode = triggerCheckBody.replace(/'[^']*'/g, "");
-assert(!/\b(insert into|update |delete from|truncate|create table|drop)\b/i.test(triggerCheckCode), "the pre-cleanup trigger check is read-only");
-for (const name of ["carrier_routes_via_places_validate", "carrier_routes_bbox_assign", "carrier_routes_route_line_assign"]) {
-  assert(triggerCheck.includes(name), `the trigger check verifies ${name}`);
+const stateCheckCode = stateCheckBody.replace(/'[^']*'/g, "");
+assert(!/\b(insert into|update |delete from|truncate|create table|drop)\b/i.test(stateCheckCode), "the spatial state check is read-only");
+
+// Sám pozná fázi a v každé očekává jiné triggery.
+assert(/PŘED úklidem/.test(stateCheck) && /PO úklidu/.test(stateCheck), "the state check distinguishes the pre- and post-cleanup phases");
+for (const name of ["carrier_routes_via_places_validate", "carrier_routes_bbox_assign", "carrier_routes_route_line_assign", "carrier_routes_route_geometry_assign"]) {
+  assert(stateCheck.includes(name), `the state check knows the trigger ${name}`);
 }
-for (const fn of ["validate_carrier_route_via_places", "assign_carrier_route_bbox", "assign_carrier_route_line"]) {
-  assert(triggerCheck.includes(fn), `the trigger check verifies the function behind ${fn}`);
+for (const fn of ["validate_carrier_route_via_places", "assign_carrier_route_bbox", "assign_carrier_route_line", "assign_carrier_route_geometry"]) {
+  assert(stateCheck.includes(fn), `the state check knows the function ${fn}`);
 }
+
+// Předpoklady migrace 180000 musí být v kontrole doslova tytéž.
+assert(/bbox_/.test(stateCheck) && /roadlink_haversine_meters/.test(stateCheck), "the state check mirrors the cleanup migration's RPC preconditions");
+assert(/carrier_route_via_coordinates_valid/.test(stateCheck), "geometry completeness uses the same shared helper as the trigger and the cleanup");
+assert(/amname = 'gist'/.test(stateCheck) && /indisvalid/.test(stateCheck) && /indisready/.test(stateCheck), "the state check requires a valid, ready GiST index");
+
+// Rollback musí jmenovat obě migrace, ze kterých se stav skládá.
+assert(/20261005140000/.test(stateCheck) && /20261005160000/.test(stateCheck), "the rollback path names both migrations that must be replayed");
+assert(/assign_carrier_route_geometry/.test(stateCheck), "the rollback path names the new geometry function that has to be dropped by hand");
+
 // tgtype = 23 je BEFORE INSERT OR UPDATE FOR EACH ROW; 15 by byl INSERT + DELETE.
 // Skript to musí vysvětlit a nikdy neporovnávat s chybnou hodnotou.
-assert(/23/.test(triggerCheck), "the check explains the BEFORE INSERT OR UPDATE bit mask instead of comparing tgtype to 15");
-assert(/pg_get_triggerdef/.test(triggerCheck), "the check reads the trigger definition rather than a bit mask");
-assert(/tgenabled/.test(triggerCheck), "the check verifies the trigger is enabled");
-assert(!/tgtype\s*=\s*15\b/i.test(triggerCheckBody), "the check never compares tgtype to the wrong value 15");
-assert(/before insert or update/i.test(triggerCheckBody) && /for each row/i.test(triggerCheckBody), "the check requires BEFORE INSERT OR UPDATE FOR EACH ROW");
+assert(/23/.test(stateCheck), "the check explains the BEFORE INSERT OR UPDATE bit mask instead of comparing tgtype to 15");
+assert(/pg_get_triggerdef/.test(stateCheck), "the check reads the trigger definition rather than a bit mask");
+assert(/tgenabled/.test(stateCheck), "the check verifies the trigger is enabled");
+assert(!/tgtype\s*=\s*15\b/i.test(stateCheckBody), "the check never compares tgtype to the wrong value 15");
+assert(/before insert or update/i.test(stateCheckBody) && /for each row/i.test(stateCheckBody), "the check requires BEFORE INSERT OR UPDATE FOR EACH ROW");
 
 // ── Živý harness: statické bezpečnostní brány + čistá logika ───────────────
 const harness = read(".roadlink/matching-spatial-integration.mjs");

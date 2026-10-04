@@ -439,25 +439,26 @@ ihned po kroku 6.
 > `supabase/migrations-deferred/README.md`. Přesun ho mimo tok je
 > vědomá volba: krok je nevratný a nepatří do automatického spouštění.
 
-### Před úklidem: ověření triggerů (read-only)
+### Ověření stavu prostorové vrstvy (read-only, před i po úklidu)
 
-Než úklid něco smaže, ověřte, že rollout došel až sem: před úklidem mají být
-přítomny **oba** triggery odvozující geometrii (`carrier_routes_bbox_assign`
-i `carrier_routes_route_line_assign`) a zapnutý i validační trigger
-`carrier_routes_via_places_validate`. Je to pojistka úplnosti — samotná migrace
-triggery maže přes `if exists`, takže chybějící trigger ji nezastaví, ale
-znamená, že některý předchozí krok nebyl aplikován. Ověřte to trvalým read-only
-skriptem:
+Jeden skript pokrývá obě fáze a sám pozná, ve které databáze je. Před úklidem je
+to brána kroku 8 — ověří PŘEDPOKLADY migrace 180000 (RPC už nesahá na `bbox_*`
+ani `roadlink_haversine_meters`, každá trasa s úplnými souřadnicemi má
+`route_line`, GiST index je platný) a že jsou přítomny **oba** triggery
+odvozující geometrii (`carrier_routes_bbox_assign` i
+`carrier_routes_route_line_assign`) plus validační
+`carrier_routes_via_places_validate`. Když předpoklady neplatí, skončí chybou —
+stejně jako samotná migrace — a **úklid nespouštějte**. Po úklidu ověří druhý
+tvar (jediný `carrier_routes_route_geometry_assign`) a vypíše správnou
+rollbackovou cestu.
 
 ```bash
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/smoke/carrier_routes_triggers.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/smoke/matching_spatial_state.sql
 ```
 
-Očekávaný výstup jsou tři řádky, `radek_ok = 'ANO'` u všech a
-`celkovy_verdikt = 'ANO — všechny tři triggery jsou přítomné a zapnuté'`.
-Když některý řádek nesouhlasí, **úklid nespouštějte** — chybí příslušný krok
-nebo je trigger vypnutý. Tato kontrola platí jen **před** úklidem; po něm už
-`carrier_routes_bbox_assign` neexistuje (viz kontrola B níže).
+Očekávaný výstup: blok B nevyhodí výjimku, blok C vypíše jen triggery své fáze
+s `radek_ok = 'ANO'` a `celkovy_verdikt = 'ANO — …'`, blok D vypíše rollback
+podle fáze. Skript spusťte i **po úklidu** (viz níže).
 
 ```bash
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations-deferred/20261005180000_matching_spatial_cleanup.sql
@@ -513,8 +514,10 @@ where routine_schema = 'public' and routine_name = 'get_route_matching_candidate
 -- očekáváno: postgres (vlastník) + service_role; anon/authenticated NE
 ```
 
-Pak **znovu celý smoke test** — musí doběhnout bez výjimky, i když je
-kontrola na `bbox_*` v něm historická (po úklidu triviálně platí).
+Pak **znovu spusťte `supabase/smoke/matching_spatial_state.sql`** — sám pozná, že
+je po úklidu, a ověří druhý tvar triggerů. A **znovu celý smoke test** — musí
+doběhnout bez výjimky, i když je kontrola na `bbox_*` v něm historická (po úklidu
+triviálně platí).
 
 **Rollback kroku 8:** migrace je **jednosměrná**, sloupce zmizí. Jediná cesta
 zpět je znovu aplikovat `20261005140000_matching_sql_geo_preselection.sql`.

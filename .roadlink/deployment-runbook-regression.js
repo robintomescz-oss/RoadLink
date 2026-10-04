@@ -144,12 +144,12 @@ assert(runbook.includes("ON_ERROR_STOP"), "migrations are applied with an error 
 // gitignorovaným scratchem. Když soubor zmizí nebo ho runbook přestane
 // jmenovat, `npm run check` to zachytí.
 assert(
-  fs.existsSync(path.join(root, "supabase/smoke/carrier_routes_triggers.sql")),
-  "the pre-cleanup trigger check lives in the repository, not in a gitignored scratch folder",
+  fs.existsSync(path.join(root, "supabase/smoke/matching_spatial_state.sql")),
+  "the spatial state check lives in the repository, not in a gitignored scratch folder",
 );
 assert(
-  runbook.includes("supabase/smoke/carrier_routes_triggers.sql"),
-  "step 8 references the durable pre-cleanup trigger check",
+  runbook.includes("supabase/smoke/matching_spatial_state.sql"),
+  "step 8 references the durable spatial state check, before and after the cleanup",
 );
 
 console.log("ALL DEPLOYMENT RUNBOOK REGRESSION CHECKS PASSED");
