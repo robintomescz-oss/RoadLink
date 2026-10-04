@@ -140,4 +140,16 @@ assert(runbook.includes("**ZASTAVKA**") && runbook.includes("**POSLEDNÍ**"), "t
 assert(runbook.includes("ověřeném produkčním chodu"), "the cleanup step waits for verified production traffic");
 assert(runbook.includes("ON_ERROR_STOP"), "migrations are applied with an error that stops the run");
 
+// Krok 8 (úklid) ověřuje před spuštěním triggery trvalým skriptem v repu, ne
+// gitignorovaným scratchem. Když soubor zmizí nebo ho runbook přestane
+// jmenovat, `npm run check` to zachytí.
+assert(
+  fs.existsSync(path.join(root, "supabase/smoke/carrier_routes_triggers.sql")),
+  "the pre-cleanup trigger check lives in the repository, not in a gitignored scratch folder",
+);
+assert(
+  runbook.includes("supabase/smoke/carrier_routes_triggers.sql"),
+  "step 8 references the durable pre-cleanup trigger check",
+);
+
 console.log("ALL DEPLOYMENT RUNBOOK REGRESSION CHECKS PASSED");

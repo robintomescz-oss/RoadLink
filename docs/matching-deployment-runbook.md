@@ -439,6 +439,23 @@ ihned po kroku 6.
 > `supabase/migrations-deferred/README.md`. Přesun ho mimo tok je
 > vědomá volba: krok je nevratný a nepatří do automatického spouštění.
 
+### Před úklidem: ověření triggerů (read-only)
+
+Úklid předpokládá, že před ním koexistují **oba** triggery odvozující geometrii
+(`carrier_routes_bbox_assign` i `carrier_routes_route_line_assign`) a že je
+zapnutý i validační trigger `carrier_routes_via_places_validate`. Než něco
+smaže, ověřte to trvalým kontrolním skriptem:
+
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/smoke/carrier_routes_triggers.sql
+```
+
+Očekávaný výstup jsou tři řádky, `radek_ok = 'ANO'` u všech a
+`celkovy_verdikt = 'ANO — všechny tři triggery jsou přítomné a zapnuté'`.
+Když některý řádek nesouhlasí, **úklid nespouštějte** — chybí příslušný krok
+nebo je trigger vypnutý. Tato kontrola platí jen **před** úklidem; po něm už
+`carrier_routes_bbox_assign` neexistuje (viz kontrola B níže).
+
 ```bash
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations-deferred/20261005180000_matching_spatial_cleanup.sql
 ```

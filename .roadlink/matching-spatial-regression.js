@@ -322,6 +322,31 @@ assert(
 );
 assert(/ST_NPoints\(route_line::extensions\.geometry\)|ST_NPoints\(cr\.route_line::extensions\.geometry\)/i.test(smoke) === false, "the smoke test does not call ST_NPoints on geography");
 
+// ── Trvalá kontrola triggerů před odloženým úklidem ───────────────────────
+// Kontrola triggerů dřív žila jen v gitignorovaném scratchi, takže se mohla
+// ztratit. Teď je trvalou součástí repa a runbook krok 8 na ni odkazuje. Když
+// zmizí nebo zesílí, musí to být vidět v `npm run check`, ne až v produkci.
+const triggerCheck = read("supabase/smoke/carrier_routes_triggers.sql");
+const triggerCheckBody = triggerCheck.replace(/--[^\n]*/g, "");
+// Pro kontrolu read-only se navíc odstraní řetězcové literály: výstupní text
+// obsahuje „BEFORE INSERT OR UPDATE FOR EACH ROW“, což by jinak vypadalo jako
+// příkaz UPDATE.
+const triggerCheckCode = triggerCheckBody.replace(/'[^']*'/g, "");
+assert(!/\b(insert into|update |delete from|truncate|create table|drop)\b/i.test(triggerCheckCode), "the pre-cleanup trigger check is read-only");
+for (const name of ["carrier_routes_via_places_validate", "carrier_routes_bbox_assign", "carrier_routes_route_line_assign"]) {
+  assert(triggerCheck.includes(name), `the trigger check verifies ${name}`);
+}
+for (const fn of ["validate_carrier_route_via_places", "assign_carrier_route_bbox", "assign_carrier_route_line"]) {
+  assert(triggerCheck.includes(fn), `the trigger check verifies the function behind ${fn}`);
+}
+// tgtype = 23 je BEFORE INSERT OR UPDATE FOR EACH ROW; 15 by byl INSERT + DELETE.
+// Skript to musí vysvětlit a nikdy neporovnávat s chybnou hodnotou.
+assert(/23/.test(triggerCheck), "the check explains the BEFORE INSERT OR UPDATE bit mask instead of comparing tgtype to 15");
+assert(/pg_get_triggerdef/.test(triggerCheck), "the check reads the trigger definition rather than a bit mask");
+assert(/tgenabled/.test(triggerCheck), "the check verifies the trigger is enabled");
+assert(!/tgtype\s*=\s*15\b/i.test(triggerCheckBody), "the check never compares tgtype to the wrong value 15");
+assert(/before insert or update/i.test(triggerCheckBody) && /for each row/i.test(triggerCheckBody), "the check requires BEFORE INSERT OR UPDATE FOR EACH ROW");
+
 // ── Živý harness: statické bezpečnostní brány + čistá logika ───────────────
 const harness = read(".roadlink/matching-spatial-integration.mjs");
 assert(/--confirm-live-spatial-smoke/.test(harness), "the live harness requires an explicit confirmation flag");
