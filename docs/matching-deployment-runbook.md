@@ -441,10 +441,13 @@ ihned po kroku 6.
 
 ### Před úklidem: ověření triggerů (read-only)
 
-Úklid předpokládá, že před ním koexistují **oba** triggery odvozující geometrii
-(`carrier_routes_bbox_assign` i `carrier_routes_route_line_assign`) a že je
-zapnutý i validační trigger `carrier_routes_via_places_validate`. Než něco
-smaže, ověřte to trvalým kontrolním skriptem:
+Než úklid něco smaže, ověřte, že rollout došel až sem: před úklidem mají být
+přítomny **oba** triggery odvozující geometrii (`carrier_routes_bbox_assign`
+i `carrier_routes_route_line_assign`) a zapnutý i validační trigger
+`carrier_routes_via_places_validate`. Je to pojistka úplnosti — samotná migrace
+triggery maže přes `if exists`, takže chybějící trigger ji nezastaví, ale
+znamená, že některý předchozí krok nebyl aplikován. Ověřte to trvalým read-only
+skriptem:
 
 ```bash
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/smoke/carrier_routes_triggers.sql
@@ -459,6 +462,12 @@ nebo je trigger vypnutý. Tato kontrola platí jen **před** úklidem; po něm u
 ```bash
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations-deferred/20261005180000_matching_spatial_cleanup.sql
 ```
+
+Migrace má vlastní blok předpokladů a **nic neuklidí, dokud neplatí**: ověří, že
+RPC už nesahá na `bbox_*` ani `roadlink_haversine_meters`, že každá trasa
+s úplnými souřadnicemi má `route_line` a že GiST index je platný a připravený.
+Když některý neplatí, skončí výjimkou **a celá transakce se odroluje**.
+Úspěch ohlásí `NOTICE: Úklid: předpoklady splněny…`; ten ve výpisu hledejte.
 
 ### Kontrola po kroku 7
 
@@ -484,11 +493,18 @@ order by tgname;
 --   (carrier_routes_via_places_validate je trigger vstupní validace, ne geometrie)
 
 -- C) Geometrie se stále odvozuje a data se nezměnila.
+--    Podmínka je STEJNÁ jako v triggeru i v úklidu (sdílený helper), takže
+--    kontroluje právě tu množinu tras, kterou má geometrie odvodit — včetně
+--    tras BEZ průjezdních bodů. Kdyby se sem dala jen „má via_latitudes“,
+--    rozbitý trigger na trase bez průjezdných bodů by proklouzl.
 select count(*) as total,
        count(*) filter (where route_line is null) as missing
-from public.carrier_routes
-where from_lat is not null and via_latitudes is not null
-  and cardinality(via_latitudes) = cardinality(via_place_ids);
+from public.carrier_routes as cr
+where cr.from_lat is not null and cr.from_lng is not null
+  and cr.to_lat is not null and cr.to_lng is not null
+  and public.carrier_route_via_coordinates_valid(
+    cr.via_place_ids, cr.via_latitudes, cr.via_longitudes
+  );
 -- očekáváno: missing = 0
 
 -- D) RPC je beze změny a oprávnění jsou stejná.
@@ -503,6 +519,13 @@ kontrola na `bbox_*` v něm historická (po úklidu triviálně platí).
 **Rollback kroku 8:** migrace je **jednosměrná**, sloupce zmizí. Jediná cesta
 zpět je znovu aplikovat `20261005140000_matching_sql_geo_preselection.sql`.
 Nejdřív ale zvažte, zda to vůbec potřebujete — data ani chování to nesměřuje.
+
+Pozor na přesnost: `140000` vrátí `bbox_*`, obdélníkový trigger
+a `roadlink_haversine_meters`, ale **neobnoví** původní topologii triggerů.
+Nový `carrier_routes_route_geometry_assign` po úklidu v databázi zůstává, takže
+`route_line` dál odvozuje on. Vrácení do přesně předúklidového stavu proto
+znamená `140000` **a** `160000` a navíc ruční zahození nového geometrického
+triggeru a funkce `assign_carrier_route_geometry()`.
 
 ---
 
