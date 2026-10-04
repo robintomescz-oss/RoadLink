@@ -192,10 +192,18 @@ assert(createRequestSource.includes('showDiscardDraftConfirmation(discardAndLeav
 assert(routeFormSource.includes('showDiscardDraftConfirmation(leave)'), 'route form still asks before discarding a dirty draft');
 assert(!createRequestSource.includes('useHardwareBackAction') && !routeFormSource.includes('useHardwareBackAction'), 'forms are not switched to the plain back action');
 
-// ── 5. Spodní navigace zůstává beze změny ───────────────────────────────────
+// ── 5. Spodní navigace: tři položky (zjednodušení 2026-10-03) ─────────────
+// Struktura je změněna záměrně: Přehled · Trh · Profil. `Moje` je tab
+// uvnitř Trhu, `Vytvořit` kontextová akce v Trhu, SOS zůstává na hlavní
+// obrazovce. Tato sekce hlídá novou strukturu; hardware Back a discard
+// guardy kontrolují výše.
 const bottomNavSource = read('components/BottomNav.tsx');
 assert(bottomNavSource.includes('{ key: "overview", label: "Přehled", icon: "dashboard" }'), 'bottom nav keeps Přehled with the dashboard icon');
-assert(bottomNavSource.includes('{ key: "mine", label: "Moje", icon: "mine" }'), 'bottom nav keeps Moje unchanged');
+assert(bottomNavSource.includes('{ key: "transport", label: "Trh", icon: "market" }'), 'bottom nav has Trh pointing at the market');
+assert(bottomNavSource.includes('{ key: "profile", label: "Profil", icon: "person" }'), 'bottom nav keeps Profil');
+assert(!bottomNavSource.includes('key: "sos"'), 'bottom nav no longer carries SOS');
+assert(!bottomNavSource.includes('key: "create"'), 'bottom nav no longer carries a centre create button');
+assert(!bottomNavSource.includes('key: "mine"'), 'bottom nav no longer carries Moje');
 assert(bottomNavSource.includes('{ key: "profile", label: "Profil", icon: "person" }'), 'bottom nav keeps Profil unchanged');
 assert(!bottomNavSource.includes('"Domů"') && !bottomNavSource.includes('"home"'), 'bottom nav was not renamed to Domů');
 

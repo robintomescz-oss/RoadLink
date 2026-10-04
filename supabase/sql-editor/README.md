@@ -1,0 +1,48 @@
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Balíček pro Supabase SQL Editor — matching s průjezdnými body
+-- ══════════════════════════════════════════════════════════════════════════════
+--
+-- Tyto soubory jsou GENEROVÁNY z supabase/migrations/ skriptem
+-- scripts/build-sql-editor-bundle.mjs. NEUPRAVUJTE JE RUČNĚ — upravte
+-- zdrojovou migraci a spusťte generator znovu.
+--
+-- Cílový projekt: RoadLink (vbmxnrhmdjmqrsdtgjkn)
+--
+-- JAK ČÍST VÝSTUP
+--   SQL Editor nezobrazuje RAISE NOTICE. Každý step proto končí SELECTem,
+--   který vrací jednu řádku se sloupcem 'zavre_kontrola':
+--     ANO → krok prokl, pokračujte dalším souborem.
+--     NE  → něco nesedí. DALŠÍ KROK NEPUŠTĚJTE, pošlete mi tabulku.
+--
+-- POŘADÍ — jeden soubor na dotaz, pokaždé čekejte na výsledek:
+--
+--   00_preflight_readonly.sql         kontrola předem, nic nemění
+--   step_1_120000_via_routes.sql
+--   step_2_130000_via_coordinates.sql
+--   step_3_140000_bbox_preselection.sql    NEJDŮLEŽITĚJŠÍ pro zbytek řetězce
+--   step_4_145000_bbox_without_via.sql     oprava: trasa bez via má také bbox
+--   step_5_150000_enable_postgis.sql        ZASTÁVKA pokud selže
+--   step_6_160000_route_line.sql
+--   step_7_170000_spatial_preselection.sql
+--
+-- Tabulka oprávnění se vrací v každém kroku a je pokaždé stejná. Stačí
+-- zkontrolovat sloupec 'jen_service_role_z_anon': postgres jako vlastník
+-- funkce je v pořádku, anon ani authenticated tam být nesmějí.
+--
+-- CO TU ZAMYŠLENĚ NENÍ
+--   krok 20261005180000 (spatial_cleanup). Je jednosměrný — odstraňuje
+--   bbox_* sloupce a nepřehrává se. Patří až po ověřeném provozu v produkci,
+--   nejdříve za pár dní reálných dotazů.
+--
+--   Edge Function google-route-matches se nasazuje až PO zeleném výsledku
+--   kroku 7.
+--
+-- KROK 4 JE OPRAVA KROKU 3
+--   Trigger bbox v kroku 3 považoval trasa bez průjezdných bodů za trasu bez
+--   geometrie. Krok 4 to opravuje a dopočítá obdélník i jim. Bez něj zůstává
+--   většina tras mimo obdélníkový index. Kroky 3 a 4 jsou na sobě závislé —
+--   krok 4 spusťte hned po kroku 3.
+--
+-- VYHRA
+--   Každý krok je v jedné transakci. Selhání = automatický rollback, databáze
+--   zůstane beze změny. Kroky jsou idempotentní.
