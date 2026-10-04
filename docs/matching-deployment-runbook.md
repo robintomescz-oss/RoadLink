@@ -433,8 +433,14 @@ přehrajt). To je jediná čistá cesta zpět, protože `170000` mění tělo fu
 geometrie na jediný zdroj pravdy. **Až po ověřeném produkčním chodu**, ne
 ihned po kroku 6.
 
+> **Tento soubor NENÍ v `supabase/migrations/`** — žije v
+> `supabase/migrations-deferred/`. Automatický migrační tok ho proto nikdy
+> nespustí a nemůže ho spustit omylem. Když bude připraven, přesuň ho zpět podle
+> `supabase/migrations-deferred/README.md`. Přesun ho mimo tok je
+> vědomá volba: krok je nevratný a nepatří do automatického spouštění.
+
 ```bash
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261005180000_matching_spatial_cleanup.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations-deferred/20261005180000_matching_spatial_cleanup.sql
 ```
 
 ### Kontrola po kroku 7
@@ -536,8 +542,9 @@ nebezpečné v žádném pořadí**:
   jen přidal. Stará funkce čte jen to, co dostává.
 
 Jediný krok, který pořadí vyžaduje, je **`20261005180000` cleanup**: před ním
-musí být ověřený provoz, protože je jednosměrný. Zbytek řetězce je
-idempotentní a lze zastavit a opakovat.
+musí být ověřený provoz, protože je jednosměrný. Proto žije mimo
+`supabase/migrations/` — viz `supabase/migrations-deferred/README.md`. Zbytek
+řetězce je idempotentní a lze zastavit a opakovat.
 
 ## Shrnutí zastávek
 

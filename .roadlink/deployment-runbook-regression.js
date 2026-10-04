@@ -26,10 +26,22 @@ const steps = [
 ];
 
 // ── Kompletnost a pořadí ───────────────────────────────────────────────────
+// Krok 180000 je jednosměrný a záměrně mimo `supabase/migrations/`, aby ho
+// `supabase db push` nemohl spustit před ověřeným provozem.
+const DEFERRED_STEPS = new Set(["20261005180000_matching_spatial_cleanup.sql"]);
 for (const step of steps) {
-  assert(fs.existsSync(path.join(root, "supabase/migrations", step.file)), `${step.file} exists`);
+  const dir = DEFERRED_STEPS.has(step.file) ? "supabase/migrations-deferred" : "supabase/migrations";
+  assert(fs.existsSync(path.join(root, dir, step.file)), `${step.file} exists in ${dir}`);
   assert(runbook.includes(step.file), `the runbook names ${step.file}`);
 }
+assert(
+  !fs.existsSync(path.join(root, "supabase/migrations", "20261005180000_matching_spatial_cleanup.sql")),
+  "the one-way cleanup is NOT in supabase/migrations, so db push cannot run it prematurely",
+);
+assert(
+  fs.existsSync(path.join(root, "supabase/migrations-deferred", "20261005180000_matching_spatial_cleanup.sql")),
+  "the cleanup is kept in supabase/migrations-deferred",
+);
 
 // Časová známka je `202610051` + 5 nebo 6 číslic (např. 120000 i 145000).
 const migrationFile = /202610051[2-8]\d{4,5}_[a-z_]+\.sql/g;
@@ -48,7 +60,7 @@ for (const step of steps) {
   assert(new RegExp(`^## Krok \\d+ .*${step.key}`, "m").test(runbook), `step ${step.key} has its own heading`);
 }
 
-const applyCommands = runbook.match(/-f supabase\/migrations\/202610051[2-8]\d{4,5}_[a-z_]+\.sql/g) || [];
+const applyCommands = runbook.match(/-f supabase\/migrations(?:-deferred)?\/202610051[2-8]\d{4,5}_[a-z_]+\.sql/g) || [];
 assert.strictEqual(applyCommands.length, steps.length, "every step shows how to apply exactly one migration file");
 
 const verificationBlocks = runbook.match(/### Kontrola po kroku \d/g) || [];

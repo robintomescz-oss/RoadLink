@@ -30,9 +30,22 @@ assert.deepStrictEqual(
     "20261005150000_enable_postgis.sql",
     "20261005160000_carrier_route_spatial_line.sql",
     "20261005170000_matching_spatial_preselection.sql",
-    "20261005180000_matching_spatial_cleanup.sql",
   ],
   "the via-matching migrations exist exactly once each and sort into the intended order",
+);
+
+// Úklid 180000 je jednosměrný a nesmí ho spustit `supabase db push`, proto leží
+// mimo `supabase/migrations/`. Jeho obsah se ale kontroluje dál stejně jako předtím
+// — odkládání nesmí znamenat méně bezpečnostních kontrol, jen jiný tok.
+const CLEANUP_MIGRATION = "20261005180000_matching_spatial_cleanup.sql";
+const deferredDir = "supabase/migrations-deferred";
+assert(
+  !fs.existsSync(path.join(migrationsDir, CLEANUP_MIGRATION)),
+  "the one-way cleanup is NOT in supabase/migrations, so db push cannot run it prematurely",
+);
+assert(
+  fs.existsSync(path.join(root, deferredDir, CLEANUP_MIGRATION)),
+  "the cleanup is kept in supabase/migrations-deferred",
 );
 
 // ── 1) Odpovědnost jednotlivých kroků (žádné duplicity, žádné rozpory) ──────
@@ -75,17 +88,21 @@ for (const name of viaMigrations) {
   assert(typeof roles[name] === "function", `${name} has a defined responsibility in the rollout`);
   roles[name](stripComments(read(path.join("supabase/migrations", name))));
 }
+roles[CLEANUP_MIGRATION](stripComments(read(path.join(deferredDir, CLEANUP_MIGRATION))));
 
 // Migrace se nesmí překrývat v jedné a téže věci: geometrii odvozuje jen jeden
 // trigger po uklízení, do té doby jsou v historii oba (bbox i route_line).
-const cleanup = stripComments(read("supabase/migrations/20261005180000_matching_spatial_cleanup.sql"));
+const cleanup = stripComments(read(path.join(deferredDir, CLEANUP_MIGRATION)));
 assert(!/create trigger carrier_routes_bbox_assign/i.test(cleanup), "the cleanup does not re-create the bbox trigger");
 assert(!/create trigger carrier_routes_route_line_assign/i.test(cleanup), "the cleanup does not re-create the superseded geometry trigger");
 assert(/create trigger carrier_routes_route_geometry_assign/i.test(cleanup), "the cleanup installs exactly one geometry trigger");
 
-// ── 2) Úklid je poslední krok, dopředný a idempotentní ─────────────────────
-const names = viaMigrations;
-assert.strictEqual(names[names.length - 1], "20261005180000_matching_spatial_cleanup.sql", "the cleanup is the last migration in the rollout");
+// ── 2) Úklid je dopředný, idempotentní a odložený mimo automatický tok ──────
+assert.strictEqual(
+  viaMigrations[viaMigrations.length - 1],
+  "20261005170000_matching_spatial_preselection.sql",
+  "the applied rollout ends at 170000; the cleanup is not part of it",
+);
 assert(/20261005170000/.test(cleanup) && /20261005160000/.test(cleanup), "the cleanup names the steps it depends on");
 
 assert(/^begin;/i.test(cleanup.trim()) && /commit;\s*$/i.test(cleanup.trim()), "the cleanup is a single explicit transaction");
@@ -100,11 +117,14 @@ assert(!/insert into/i.test(cleanup), "the cleanup inserts no data");
 assert(!/\bgrant\b/i.test(cleanup), "the cleanup grants nothing");
 assert(!/alter table[\s\S]*?row level security/i.test(cleanup), "the cleanup does not touch RLS");
 assert(!/get_public_marketplace_routes/i.test(cleanup), "the cleanup does not touch the public feed");
-assert(/návratová cesta|rollback/i.test(read("supabase/migrations/20261005180000_matching_spatial_cleanup.sql")), "the rollback path is documented in the file itself");
+assert(/návratová cesta|rollback/i.test(read(path.join(deferredDir, CLEANUP_MIGRATION))), "the rollback path is documented in the file itself");
 
 // ── 3) Žádná nová migrace nesmí oslabit oprávnění ──────────────────────────
-for (const name of viaMigrations) {
-  const body = stripComments(read(path.join("supabase/migrations", name)));
+for (const { name, file } of [
+  ...viaMigrations.map((entry) => ({ name: entry, file: path.join("supabase/migrations", entry) })),
+  { name: CLEANUP_MIGRATION, file: path.join(deferredDir, CLEANUP_MIGRATION) },
+]) {
+  const body = stripComments(read(file));
 
   assert(!/grant\s+execute[\s\S]*?\bto\s+(anon|authenticated)\b/i.test(body), `${name} never grants the matching RPC to anon or authenticated`);
   assert(!/grant\s+select[\s\S]*?\bon\s+public\.carrier_routes\b/i.test(body), `${name} never grants direct select on carrier_routes`);

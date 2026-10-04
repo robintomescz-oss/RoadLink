@@ -10,7 +10,7 @@ const geometryMigration = read("supabase/migrations/20261005160000_carrier_route
 const rpcMigration = read("supabase/migrations/20261005170000_matching_spatial_preselection.sql");
 const bboxMigration = read("supabase/migrations/20261005140000_matching_sql_geo_preselection.sql");
 const bboxFixMigration = read("supabase/migrations/20261005145000_matching_bbox_without_via.sql");
-const cleanupMigration = read("supabase/migrations/20261005180000_matching_spatial_cleanup.sql");
+const cleanupMigration = read("supabase/migrations-deferred/20261005180000_matching_spatial_cleanup.sql");
 const cleanupBody = cleanupMigration.replace(/--[^\n]*/g, "");
 
 // Kontroly nad SQL běží na kódu BEZ KOMENTÁŘŮ. Migrace tu chybu výslovně
@@ -256,19 +256,34 @@ assert((cleanupBody.match(/alter table public\.carrier_routes\s+drop column if e
 assert(/^begin;/i.test(cleanupBody.trim()) && /commit;\s*$/i.test(cleanupBody.trim()), "the cleanup is a single explicit transaction");
 assert(/návratová cesta|rollback/i.test(cleanupMigration), "the one-way nature and the rollback path are documented");
 
-// Pořadí souborů musí odpovídat pořadí nasazení.
+// Pořadí souborů musí odpovídat pořadí nasazení. Úklid 180000 je záměrně
+// ODKLÁDANÝ — leží mimo `supabase/migrations/`, aby ho `supabase db push`
+// nemohl spustit dřív, než uplyne doba reálného provozu.
 const names = [
   "20261005145000_matching_bbox_without_via.sql",
   "20261005150000_enable_postgis.sql",
   "20261005160000_carrier_route_spatial_line.sql",
   "20261005170000_matching_spatial_preselection.sql",
-  "20261005180000_matching_spatial_cleanup.sql",
 ];
 const sorted = [...names].sort();
 assert.deepStrictEqual(names, sorted, "migration file names sort into the intended rollout order");
 for (const name of names) {
   assert(fs.existsSync(path.join(root, "supabase/migrations", name)), `${name} exists`);
 }
+
+const CLEANUP_MIGRATION = "20261005180000_matching_spatial_cleanup.sql";
+assert(
+  !fs.existsSync(path.join(root, "supabase/migrations", CLEANUP_MIGRATION)),
+  "the one-way cleanup is NOT in supabase/migrations, so db push cannot run it prematurely",
+);
+assert(
+  fs.existsSync(path.join(root, "supabase/migrations-deferred", CLEANUP_MIGRATION)),
+  "the cleanup is kept in supabase/migrations-deferred",
+);
+assert(
+  /supabase\/migrations-deferred/.test(read("supabase/migrations-deferred/README.md")),
+  "the deferred folder explains why the cleanup must not run automatically",
+);
 
 // Souřadnice ani geometrie nesmějí do veřejného trhu.
 const publicFeed = read("supabase/migrations/20261003090000_remove_via_places_from_public_feed.sql");
