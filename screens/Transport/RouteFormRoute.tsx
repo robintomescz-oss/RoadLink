@@ -3,7 +3,7 @@ import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from "reac
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { supabase } from "../../lib/supabase";
 import { canonicalVehicleType } from "../../lib/labels";
-import { buildRouteMetricsPayload, canAddViaPlace, capacitySnapshot, moveViaPlace, normalizeViaPlaces, routeMetricsSubmitBlockReason, MAX_VIA_PLACES, type CapacityErrorKey, validateCapacityForm } from "../../lib/createFormLogic";
+import { buildRouteMetricsPayload, canAddViaPlace, capacitySnapshot, moveViaPlace, normalizeViaPlaces, parseOptionalWeightKg, routeMetricsSubmitBlockReason, MAX_VIA_PLACES, type CapacityErrorKey, validateCapacityForm } from "../../lib/createFormLogic";
 import { FormBackHeader, FormSection, FieldError, ReviewRow } from "../../components/form/FormParts";
 import { RouteMetricsPreviewCard } from "../../components/form/RouteMetricsPreviewCard";
 import { VerifiedLocationInput } from "../../components/form/VerifiedLocationInput";
@@ -29,6 +29,7 @@ export default function RouteFormRoute() {
   const [routeDepartureDate, setRouteDepartureDate] = useState<Date | null>(null);
   const [routeDepartureTime, setRouteDepartureTime] = useState<Date | null>(null);
   const [routeSpaces, setRouteSpaces] = useState("1");
+  const [routeAvailableWeightKg, setRouteAvailableWeightKg] = useState("");
   const [viaPlaces, setViaPlaces] = useState<VerifiedLocation[]>([]);
   const [routeVehicleTypes, setRouteVehicleTypes] = useState("Osobní automobil");
   const [routePrice, setRoutePrice] = useState("");
@@ -51,9 +52,10 @@ export default function RouteFormRoute() {
     viaPlaceIds: viaPlaces.map((place) => place.placeId),
     preview: routePreview,
   });
+  const availableWeight = parseOptionalWeightKg(routeAvailableWeightKg);
 
   function currentRouteSnapshot() {
-    return capacitySnapshot({ routeFrom, routeTo, fromPublicLabel: routeFromPublicLabel, toPublicLabel: routeToPublicLabel, routeDepartureDate, routeDepartureTime, routeSpaces, viaPlaces, routeVehicleTypes, routePrice, routePriceMode, routeDescription });
+    return capacitySnapshot({ routeFrom, routeTo, fromPublicLabel: routeFromPublicLabel, toPublicLabel: routeToPublicLabel, routeDepartureDate, routeDepartureTime, routeSpaces, routeAvailableWeightKg, viaPlaces, routeVehicleTypes, routePrice, routePriceMode, routeDescription });
   }
 
   useEffect(() => {
@@ -83,7 +85,7 @@ export default function RouteFormRoute() {
 
   async function createRoute() {
     if (!userId) return;
-    const validation = validateCapacityForm({ routeFrom, routeTo, fromPublicLabel: routeFromPublicLabel, toPublicLabel: routeToPublicLabel, routeDepartureDate, routeDepartureTime, routeSpaces, routeVehicleTypes, routePriceMode, routePrice });
+    const validation = validateCapacityForm({ routeFrom, routeTo, fromPublicLabel: routeFromPublicLabel, toPublicLabel: routeToPublicLabel, routeDepartureDate, routeDepartureTime, routeSpaces, routeAvailableWeightKg, routeVehicleTypes, routePriceMode, routePrice });
     setRouteErrors(validation.errors);
     if (!fromLocation || !toLocation) {
       setRouteErrors((current) => ({ ...current, route: "Vyberte obě ověřená místa z nabídky." }));
@@ -161,6 +163,7 @@ export default function RouteFormRoute() {
         to_lng: toCoordinates?.longitude ?? null,
         departure_at: departureAt.toISOString(),
         available_spaces: availableSpaces,
+        available_weight_kg: availableWeight,
         via_place_ids: viaPlaceIds.length > 0 ? viaPlaceIds.map((place) => place.placeId) : null,
         via_public_labels: viaPlaceIds.length > 0 ? viaPlaceIds.map((place) => place.publicLabel) : null,
         via_latitudes: viaHasCoordinates ? viaPlaceIds.map((place) => place.latitude) : null,
@@ -275,6 +278,10 @@ export default function RouteFormRoute() {
           <Text style={styles.label}>Počet volných míst</Text>
           <TextInput style={styles.compactInput} value={routeSpaces} onChangeText={(value) => { setRouteSpaces(value); setRouteErrors((current) => ({ ...current, capacity: undefined })); }} placeholder="Počet míst" keyboardType="numeric" />
           <FieldError message={routeErrors.capacity} />
+          <Text style={styles.label}>Volná nosnost · volitelné</Text>
+          <TextInput style={styles.compactInput} value={routeAvailableWeightKg} onChangeText={(value) => { setRouteAvailableWeightKg(value); setRouteErrors((current) => ({ ...current, availableWeight: undefined })); }} placeholder="Např. 1500" keyboardType="numeric" />
+          <Text style={styles.muted}>V kilogramech. Uveďte skutečnou zbývající nosnost pro tuto trasu.</Text>
+          <FieldError message={routeErrors.availableWeight} />
         </FormSection>
         <FormSection title="Přijímaná vozidla">
           <Text style={styles.label}>Typ vozidla</Text>
@@ -295,6 +302,7 @@ export default function RouteFormRoute() {
           <ReviewRow label="Trasa" value={`${routeFromPublicLabel.trim() || "Odkud neuvedeno"} → ${routeToPublicLabel.trim() || "Kam neuvedeno"}`} />
           <ReviewRow label="Odjezd" value={`${routeDepartureDate ? routeDepartureDate.toLocaleDateString("cs-CZ") : "Datum neuvedeno"}${routeDepartureTime ? ` · ${String(routeDepartureTime.getHours()).padStart(2, "0")}:${String(routeDepartureTime.getMinutes()).padStart(2, "0")}` : ""}`} />
           <ReviewRow label="Kapacita" value={`${routeSpaces || "0"} ${Number(routeSpaces) === 1 ? "místo" : Number(routeSpaces) >= 2 && Number(routeSpaces) <= 4 ? "místa" : "míst"}`} />
+          {availableWeight !== null ? <ReviewRow label="Volná nosnost" value={`${availableWeight.toLocaleString("cs-CZ")} kg`} /> : null}
           <ReviewRow label="Vozidla" value={routeVehicleTypes.trim() || "Neuvedeno"} />
           <ReviewRow label="Cena" value={routePriceMode === "negotiable" ? "Cena dohodou" : routePrice.trim() ? `${routePrice.trim()} Kč` : "Neuvedeno"} />
           <FieldError message={capacityRouteBlockReason ?? undefined} />

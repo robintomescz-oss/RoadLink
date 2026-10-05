@@ -7,6 +7,8 @@ Mobilní tržiště pro poptávky a nabídky přepravy vozidel. Aplikace je post
 - veřejný, sanitizovaný trh přepravy dostupný bez přihlášení;
 - přihlášení a registrace e-mailem i přes Google účet, oddělené soukromé detaily chráněné přes Supabase RLS (nastavení Google přihlášení: `docs/google-auth-setup.md`);
 - poptávky, nabídky dopravců, volné trasy a průběh přepravy;
+- hmotnost přepravovaného vozidla/nákladu a volná nosnost trasy jsou ve vývoji na samostatné větvi; do provozu se dostanou až po aplikaci příslušné databázové migrace;
+- vzájemné hodnocení zákazníka a přepravce je připravené pouze pro dokončené přepravy; stejně jako hmotnost zatím čeká na databázovou migraci a nasazení;
 - profil dopravce a vozový park;
 - responzivní domovská obrazovka a formuláře;
 - SOS „Emergency Wizard“ – průvodce pro poruchu nebo nehodu (tmavý režim, tísňová čísla dostupná na všech krocích, funguje bez registrace a offline; viz `docs/sos-emergency-wizard.md`);
@@ -49,3 +51,11 @@ Klientská aplikace smí obsahovat pouze Supabase publishable key. Service-role 
 ## Databáze
 
 Dopředné migrace jsou v `supabase/migrations`. Ruční destruktivní rollbacky jsou oddělené v `supabase/rollback` a nesmějí se spouštět automaticky.
+
+## GitHub popis repozitáře
+
+Krátký popis repozitáře má odpovídat aktuálně nasazenému produktu, ne rozpracovaným větvím. Doporučené znění:
+
+> RoadLink – mobilní tržiště pro poptávky a nabídky přepravy vozidel, postavené na Expo a Supabase.
+
+Neuvádějte do krátkého popisu matching tras, průjezdné body, hodnocení ani hmotnost, dokud nejsou nasazené a ověřené v cílovém prostředí.

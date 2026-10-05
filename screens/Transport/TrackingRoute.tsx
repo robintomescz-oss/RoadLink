@@ -29,6 +29,7 @@ import {
   DetailShell,
   DetailStatusHeader,
 } from "../../components/transport/DetailComponents";
+import { TransportReviewPanel } from "../../components/transport/TransportReviewPanel";
 
 function transportLifecycleMessage(status?: string) {
   switch (status) {
@@ -161,6 +162,7 @@ export default function TrackingRoute() {
         {activeJob.vehicleModel?.trim() ? <DetailInfoRow label="Model" value={activeJob.vehicleModel} /> : null}
         <DetailInfoRow label="Pojízdnost" value={vehicleMobilityLabel(activeJob.vehicleMobility)} />
         {activeJob.problem?.trim() ? <DetailInfoRow label="Popis" value={activeJob.problem} /> : null}
+        {activeJob.cargoWeightKg ? <DetailInfoRow label="Hmotnost vozidla / nákladu" value={`${activeJob.cargoWeightKg.toLocaleString("cs-CZ")} kg`} /> : null}
       </DetailSection>
       {selectedOffer ? (
         <DetailSection title="Vybraná nabídka">
@@ -175,6 +177,11 @@ export default function TrackingRoute() {
       ) : null}
       {canDriverUpdateTransport && activeJob.status === "in_progress" ? (
         <DetailPrimaryAction label="Označit jako doručené" loadingLabel="Ukládám…" loading={transportStatusLoading} onPress={() => controller.confirmTransportStatusUpdate("completed")} />
+      ) : null}
+      {activeJob.status === "completed" ? (
+        <DetailSection title="Hodnocení přepravy">
+          <TransportReviewPanel towRequestId={activeJob.id} />
+        </DetailSection>
       ) : null}
       <DetailSecondaryAction label="Zpět na přepravu" onPress={goBack} />
     </DetailShell>

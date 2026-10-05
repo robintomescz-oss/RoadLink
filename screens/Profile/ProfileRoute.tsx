@@ -7,6 +7,7 @@ import { styles } from "../../lib/appStyles";
 import { useAppContext } from "../../contexts/AppContext";
 import { navigateLegacy } from "../../navigation/navigationRef";
 import { useHardwareBackTo } from "../../hooks/useBackHandlers";
+import { useTransportRatingSummary } from "../../hooks/useTransportRatingSummary";
 
 /**
  * screen === "profile" z App.tsx.
@@ -45,6 +46,7 @@ export default function ProfileRoute() {
   // Osobní vozidla nejsou součástí přepravního profilu — stojí vedle něj.
   const { personalVehicles, personalVehiclesLoading, personalVehiclesError } = personalVehiclesState;
   const { signOutLoading, signOutUser } = authState;
+  const ratingSummary = useTransportRatingSummary(userId);
   const goBack = () => navigateLegacy("home");
 
   // Hardwarové Zpět: stejná cesta jako horní „← Přehled“ (jinak by Back ukončil aplikaci).
@@ -100,6 +102,18 @@ export default function ProfileRoute() {
             <Text style={styles.profileSectionHint}>
               Osobní vozidlo pomůže rychleji vyplnit SOS. Je volitelné a zůstává soukromé.
             </Text>
+
+            {ratingSummary ? (
+              <View style={styles.profileCard}>
+                <Text style={styles.profileCardHeading}>Hodnocení od uživatelů</Text>
+                <Text style={styles.profileSummaryValue}>
+                  {ratingSummary.reviewCount === 0 || ratingSummary.averageRating === null
+                    ? "Zatím bez hodnocení"
+                    : `${ratingSummary.averageRating.toLocaleString("cs-CZ", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} / 5 · ${ratingSummary.reviewCount} hodnocení`}
+                </Text>
+                <Text style={styles.profileCardHint}>Po dokončené přepravě se mohou vzájemně hodnotit zákazník i přepravce.</Text>
+              </View>
+            ) : null}
 
             {/* Osobní údaje */}
             {profileEditing ? (

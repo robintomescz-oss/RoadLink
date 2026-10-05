@@ -24,6 +24,7 @@ const regressionScripts = [
   ".roadlink/profile-vehicle-regression.js",
   ".roadlink/bottom-nav-regression.js",
   ".roadlink/personal-vehicles-regression.js",
+  ".roadlink/reviews-load-regression.js",
   ".roadlink/public-market-regression.js",
   ".roadlink/transport-confirmation-regression.js",
 ];

@@ -41,6 +41,8 @@ export type Job = {
   vehicleMobility?: VehicleMobility;
   vehicleModel?: string | null;
   canTrailer?: boolean | null;
+  /** Volitelný odhad hmotnosti přepravovaného vozidla/nákladu v kg. */
+  cargoWeightKg?: number | null;
   createdAt?: string;
 };
 
@@ -53,11 +55,24 @@ export type CarrierRoute = {
   viaLabels: string[];
   departureAt: string;
   availableSpaces: number;
+  /** Volitelná zbývající nosnost pro tuto konkrétní trasu v kg. */
+  availableWeightKg?: number | null;
   maxDeviationKm: number | null;
   vehicleTypes: string;
   price: number | null;
   description: string;
   status: string;
+};
+
+export type TransportRatingSummary = {
+  averageRating: number | null;
+  reviewCount: number;
+};
+
+export type TransportReview = {
+  rating: number;
+  comment: string | null;
+  createdAt: string;
 };
 
 export type TowOffer = {

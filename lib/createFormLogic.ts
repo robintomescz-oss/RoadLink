@@ -69,6 +69,7 @@ export type RequestValidationInput = {
   dateMode: "concrete" | "window";
   vehicle: string;
   loadingState: LoadingStateOption | null;
+  cargoWeightKg?: string;
 };
 
 export type CapacityValidationInput = {
@@ -82,6 +83,7 @@ export type CapacityValidationInput = {
   routeVehicleTypes: string;
   routePriceMode: "fixed" | "negotiable";
   routePrice: string;
+  routeAvailableWeightKg?: string;
 };
 
 export type ValidationResult<T extends string> = {
@@ -95,8 +97,23 @@ function result<T extends string>(errors: Partial<Record<T, string>>, order: T[]
   return { valid: firstInvalid === null, errors, firstInvalid };
 }
 
-export type RequestErrorKey = "route" | "publicPlace" | "date" | "vehicle" | "loading";
-export type CapacityErrorKey = "route" | "publicPlace" | "departure" | "capacity" | "vehicle" | "price";
+export type RequestErrorKey = "route" | "publicPlace" | "date" | "vehicle" | "loading" | "cargoWeight";
+export type CapacityErrorKey = "route" | "publicPlace" | "departure" | "capacity" | "vehicle" | "price" | "availableWeight";
+
+/** Hmotnost je dobrovolná, ale pokud ji uživatel zná, musí být realistická. */
+export function parseOptionalWeightKg(value: string | null | undefined): number | null {
+  const trimmed = typeof value === "string" ? value.replace(/\s/g, "") : "";
+  if (!trimmed || !/^\d+$/.test(trimmed)) return null;
+  const weight = Number(trimmed);
+  return Number.isSafeInteger(weight) && weight >= 1 && weight <= 50000 ? weight : null;
+}
+
+function optionalWeightError(value: string | null | undefined, label: string) {
+  const trimmed = typeof value === "string" ? value.replace(/\s/g, "") : "";
+  return trimmed && parseOptionalWeightKg(trimmed) === null
+    ? `${label} zadejte jako celé číslo od 1 do 50 000 kg.`
+    : null;
+}
 
 export function validateRequestForm(input: RequestValidationInput): ValidationResult<RequestErrorKey> {
   const errors: Partial<Record<RequestErrorKey, string>> = {};
@@ -129,7 +146,9 @@ export function validateRequestForm(input: RequestValidationInput): ValidationRe
 
   if (!input.vehicle.trim()) errors.vehicle = "Vyberte prosím typ vozidla.";
   if (!input.loadingState) errors.loading = "Vyberte prosím stav vozidla pro nakládku.";
-  return result(errors, ["route", "publicPlace", "date", "vehicle", "loading"]);
+  const cargoWeightError = optionalWeightError(input.cargoWeightKg, "Hmotnost");
+  if (cargoWeightError) errors.cargoWeight = cargoWeightError;
+  return result(errors, ["route", "publicPlace", "date", "vehicle", "loading", "cargoWeight"]);
 }
 
 export function validateCapacityForm(input: CapacityValidationInput): ValidationResult<CapacityErrorKey> {
@@ -162,8 +181,10 @@ export function validateCapacityForm(input: CapacityValidationInput): Validation
   if (input.routePriceMode === "negotiable" && price !== null && input.routePrice.trim() !== "" && (!Number.isFinite(price) || price < 0)) {
     errors.price = "Cena musí být platné nezáporné číslo.";
   }
+  const availableWeightError = optionalWeightError(input.routeAvailableWeightKg, "Volnou nosnost");
+  if (availableWeightError) errors.availableWeight = availableWeightError;
 
-  return result(errors, ["route", "publicPlace", "departure", "capacity", "vehicle", "price"]);
+  return result(errors, ["route", "publicPlace", "departure", "capacity", "vehicle", "price", "availableWeight"]);
 }
 
 function dateToken(date: Date | null) {
@@ -194,6 +215,7 @@ export function requestSnapshot(input: {
   dateMode: "concrete" | "window";
   loadingState: LoadingStateOption | null;
   requestVehicleModel: string;
+  cargoWeightKg?: string;
 }) {
   return JSON.stringify({ ...input, requestedDate: dateToken(input.requestedDate), requestedEndDate: dateToken(input.requestedEndDate) });
 }
@@ -346,6 +368,7 @@ export function capacitySnapshot(input: {
   routeDepartureDate: Date | null;
   routeDepartureTime: Date | null;
   routeSpaces: string;
+  routeAvailableWeightKg?: string;
   viaPlaces?: readonly ViaPlace[];
   routeVehicleTypes: string;
   routePrice: string;

@@ -185,7 +185,7 @@ export default function RouteDetailRoute() {
             </View>
             <View style={styles.detailTwoColumnRow}>
               <View style={styles.detailMiniSection}><Text style={styles.sectionLabel}>ODJEZD</Text><Text style={styles.detailValueStrong}>{carrierRouteDepartureLabel(activeRoute.departureAt)}</Text></View>
-              <View style={styles.detailMiniSection}><Text style={styles.sectionLabel}>KAPACITA</Text><Text style={styles.detailValueStrong}>{activeRoute.availableSpaces} {activeRoute.availableSpaces === 1 ? "volné místo" : activeRoute.availableSpaces >= 2 && activeRoute.availableSpaces <= 4 ? "volná místa" : "volných míst"}</Text></View>
+              <View style={styles.detailMiniSection}><Text style={styles.sectionLabel}>KAPACITA</Text><Text style={styles.detailValueStrong}>{activeRoute.availableSpaces} {activeRoute.availableSpaces === 1 ? "volné místo" : activeRoute.availableSpaces >= 2 && activeRoute.availableSpaces <= 4 ? "volná místa" : "volných míst"}</Text>{activeRoute.availableWeightKg ? <Text style={styles.detailBodyMuted}>{activeRoute.availableWeightKg.toLocaleString("cs-CZ")} kg volné nosnosti</Text> : null}</View>
             </View>
             <View style={styles.detailTwoColumnRow}>
               <View style={styles.detailMiniSection}><Text style={styles.sectionLabel}>VOZIDLO</Text><Text style={styles.detailValueStrong}>{activeRoute.vehicleTypes}</Text></View>

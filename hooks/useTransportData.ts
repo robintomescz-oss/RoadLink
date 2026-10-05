@@ -82,6 +82,7 @@ export function useTransportData({
       vehicleMobility: row.vehicle_mobility || "unknown",
       vehicleModel: row.vehicle_model || null,
       canTrailer: row.can_drive_onto_trailer ?? null,
+      cargoWeightKg: typeof row.cargo_weight_kg === "number" ? row.cargo_weight_kg : null,
       createdAt: row.created_at || "",
     };
   }
@@ -147,6 +148,7 @@ export function useTransportData({
         : [],
       departureAt: data.departure_at || "Neuvedeno",
       availableSpaces: data.available_spaces ?? 0,
+      availableWeightKg: typeof data.available_weight_kg === "number" ? data.available_weight_kg : null,
       maxDeviationKm: data.max_deviation_km ?? null,
       vehicleTypes: Array.isArray(data.vehicle_types)
         ? data.vehicle_types.map((value: string) => canonicalVehicleType(value)).join(", ")
@@ -304,6 +306,7 @@ export function useTransportData({
           : [],
         departureAt: row.departure_at || "Neuvedeno",
         availableSpaces: row.available_spaces ?? 0,
+        availableWeightKg: typeof row.available_weight_kg === "number" ? row.available_weight_kg : null,
         maxDeviationKm: row.max_deviation_km ?? null,
         vehicleTypes: Array.isArray(row.vehicle_types)
           ? row.vehicle_types.map((value: string) => canonicalVehicleType(value)).join(", ")

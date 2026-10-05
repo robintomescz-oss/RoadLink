@@ -19,6 +19,7 @@ import {
   requestSnapshot,
   validateRequestForm,
   buildRouteMetricsPayload,
+  parseOptionalWeightKg,
   routeMetricsSubmitBlockReason,
   type LoadingStateOption,
   type RequestErrorKey,
@@ -36,6 +37,7 @@ const EMPTY_REQUEST_DRAFT: RequestDraft = {
   destinationPublicLabel: "",
   vehicle: "Osobní automobil",
   problem: "",
+  cargoWeightKg: "",
 };
 
 /**
@@ -70,6 +72,7 @@ export default function CreateRequestScreen() {
   const [requestedEndDate, setRequestedEndDate] = useState<Date | null>(null);
   const [dateMode, setDateMode] = useState<"concrete" | "window">("concrete");
   const [requestVehicleModel, setRequestVehicleModel] = useState("");
+  const [cargoWeightKg, setCargoWeightKg] = useState(requestDraft.cargoWeightKg);
   const [loadingStateOption, setLoadingStateOption] = useState<LoadingStateOption | null>(INITIAL_LOADING_STATE);
   const [requestErrors, setRequestErrors] = useState<Partial<Record<RequestErrorKey, string>>>({});
   const [requestInitialSnapshot, setRequestInitialSnapshot] = useState<string | null>(() =>
@@ -85,6 +88,7 @@ export default function CreateRequestScreen() {
       dateMode: "concrete",
       loadingState: INITIAL_LOADING_STATE,
       requestVehicleModel: "",
+      cargoWeightKg: requestDraft.cargoWeightKg,
     })
   );
   const requestScrollRef = useRef<ScrollView | null>(null);
@@ -102,8 +106,8 @@ export default function CreateRequestScreen() {
   });
 
   // Při zavření formuláře (jakýmkoli způsobem) vrátíme poslední hodnoty do kontextu.
-  const draftRef = useRef<RequestDraft>({ pickupText, destination, pickupPublicLabel, destinationPublicLabel, vehicle, problem });
-  draftRef.current = { pickupText, destination, pickupPublicLabel, destinationPublicLabel, vehicle, problem };
+  const draftRef = useRef<RequestDraft>({ pickupText, destination, pickupPublicLabel, destinationPublicLabel, vehicle, problem, cargoWeightKg });
+  draftRef.current = { pickupText, destination, pickupPublicLabel, destinationPublicLabel, vehicle, problem, cargoWeightKg };
   useEffect(() => () => setRequestDraft(draftRef.current), []);
 
   // Dřív efekt na `screen` v App: při vstupu na obrazovku se obnoví poloha.
@@ -124,6 +128,7 @@ export default function CreateRequestScreen() {
       dateMode,
       loadingState: loadingStateOption,
       requestVehicleModel,
+      cargoWeightKg,
     });
   }
 
@@ -172,6 +177,7 @@ export default function CreateRequestScreen() {
       dateMode,
       vehicle,
       loadingState: loadingStateOption,
+      cargoWeightKg,
     });
     setRequestErrors(validation.errors);
     if (!pickupLocation || !destinationLocation) {
@@ -213,6 +219,7 @@ export default function CreateRequestScreen() {
         destinationPlaceId: destinationLocation.placeId,
         preview: routePreview,
       });
+      const cargoWeight = parseOptionalWeightKg(cargoWeightKg);
 
       const { data, error } = await supabase
         .from("tow_requests")
@@ -235,6 +242,7 @@ export default function CreateRequestScreen() {
           time_preference: "specific",
           vehicle_mobility: loadingMapping.vehicle_mobility,
           can_drive_onto_trailer: loadingMapping.can_drive_onto_trailer,
+          cargo_weight_kg: cargoWeight,
           ...routeMetricsPayload,
           status: "open",
         })
@@ -270,6 +278,7 @@ export default function CreateRequestScreen() {
         vehicleMobility: data.vehicle_mobility || loadingMapping.vehicle_mobility,
         vehicleModel: data.vehicle_model || null,
         canTrailer: data.can_drive_onto_trailer ?? loadingMapping.can_drive_onto_trailer,
+        cargoWeightKg: typeof data.cargo_weight_kg === "number" ? data.cargo_weight_kg : cargoWeight,
         createdAt: data.created_at || "",
       };
 
@@ -352,6 +361,10 @@ export default function CreateRequestScreen() {
           <FieldError message={requestErrors.vehicle} />
           <Text style={styles.label}>Značka a model · volitelné</Text>
           <TextInput style={styles.compactInput} value={requestVehicleModel} onChangeText={setRequestVehicleModel} placeholder="Škoda Octavia" />
+          <Text style={styles.label}>Odhadovaná hmotnost vozidla / nákladu · volitelné</Text>
+          <TextInput style={styles.compactInput} value={cargoWeightKg} onChangeText={(value) => { setCargoWeightKg(value); setRequestErrors((current) => ({ ...current, cargoWeight: undefined })); }} placeholder="Např. 1450" keyboardType="numeric" />
+          <Text style={styles.muted}>V kilogramech. Pokud ji znáte, pomůže přepravci posoudit vhodnost kapacity.</Text>
+          <FieldError message={requestErrors.cargoWeight} />
         </FormSection>
 
         <FormSection title="Stav vozidla pro nakládku">
@@ -372,6 +385,7 @@ export default function CreateRequestScreen() {
           <ReviewRow label="Trasa" value={`${pickupPublicLabel.trim() || "Odkud neuvedeno"} → ${destinationPublicLabel.trim() || "Kam neuvedeno"}`} />
           <ReviewRow label="Termín" value={dateMode === "window" ? `${requestedDate ? requestedDate.toLocaleDateString("cs-CZ") : "Od neuvedeno"} – ${requestedEndDate ? requestedEndDate.toLocaleDateString("cs-CZ") : "Do neuvedeno"}` : requestedDate ? requestedDate.toLocaleDateString("cs-CZ") : "Datum neuvedeno"} />
           <ReviewRow label="Vozidlo" value={`${vehicle}${requestVehicleModel.trim() ? ` · ${requestVehicleModel.trim()}` : ""}`} />
+          {parseOptionalWeightKg(cargoWeightKg) !== null ? <ReviewRow label="Hmotnost" value={`${parseOptionalWeightKg(cargoWeightKg)!.toLocaleString("cs-CZ")} kg`} /> : null}
           <ReviewRow label="Nakládka" value={loadingLabel} />
           <FieldError message={requestRouteBlockReason ?? undefined} />
           <TouchableOpacity style={[styles.primary, (creatingRequest || Boolean(requestRouteBlockReason)) && styles.primaryDisabled]} disabled={creatingRequest || Boolean(requestRouteBlockReason)} onPress={createJob} accessibilityLabel="Odeslat poptávku">

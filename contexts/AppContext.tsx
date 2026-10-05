@@ -34,6 +34,7 @@ export type RequestDraft = {
   destinationPublicLabel: string;
   vehicle: string;
   problem: string;
+  cargoWeightKg: string;
 };
 
 const INITIAL_REQUEST_DRAFT: RequestDraft = {
@@ -43,6 +44,7 @@ const INITIAL_REQUEST_DRAFT: RequestDraft = {
   destinationPublicLabel: "",
   vehicle: "Osobní automobil",
   problem: "",
+  cargoWeightKg: "",
 };
 
 type AuthState = ReturnType<typeof useAuthSession>;
