@@ -17,9 +17,6 @@ function check(condition, message) {
   else { console.error(`FAIL ${message}`); failed = true; }
 }
 
-check(/add column if not exists cargo_weight_kg integer/i.test(migration), "request cargo weight migration exists");
-check(/add column if not exists available_weight_kg integer/i.test(migration), "route available payload migration exists");
-check(/between 1 and 50000/g.test(migration), "both weights have bounded positive validation");
 check(/create table if not exists public\.transport_reviews/i.test(migration), "reviews use a dedicated table");
 check(/unique \(tow_request_id, reviewer_id\)/i.test(migration), "each participant can review a transport only once");
 check(/reviewer_id <> reviewee_id/i.test(migration), "self-review is forbidden");
@@ -29,14 +26,13 @@ check(/revoke all on public\.transport_reviews from public, anon, authenticated/
 check(/security definer/i.test(migration) && /set search_path = ''/i.test(migration), "review RPC is hardened");
 check(/get_my_transport_rating_summary/i.test(migration), "profile summary RPC exists");
 check(/get_my_transport_review/i.test(migration), "own review state RPC exists");
-check(/Odhadovaná hmotnost vozidla \/ nákladu/i.test(requestForm), "request form explains cargo weight");
-check(/cargo_weight_kg: cargoWeight/i.test(requestForm), "request form persists cargo weight");
-check(/Volná nosnost/i.test(routeForm), "capacity form explains remaining payload");
-check(/available_weight_kg: availableWeight/i.test(routeForm), "capacity form persists remaining payload");
-check(/parseOptionalWeightKg/.test(logic) && /1 do 50 000 kg/.test(logic), "client validates optional weights consistently");
+check(/VEHICLE_WEIGHT_OPTIONS/.test(logic) && /over_2500/.test(logic) && /unknown/.test(logic), "shared five-band vehicle-weight model exists");
+check(/vehicle_weight_band: vehicleWeightBand/.test(requestForm), "request form persists its selected weight band");
+check(/max_vehicle_weight_band: maxVehicleWeightBand/.test(routeForm), "capacity form persists its selected weight band");
+check(/vehicleWeightBand/.test(requestForm) && /maxVehicleWeightBand/.test(routeForm), "both forms require an explicit weight band including unknown");
 check(/TransportReviewPanel/.test(tracking) && /activeJob\.status === "completed"/.test(tracking), "review entry appears only after completion");
 check(/useTransportRatingSummary/.test(profile) && /Hodnocení od uživatelů/.test(profile), "profile shows received ratings for every account");
-check(/availableWeight === null \|\| cargoWeight === null \|\| cargoWeight <= availableWeight/.test(matching), "matching excludes known overweight requests");
+check(/requestWeightRank <= routeWeightRank/.test(matching), "matching excludes a request above the known route weight band");
 check(!/reviewee_id:\s*/.test(tracking), "mobile never chooses the reviewee identity");
 
 if (failed) process.exit(1);

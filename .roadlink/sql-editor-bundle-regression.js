@@ -17,7 +17,7 @@ const { execFileSync } = require("node:child_process");
 const root = path.resolve(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 const bundleDir = path.join(root, "supabase/sql-editor");
-const readBundle = (name) => fs.readFileSync(path.join(bundleDir, name), "utf8");
+const readBundle = (name) => fs.readFileSync(path.join(bundleDir, name), "utf8").replace(/\r\n/g, "\n");
 
 
 // ── Očekávané soubory, žádný jiný ──────────────────────────────────────────
@@ -43,7 +43,7 @@ for (const name of steps) {
   const sourceLine = content.split("\n").find((line) => line.startsWith("-- Zdroj:"));
   assert(sourceLine, `${name} names its source migration`);
 
-  const source = sourceLine.split("/").pop();
+  const source = sourceLine.split("/").pop().replace(/\r$/, "");
   const migration = read(`supabase/migrations/${source}`).replace(/\r\n/g, "\n").trim();
   assert(migration.length > 0, `${source} is not empty`);
   assert(content.includes(migration), `${name} embeds ${source} verbatim, with no drift`);
@@ -215,10 +215,13 @@ assert(
   gitignore.includes("/.roadlink/freebuff-report.md") && !gitignore.includes("!.roadlink/freebuff-report.md"),
   "the deployment report is explicitly ignored instead of being tracked",
 );
-const report = read(".roadlink/freebuff-report.md");
-assert(/##\s*9\./.test(report), "the report has a section on what actually happened during the rollout");
-assert(/bez_bbox_tras_s_ukoncene/.test(report), "the report records the check that failed during the rollout");
-assert(!/(DATABASE_URL|postgresql:\/\/|password\s*=)/i.test(report), "the report carries no connection string or password");
+const reportPath = path.join(root, ".roadlink/freebuff-report.md");
+if (fs.existsSync(reportPath)) {
+  const report = fs.readFileSync(reportPath, "utf8");
+  assert(/##\s*9\./.test(report), "the local report has a section on what actually happened during the rollout");
+  assert(/bez_bbox_tras_s_ukoncene/.test(report), "the local report records the check that failed during the rollout");
+  assert(!/(DATABASE_URL|postgresql:\/\/|password\s*=)/i.test(report), "the local report carries no connection string or password");
+}
 
 // ── Oprávnění: vlastník ≠ nebezpečná role ───────────────────────────────────
 // `postgres` je vlastníkem funkce, takže EXECUTE má vždy a jeho přítomnost je

@@ -17,7 +17,7 @@ const stripComments = (sql) => sql.replace(/--[^\n]*/g, "");
 const migrationsDir = path.join(root, "supabase/migrations");
 const viaMigrations = fs
   .readdirSync(migrationsDir)
-  .filter((name) => /^20261005[1-8][0-9]{5}_/.test(name))
+  .filter((name) => /^202610051[2-7][0-9]{4}_/.test(name))
   .sort();
 
 assert.deepStrictEqual(
@@ -30,6 +30,7 @@ assert.deepStrictEqual(
     "20261005150000_enable_postgis.sql",
     "20261005160000_carrier_route_spatial_line.sql",
     "20261005170000_matching_spatial_preselection.sql",
+    "20261005171000_grant_via_coordinates_helper_to_authenticated.sql",
   ],
   "the via-matching migrations exist exactly once each and sort into the intended order",
 );
@@ -78,6 +79,12 @@ const roles = {
   "20261005170000_matching_spatial_preselection.sql": (body) => {
     assert(/create or replace function public\.get_route_matching_candidates_internal/i.test(body), "the spatial preselection is the last step that redefines the RPC");
   },
+  "20261005171000_grant_via_coordinates_helper_to_authenticated.sql": (body) => {
+    assert(/grant\s+execute\s+on\s+function\s+public\.carrier_route_via_coordinates_valid\(text\[\], double precision\[\], double precision\[\]\)\s+to\s+authenticated/i.test(body), "authenticated clients can insert carrier_routes because the trigger helper is executable");
+    assert(/revoke all[\s\S]*carrier_route_via_coordinates_valid[\s\S]*from public/i.test(body), "the helper remains closed to PUBLIC");
+    assert(/revoke all[\s\S]*carrier_route_via_coordinates_valid[\s\S]*from anon/i.test(body), "the helper remains closed to anon");
+    assert(!/alter\s+table|update\s+public\.|insert\s+into|delete\s+from|drop\s+table|truncate/i.test(body), "the grant repair changes no table or row data");
+  },
   "20261005180000_matching_spatial_cleanup.sql": (body) => {
     assert(/drop column if exists bbox_min_lat/i.test(body), "the cleanup drops the transitional bbox columns");
     assert(/assign_carrier_route_geometry/i.test(body), "the cleanup leaves a single geometry source of truth");
@@ -100,8 +107,8 @@ assert(/create trigger carrier_routes_route_geometry_assign/i.test(cleanup), "th
 // ── 2) Úklid je dopředný, idempotentní a odložený mimo automatický tok ──────
 assert.strictEqual(
   viaMigrations[viaMigrations.length - 1],
-  "20261005170000_matching_spatial_preselection.sql",
-  "the applied rollout ends at 170000; the cleanup is not part of it",
+  "20261005171000_grant_via_coordinates_helper_to_authenticated.sql",
+  "the applied rollout ends at 171000; the cleanup is not part of it",
 );
 assert(/20261005170000/.test(cleanup) && /20261005160000/.test(cleanup), "the cleanup names the steps it depends on");
 
@@ -126,7 +133,11 @@ for (const { name, file } of [
 ]) {
   const body = stripComments(read(file));
 
-  assert(!/grant\s+execute[\s\S]*?\bto\s+(anon|authenticated)\b/i.test(body), `${name} never grants the matching RPC to anon or authenticated`);
+  const grantsClientExecute = /grant\s+execute[\s\S]*?\bto\s+(anon|authenticated)\b/i.test(body);
+  const grantsOnlyViaHelperToAuthenticated = /grant\s+execute\s+on\s+function\s+public\.carrier_route_via_coordinates_valid\(text\[\], double precision\[\], double precision\[\]\)\s+to\s+authenticated/i.test(body)
+    && !/grant\s+execute[\s\S]*?\bto\s+anon\b/i.test(body)
+    && !/get_route_matching_candidates_internal[\s\S]*grant\s+execute[\s\S]*?\bto\s+authenticated\b/i.test(body);
+  assert(!grantsClientExecute || grantsOnlyViaHelperToAuthenticated, `${name} never grants the matching RPC to anon or authenticated`);
   assert(!/grant\s+select[\s\S]*?\bon\s+public\.carrier_routes\b/i.test(body), `${name} never grants direct select on carrier_routes`);
   assert(!/row level security/i.test(body), `${name} does not reconfigure RLS`);
   assert(!/drop policy/i.test(body), `${name} does not drop any policy`);

@@ -1,48 +1,11 @@
--- Hodnocení dokončených přeprav a hmotnost pro poptávky/volnou kapacitu.
+-- Hodnocení dokončených přeprav.
 --
 -- Bezpečnost:
 -- * recenzi lze vložit pouze přes RPC po skutečném stavu completed;
 -- * obě strany mohou hodnotit právě jednou, samy sebe nikdy;
 -- * klient nemůže určit hodnoceného uživatele ani upravovat starou recenzi;
--- * hmotnost je dobrovolná kvůli existujícím řádkům, ale známá hodnota musí
---   být kladný počet kilogramů.
 
 begin;
-
-alter table public.tow_requests
-  add column if not exists cargo_weight_kg integer;
-
-alter table public.carrier_routes
-  add column if not exists available_weight_kg integer;
-
-do $$
-begin
-  if not exists (
-    select 1 from pg_constraint
-    where conrelid = 'public.tow_requests'::regclass
-      and conname = 'tow_requests_cargo_weight_kg_check'
-  ) then
-    alter table public.tow_requests
-      add constraint tow_requests_cargo_weight_kg_check
-      check (cargo_weight_kg is null or cargo_weight_kg between 1 and 50000);
-  end if;
-
-  if not exists (
-    select 1 from pg_constraint
-    where conrelid = 'public.carrier_routes'::regclass
-      and conname = 'carrier_routes_available_weight_kg_check'
-  ) then
-    alter table public.carrier_routes
-      add constraint carrier_routes_available_weight_kg_check
-      check (available_weight_kg is null or available_weight_kg between 1 and 50000);
-  end if;
-end;
-$$;
-
-comment on column public.tow_requests.cargo_weight_kg is
-  'Optional estimated transported vehicle/cargo weight in kilograms. Visible only through authorized transport details.';
-comment on column public.carrier_routes.available_weight_kg is
-  'Optional remaining payload capacity for this route in kilograms. Null means unknown, not unlimited.';
 
 create table if not exists public.transport_reviews (
   id uuid primary key default gen_random_uuid(),

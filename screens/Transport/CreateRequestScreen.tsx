@@ -15,11 +15,13 @@ import { coordinatesFromValues } from "../../lib/geocode";
 import type { VerifiedLocation } from "../../lib/verifiedLocation";
 import {
   LOADING_STATE_OPTIONS,
+  VEHICLE_WEIGHT_OPTIONS,
+  vehicleWeightLabel,
+  type VehicleWeightBand,
   loadingOptionToFields,
   requestSnapshot,
   validateRequestForm,
   buildRouteMetricsPayload,
-  parseOptionalWeightKg,
   routeMetricsSubmitBlockReason,
   type LoadingStateOption,
   type RequestErrorKey,
@@ -37,7 +39,7 @@ const EMPTY_REQUEST_DRAFT: RequestDraft = {
   destinationPublicLabel: "",
   vehicle: "Osobní automobil",
   problem: "",
-  cargoWeightKg: "",
+  vehicleWeightBand: null,
 };
 
 /**
@@ -72,7 +74,8 @@ export default function CreateRequestScreen() {
   const [requestedEndDate, setRequestedEndDate] = useState<Date | null>(null);
   const [dateMode, setDateMode] = useState<"concrete" | "window">("concrete");
   const [requestVehicleModel, setRequestVehicleModel] = useState("");
-  const [cargoWeightKg, setCargoWeightKg] = useState(requestDraft.cargoWeightKg);
+  const [vehicleWeightBand, setVehicleWeightBand] = useState<VehicleWeightBand | null>(requestDraft.vehicleWeightBand);
+  const [weightPickerOpen, setWeightPickerOpen] = useState(false);
   const [loadingStateOption, setLoadingStateOption] = useState<LoadingStateOption | null>(INITIAL_LOADING_STATE);
   const [requestErrors, setRequestErrors] = useState<Partial<Record<RequestErrorKey, string>>>({});
   const [requestInitialSnapshot, setRequestInitialSnapshot] = useState<string | null>(() =>
@@ -88,7 +91,7 @@ export default function CreateRequestScreen() {
       dateMode: "concrete",
       loadingState: INITIAL_LOADING_STATE,
       requestVehicleModel: "",
-      cargoWeightKg: requestDraft.cargoWeightKg,
+      vehicleWeightBand: requestDraft.vehicleWeightBand,
     })
   );
   const requestScrollRef = useRef<ScrollView | null>(null);
@@ -106,8 +109,8 @@ export default function CreateRequestScreen() {
   });
 
   // Při zavření formuláře (jakýmkoli způsobem) vrátíme poslední hodnoty do kontextu.
-  const draftRef = useRef<RequestDraft>({ pickupText, destination, pickupPublicLabel, destinationPublicLabel, vehicle, problem, cargoWeightKg });
-  draftRef.current = { pickupText, destination, pickupPublicLabel, destinationPublicLabel, vehicle, problem, cargoWeightKg };
+  const draftRef = useRef<RequestDraft>({ pickupText, destination, pickupPublicLabel, destinationPublicLabel, vehicle, problem, vehicleWeightBand });
+  draftRef.current = { pickupText, destination, pickupPublicLabel, destinationPublicLabel, vehicle, problem, vehicleWeightBand };
   useEffect(() => () => setRequestDraft(draftRef.current), []);
 
   // Dřív efekt na `screen` v App: při vstupu na obrazovku se obnoví poloha.
@@ -128,7 +131,7 @@ export default function CreateRequestScreen() {
       dateMode,
       loadingState: loadingStateOption,
       requestVehicleModel,
-      cargoWeightKg,
+      vehicleWeightBand,
     });
   }
 
@@ -177,7 +180,7 @@ export default function CreateRequestScreen() {
       dateMode,
       vehicle,
       loadingState: loadingStateOption,
-      cargoWeightKg,
+      vehicleWeightBand,
     });
     setRequestErrors(validation.errors);
     if (!pickupLocation || !destinationLocation) {
@@ -219,7 +222,6 @@ export default function CreateRequestScreen() {
         destinationPlaceId: destinationLocation.placeId,
         preview: routePreview,
       });
-      const cargoWeight = parseOptionalWeightKg(cargoWeightKg);
 
       const { data, error } = await supabase
         .from("tow_requests")
@@ -242,7 +244,7 @@ export default function CreateRequestScreen() {
           time_preference: "specific",
           vehicle_mobility: loadingMapping.vehicle_mobility,
           can_drive_onto_trailer: loadingMapping.can_drive_onto_trailer,
-          cargo_weight_kg: cargoWeight,
+          vehicle_weight_band: vehicleWeightBand,
           ...routeMetricsPayload,
           status: "open",
         })
@@ -278,7 +280,7 @@ export default function CreateRequestScreen() {
         vehicleMobility: data.vehicle_mobility || loadingMapping.vehicle_mobility,
         vehicleModel: data.vehicle_model || null,
         canTrailer: data.can_drive_onto_trailer ?? loadingMapping.can_drive_onto_trailer,
-        cargoWeightKg: typeof data.cargo_weight_kg === "number" ? data.cargo_weight_kg : cargoWeight,
+        vehicleWeightBand: data.vehicle_weight_band ?? vehicleWeightBand,
         createdAt: data.created_at || "",
       };
 
@@ -361,10 +363,17 @@ export default function CreateRequestScreen() {
           <FieldError message={requestErrors.vehicle} />
           <Text style={styles.label}>Značka a model · volitelné</Text>
           <TextInput style={styles.compactInput} value={requestVehicleModel} onChangeText={setRequestVehicleModel} placeholder="Škoda Octavia" />
-          <Text style={styles.label}>Odhadovaná hmotnost vozidla / nákladu · volitelné</Text>
-          <TextInput style={styles.compactInput} value={cargoWeightKg} onChangeText={(value) => { setCargoWeightKg(value); setRequestErrors((current) => ({ ...current, cargoWeight: undefined })); }} placeholder="Např. 1450" keyboardType="numeric" />
-          <Text style={styles.muted}>V kilogramech. Pokud ji znáte, pomůže přepravci posoudit vhodnost kapacity.</Text>
-          <FieldError message={requestErrors.cargoWeight} />
+          <Text style={styles.label}>Hmotnost přepravovaného vozidla · povinné</Text>
+          <Text style={styles.muted}>Vyberte pásmo skutečné hmotnosti vozidla včetně převáženého nákladu. Pokud ji neznáte, zvolte Nevím; před přepravou ji bude nutné ověřit.</Text>
+          <TouchableOpacity style={styles.compactInput} onPress={() => setWeightPickerOpen((open) => !open)} accessibilityRole="button" accessibilityLabel="Vybrat hmotnost vozidla" accessibilityState={{ expanded: weightPickerOpen }}>
+            <Text style={styles.selectChipText}>{vehicleWeightBand ? vehicleWeightLabel(vehicleWeightBand) : "Vyberte hmotnost"} {weightPickerOpen ? "▴" : "▾"}</Text>
+          </TouchableOpacity>
+          {weightPickerOpen && VEHICLE_WEIGHT_OPTIONS.map((item) => (
+            <TouchableOpacity key={item.value} style={[styles.selectChip, vehicleWeightBand === item.value && styles.selectChipActive]} onPress={() => { setVehicleWeightBand(item.value); setWeightPickerOpen(false); setRequestErrors((current) => ({ ...current, weight: undefined })); }} accessibilityRole="radio" accessibilityState={{ checked: vehicleWeightBand === item.value }}>
+              <Text style={[styles.selectChipText, vehicleWeightBand === item.value && styles.selectChipTextActive]}>{item.label}</Text>
+            </TouchableOpacity>
+          ))}
+          <FieldError message={requestErrors.weight} />
         </FormSection>
 
         <FormSection title="Stav vozidla pro nakládku">
@@ -385,7 +394,7 @@ export default function CreateRequestScreen() {
           <ReviewRow label="Trasa" value={`${pickupPublicLabel.trim() || "Odkud neuvedeno"} → ${destinationPublicLabel.trim() || "Kam neuvedeno"}`} />
           <ReviewRow label="Termín" value={dateMode === "window" ? `${requestedDate ? requestedDate.toLocaleDateString("cs-CZ") : "Od neuvedeno"} – ${requestedEndDate ? requestedEndDate.toLocaleDateString("cs-CZ") : "Do neuvedeno"}` : requestedDate ? requestedDate.toLocaleDateString("cs-CZ") : "Datum neuvedeno"} />
           <ReviewRow label="Vozidlo" value={`${vehicle}${requestVehicleModel.trim() ? ` · ${requestVehicleModel.trim()}` : ""}`} />
-          {parseOptionalWeightKg(cargoWeightKg) !== null ? <ReviewRow label="Hmotnost" value={`${parseOptionalWeightKg(cargoWeightKg)!.toLocaleString("cs-CZ")} kg`} /> : null}
+          <ReviewRow label="Hmotnost" value={vehicleWeightLabel(vehicleWeightBand)} />
           <ReviewRow label="Nakládka" value={loadingLabel} />
           <FieldError message={requestRouteBlockReason ?? undefined} />
           <TouchableOpacity style={[styles.primary, (creatingRequest || Boolean(requestRouteBlockReason)) && styles.primaryDisabled]} disabled={creatingRequest || Boolean(requestRouteBlockReason)} onPress={createJob} accessibilityLabel="Odeslat poptávku">

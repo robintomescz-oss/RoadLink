@@ -41,8 +41,8 @@ export type Job = {
   vehicleMobility?: VehicleMobility;
   vehicleModel?: string | null;
   canTrailer?: boolean | null;
-  /** Volitelný odhad hmotnosti přepravovaného vozidla/nákladu v kg. */
-  cargoWeightKg?: number | null;
+  /** Produktové pásmo hmotnosti přepravovaného vozidla; unknown znamená nutnost ověření. */
+  vehicleWeightBand?: import("./createFormLogic").VehicleWeightBand | null;
   createdAt?: string;
 };
 
@@ -55,8 +55,8 @@ export type CarrierRoute = {
   viaLabels: string[];
   departureAt: string;
   availableSpaces: number;
-  /** Volitelná zbývající nosnost pro tuto konkrétní trasu v kg. */
-  availableWeightKg?: number | null;
+  /** Maximální pásmo hmotnosti vozidla, které lze na trase přepravit. */
+  maxVehicleWeightBand?: import("./createFormLogic").VehicleWeightBand | null;
   maxDeviationKm: number | null;
   vehicleTypes: string;
   price: number | null;

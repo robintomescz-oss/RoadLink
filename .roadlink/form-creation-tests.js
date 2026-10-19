@@ -57,12 +57,14 @@ const validRequest = {
   requestedEndDate: null,
   dateMode: 'concrete',
   vehicle: 'Osobní automobil',
+  vehicleWeightBand: 'up_to_1600',
   loadingState: 'drive',
 };
 assert.strictEqual(validateRequestForm(validRequest).valid, true);
 assert.strictEqual(validateRequestForm({ ...validRequest, pickupText: '' }).firstInvalid, 'route');
 assert.strictEqual(validateRequestForm({ ...validRequest, requestedDate: null }).firstInvalid, 'date');
 assert.strictEqual(validateRequestForm({ ...validRequest, vehicle: '' }).firstInvalid, 'vehicle');
+assert.strictEqual(validateRequestForm({ ...validRequest, vehicleWeightBand: null }).firstInvalid, 'weight');
 assert.strictEqual(validateRequestForm({ ...validRequest, loadingState: null }).firstInvalid, 'loading');
 assert.strictEqual(validateRequestForm({ ...validRequest, dateMode: 'window', requestedEndDate: null }).valid, false);
 assert.strictEqual(validateRequestForm({ ...validRequest, dateMode: 'window', requestedEndDate: date('2026-09-30T00:00:00Z') }).firstInvalid, 'date');
@@ -76,6 +78,7 @@ const validCapacity = {
   routeSpaces: '1',
   routeMaxDeviationKm: '',
   routeVehicleTypes: 'Osobní automobil',
+  maxVehicleWeightBand: 'up_to_1600',
   routePriceMode: 'fixed',
   routePrice: '1200',
 };
@@ -90,6 +93,7 @@ assert.strictEqual(
 );
 assert.strictEqual(validateCapacityForm({ ...validCapacity, routeSpaces: '0' }).firstInvalid, 'capacity');
 assert.strictEqual(validateCapacityForm({ ...validCapacity, routeVehicleTypes: '' }).firstInvalid, 'vehicle');
+assert.strictEqual(validateCapacityForm({ ...validCapacity, maxVehicleWeightBand: null }).firstInvalid, 'weight');
 assert.strictEqual(validateCapacityForm({ ...validCapacity, routePrice: '' }).firstInvalid, 'price');
 assert.strictEqual(validateCapacityForm({ ...validCapacity, routePriceMode: 'negotiable', routePrice: '' }).valid, true);
 assert.strictEqual(validateCapacityForm({ ...validCapacity, routePriceMode: 'negotiable', routePrice: 'abc' }).firstInvalid, 'price');

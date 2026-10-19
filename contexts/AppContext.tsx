@@ -19,6 +19,7 @@ import { useTransportData } from "../hooks/useTransportData";
 import type { OfferProviderProfile, RequestViewMode, TowOffer } from "../lib/types";
 import { createInitialSosState, type SosState } from "../lib/sos/sosState";
 import type { AssistanceOffer, AssistanceOrderRequest } from "../lib/sos/assistanceProvider";
+import type { VehicleWeightBand } from "../lib/createFormLogic";
 
 export type TransportTab = "all" | "requests" | "capacity" | "mine";
 
@@ -34,7 +35,7 @@ export type RequestDraft = {
   destinationPublicLabel: string;
   vehicle: string;
   problem: string;
-  cargoWeightKg: string;
+  vehicleWeightBand: VehicleWeightBand | null;
 };
 
 const INITIAL_REQUEST_DRAFT: RequestDraft = {
@@ -44,7 +45,7 @@ const INITIAL_REQUEST_DRAFT: RequestDraft = {
   destinationPublicLabel: "",
   vehicle: "Osobní automobil",
   problem: "",
-  cargoWeightKg: "",
+  vehicleWeightBand: null,
 };
 
 type AuthState = ReturnType<typeof useAuthSession>;

@@ -16,6 +16,7 @@ import {
   vehicleMobilityLabel,
 } from "../../lib/labels";
 import { supabase } from "../../lib/supabase";
+import { vehicleWeightLabel } from "../../lib/createFormLogic";
 import type { Job } from "../../lib/types";
 import { fetchRouteMatches, routeMatchSummary, type RouteMatch } from "../../lib/routeMatches";
 
@@ -185,7 +186,7 @@ export default function RouteDetailRoute() {
             </View>
             <View style={styles.detailTwoColumnRow}>
               <View style={styles.detailMiniSection}><Text style={styles.sectionLabel}>ODJEZD</Text><Text style={styles.detailValueStrong}>{carrierRouteDepartureLabel(activeRoute.departureAt)}</Text></View>
-              <View style={styles.detailMiniSection}><Text style={styles.sectionLabel}>KAPACITA</Text><Text style={styles.detailValueStrong}>{activeRoute.availableSpaces} {activeRoute.availableSpaces === 1 ? "volné místo" : activeRoute.availableSpaces >= 2 && activeRoute.availableSpaces <= 4 ? "volná místa" : "volných míst"}</Text>{activeRoute.availableWeightKg ? <Text style={styles.detailBodyMuted}>{activeRoute.availableWeightKg.toLocaleString("cs-CZ")} kg volné nosnosti</Text> : null}</View>
+              <View style={styles.detailMiniSection}><Text style={styles.sectionLabel}>KAPACITA</Text><Text style={styles.detailValueStrong}>{activeRoute.availableSpaces} {activeRoute.availableSpaces === 1 ? "volné místo" : activeRoute.availableSpaces >= 2 && activeRoute.availableSpaces <= 4 ? "volná místa" : "volných míst"}</Text><Text style={styles.detailBodyMuted}>{vehicleWeightLabel(activeRoute.maxVehicleWeightBand)}</Text></View>
             </View>
             <View style={styles.detailTwoColumnRow}>
               <View style={styles.detailMiniSection}><Text style={styles.sectionLabel}>VOZIDLO</Text><Text style={styles.detailValueStrong}>{activeRoute.vehicleTypes}</Text></View>

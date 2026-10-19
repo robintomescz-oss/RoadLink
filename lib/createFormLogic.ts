@@ -3,6 +3,19 @@ import type { VehicleMobility } from "./types";
 
 export type LoadingStateOption = "drive" | "winch" | "special" | "unknown";
 
+/** Produktová pásma, nikoli potvrzení skutečné nosnosti celé soupravy. */
+export const VEHICLE_WEIGHT_OPTIONS = [
+  { value: "up_to_1600", label: "Do 1 600 kg" },
+  { value: "1600_to_2000", label: "Nad 1 600 do 2 000 kg" },
+  { value: "2000_to_2500", label: "Nad 2 000 do 2 500 kg" },
+  { value: "over_2500", label: "Nad 2 500 kg" },
+  { value: "unknown", label: "Nevím" },
+] as const;
+export type VehicleWeightBand = typeof VEHICLE_WEIGHT_OPTIONS[number]["value"];
+export function vehicleWeightLabel(value: unknown) {
+  return VEHICLE_WEIGHT_OPTIONS.find((option) => option.value === value)?.label ?? "Hmotnost neuvedena";
+}
+
 export type LoadingStateMapping = {
   option: LoadingStateOption;
   label: string;
@@ -60,6 +73,7 @@ export function fieldsToLoadingOption(
 }
 
 export type RequestValidationInput = {
+  vehicleWeightBand?: VehicleWeightBand | null;
   pickupText: string;
   destination: string;
   pickupPublicLabel?: string;
@@ -69,10 +83,10 @@ export type RequestValidationInput = {
   dateMode: "concrete" | "window";
   vehicle: string;
   loadingState: LoadingStateOption | null;
-  cargoWeightKg?: string;
 };
 
 export type CapacityValidationInput = {
+  maxVehicleWeightBand?: VehicleWeightBand | null;
   routeFrom: string;
   routeTo: string;
   fromPublicLabel?: string;
@@ -83,7 +97,6 @@ export type CapacityValidationInput = {
   routeVehicleTypes: string;
   routePriceMode: "fixed" | "negotiable";
   routePrice: string;
-  routeAvailableWeightKg?: string;
 };
 
 export type ValidationResult<T extends string> = {
@@ -97,23 +110,8 @@ function result<T extends string>(errors: Partial<Record<T, string>>, order: T[]
   return { valid: firstInvalid === null, errors, firstInvalid };
 }
 
-export type RequestErrorKey = "route" | "publicPlace" | "date" | "vehicle" | "loading" | "cargoWeight";
-export type CapacityErrorKey = "route" | "publicPlace" | "departure" | "capacity" | "vehicle" | "price" | "availableWeight";
-
-/** Hmotnost je dobrovolná, ale pokud ji uživatel zná, musí být realistická. */
-export function parseOptionalWeightKg(value: string | null | undefined): number | null {
-  const trimmed = typeof value === "string" ? value.replace(/\s/g, "") : "";
-  if (!trimmed || !/^\d+$/.test(trimmed)) return null;
-  const weight = Number(trimmed);
-  return Number.isSafeInteger(weight) && weight >= 1 && weight <= 50000 ? weight : null;
-}
-
-function optionalWeightError(value: string | null | undefined, label: string) {
-  const trimmed = typeof value === "string" ? value.replace(/\s/g, "") : "";
-  return trimmed && parseOptionalWeightKg(trimmed) === null
-    ? `${label} zadejte jako celé číslo od 1 do 50 000 kg.`
-    : null;
-}
+export type RequestErrorKey = "route" | "publicPlace" | "date" | "vehicle" | "weight" | "loading";
+export type CapacityErrorKey = "route" | "publicPlace" | "departure" | "capacity" | "vehicle" | "weight" | "price";
 
 export function validateRequestForm(input: RequestValidationInput): ValidationResult<RequestErrorKey> {
   const errors: Partial<Record<RequestErrorKey, string>> = {};
@@ -145,10 +143,9 @@ export function validateRequestForm(input: RequestValidationInput): ValidationRe
   }
 
   if (!input.vehicle.trim()) errors.vehicle = "Vyberte prosím typ vozidla.";
+  if (!VEHICLE_WEIGHT_OPTIONS.some((option) => option.value === input.vehicleWeightBand)) errors.weight = "Vyberte prosím hmotnost přepravovaného vozidla.";
   if (!input.loadingState) errors.loading = "Vyberte prosím stav vozidla pro nakládku.";
-  const cargoWeightError = optionalWeightError(input.cargoWeightKg, "Hmotnost");
-  if (cargoWeightError) errors.cargoWeight = cargoWeightError;
-  return result(errors, ["route", "publicPlace", "date", "vehicle", "loading", "cargoWeight"]);
+  return result(errors, ["route", "publicPlace", "date", "vehicle", "weight", "loading"]);
 }
 
 export function validateCapacityForm(input: CapacityValidationInput): ValidationResult<CapacityErrorKey> {
@@ -174,6 +171,7 @@ export function validateCapacityForm(input: CapacityValidationInput): Validation
   if (!input.routeDepartureDate) errors.departure = "Vyberte prosím datum odjezdu.";
   if (!Number.isFinite(availableSpaces) || availableSpaces <= 0) errors.capacity = "Zadejte platný kladný počet volných míst.";
 
+  if (!VEHICLE_WEIGHT_OPTIONS.some((option) => option.value === input.maxVehicleWeightBand)) errors.weight = "Vyberte prosím maximální hmotnost přepravovaného vozidla.";
   if (!input.routeVehicleTypes.trim()) errors.vehicle = "Zadejte prosím typ přijímaného vozidla.";
   if (input.routePriceMode === "fixed" && (price === null || !Number.isFinite(price) || price < 0)) {
     errors.price = "Zadejte platnou pevnou cenu, nebo zvolte cenu dohodou.";
@@ -181,10 +179,7 @@ export function validateCapacityForm(input: CapacityValidationInput): Validation
   if (input.routePriceMode === "negotiable" && price !== null && input.routePrice.trim() !== "" && (!Number.isFinite(price) || price < 0)) {
     errors.price = "Cena musí být platné nezáporné číslo.";
   }
-  const availableWeightError = optionalWeightError(input.routeAvailableWeightKg, "Volnou nosnost");
-  if (availableWeightError) errors.availableWeight = availableWeightError;
-
-  return result(errors, ["route", "publicPlace", "departure", "capacity", "vehicle", "price", "availableWeight"]);
+  return result(errors, ["route", "publicPlace", "departure", "capacity", "vehicle", "weight", "price"]);
 }
 
 function dateToken(date: Date | null) {
@@ -204,6 +199,7 @@ export function resolvePrivateAddress(publicLabel: string, precisePlace: string)
 }
 
 export function requestSnapshot(input: {
+  vehicleWeightBand?: VehicleWeightBand | null;
   pickupText: string;
   destination: string;
   pickupPublicLabel?: string;
@@ -215,7 +211,6 @@ export function requestSnapshot(input: {
   dateMode: "concrete" | "window";
   loadingState: LoadingStateOption | null;
   requestVehicleModel: string;
-  cargoWeightKg?: string;
 }) {
   return JSON.stringify({ ...input, requestedDate: dateToken(input.requestedDate), requestedEndDate: dateToken(input.requestedEndDate) });
 }
@@ -361,6 +356,7 @@ export function canAddViaPlace(input: {
 }
 
 export function capacitySnapshot(input: {
+  maxVehicleWeightBand?: VehicleWeightBand | null;
   routeFrom: string;
   routeTo: string;
   fromPublicLabel?: string;
@@ -368,7 +364,6 @@ export function capacitySnapshot(input: {
   routeDepartureDate: Date | null;
   routeDepartureTime: Date | null;
   routeSpaces: string;
-  routeAvailableWeightKg?: string;
   viaPlaces?: readonly ViaPlace[];
   routeVehicleTypes: string;
   routePrice: string;

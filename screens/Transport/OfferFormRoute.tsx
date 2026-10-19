@@ -9,6 +9,7 @@ import { styles } from "../../lib/appStyles";
 import { useAppContext } from "../../contexts/AppContext";
 import { navigateLegacy } from "../../navigation/navigationRef";
 import { useHardwareBackAction } from "../../hooks/useBackHandlers";
+import { vehicleWeightLabel } from "../../lib/createFormLogic";
 
 export default function OfferFormRoute() {
   const { userId, transportState, profileState, setTransportTab } = useAppContext();
@@ -115,6 +116,7 @@ export default function OfferFormRoute() {
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text style={styles.bigTitle}>{activeJob.vehicle} • {activeJob.problem}</Text>
         <Text style={styles.muted}>→ {activeJob.destination}</Text>
+        <Text style={styles.muted}>Hmotnost vozidla: {vehicleWeightLabel(activeJob.vehicleWeightBand)}</Text>
         <Text style={styles.label}>Cena</Text>
         <TextInput style={styles.input} value={offerPrice} onChangeText={setOfferPrice} placeholder="Cena v Kč" keyboardType="numeric" />
         <Text style={styles.label}>Předpokládaný příjezd</Text>

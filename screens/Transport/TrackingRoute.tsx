@@ -14,6 +14,7 @@ import {
   vehicleMobilityLabel,
 } from "../../lib/labels";
 import { styles } from "../../lib/appStyles";
+import { vehicleWeightLabel } from "../../lib/createFormLogic";
 import {
   buildTransportStatusContext,
   createTransportStatusController,
@@ -162,7 +163,7 @@ export default function TrackingRoute() {
         {activeJob.vehicleModel?.trim() ? <DetailInfoRow label="Model" value={activeJob.vehicleModel} /> : null}
         <DetailInfoRow label="Pojízdnost" value={vehicleMobilityLabel(activeJob.vehicleMobility)} />
         {activeJob.problem?.trim() ? <DetailInfoRow label="Popis" value={activeJob.problem} /> : null}
-        {activeJob.cargoWeightKg ? <DetailInfoRow label="Hmotnost vozidla / nákladu" value={`${activeJob.cargoWeightKg.toLocaleString("cs-CZ")} kg`} /> : null}
+        <DetailInfoRow label="Hmotnost vozidla" value={vehicleWeightLabel(activeJob.vehicleWeightBand)} />
       </DetailSection>
       {selectedOffer ? (
         <DetailSection title="Vybraná nabídka">

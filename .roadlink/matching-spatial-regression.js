@@ -10,8 +10,9 @@ const geometryMigration = read("supabase/migrations/20261005160000_carrier_route
 const rpcMigration = read("supabase/migrations/20261005170000_matching_spatial_preselection.sql");
 const bboxMigration = read("supabase/migrations/20261005140000_matching_sql_geo_preselection.sql");
 const bboxFixMigration = read("supabase/migrations/20261005145000_matching_bbox_without_via.sql");
+const grantMigration = read("supabase/migrations/20261005171000_grant_via_coordinates_helper_to_authenticated.sql");
 const cleanupMigration = read("supabase/migrations-deferred/20261005180000_matching_spatial_cleanup.sql");
-const cleanupBody = cleanupMigration.replace(/--[^\n]*/g, "");
+const cleanupBody = cleanupMigration.replace(/\r\n/g, "\n").replace(/--[^\n]*/g, "");
 
 // Kontroly nad SQL běží na kódu BEZ KOMENTÁŘŮ. Migrace tu chybu výslovně
 // popisuje v komentáři (doslova uvádí chybný výraz jako příklad toho, co se
@@ -133,7 +134,11 @@ assert(/returns boolean/i.test(bboxFixMigration), "the helper answers a yes/no q
 assert(/coalesce\(cardinality\(p_via_place_ids\), 0\) = 0/i.test(bboxFixMigration), "an empty via list is a valid state, not missing data");
 assert(/coalesce\(cardinality\(p_via_latitudes\), 0\) = 0/i.test(bboxFixMigration), "orphaned via coordinates without via points are rejected");
 assert(/value <> value/i.test(bboxFixMigration), "NaN via coordinates are rejected (NaN <> NaN is true in Postgres)");
-assert(/revoke all[\s\S]*carrier_route_via_coordinates_valid[\s\S]*from anon[\s\S]*from authenticated/i.test(bboxFixMigration), "the helper is closed for clients");
+assert(/revoke all[\s\S]*carrier_route_via_coordinates_valid[\s\S]*from anon[\s\S]*from authenticated/i.test(bboxFixMigration), "the original helper migration stays historically accurate: it accidentally closed the helper for clients");
+assert(/grant\s+execute\s+on\s+function\s+public\.carrier_route_via_coordinates_valid\(text\[\], double precision\[\], double precision\[\]\)\s+to\s+authenticated/i.test(grantMigration), "authenticated clients can execute the helper that the carrier_routes trigger calls during inserts");
+assert(/revoke all[\s\S]*carrier_route_via_coordinates_valid[\s\S]*from public/i.test(grantMigration), "the repair still keeps the helper closed to PUBLIC");
+assert(/revoke all[\s\S]*carrier_route_via_coordinates_valid[\s\S]*from anon/i.test(grantMigration), "the repair still keeps the helper closed to anon");
+assert(!/\b(alter\s+table|update|insert\s+into|delete\s+from|drop\s+table|truncate)\b/i.test(code(grantMigration)), "the repair is grants-only: no table or data mutation");
 // `.trim()` nestačí: soubor začíná komentářem, takže `^` na trimovaném textu
 // ukazuje na `--`, ne na `begin`. Proto řádkový příznak `m`.
 assert(/^\s*begin;/im.test(bboxFixMigration) && /^\s*commit;\s*$/im.test(bboxFixMigration), "the fix is one explicit transaction");

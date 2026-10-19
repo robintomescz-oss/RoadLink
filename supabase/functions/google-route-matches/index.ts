@@ -66,27 +66,27 @@ Deno.serve(async (request) => {
   }
 
   const rawCandidates = Array.isArray(data) ? data : [];
-  // Známá hmotnost nesmí překročit známou volnou nosnost. Neznámá hodnota
-  // zůstává průchozí kvůli starším záznamům; UI ji výslovně označuje jako
-  // nevyplněnou, nikdy jako neomezenou kapacitu.
+  // Známé pásmo poptávky nesmí být vyšší než známé maximum kapacity. „Nevím“
+  // zůstává průchozí: pásmo není potvrzením skutečné nosnosti soupravy.
   const [{ data: routeWeightRow, error: routeWeightError }, { data: requestWeightRows, error: requestWeightError }] = await Promise.all([
-    admin.from("carrier_routes").select("available_weight_kg").eq("id", validated.routeId).eq("driver_id", identity.userId).maybeSingle(),
+    admin.from("carrier_routes").select("max_vehicle_weight_band").eq("id", validated.routeId).eq("driver_id", identity.userId).maybeSingle(),
     rawCandidates.length > 0
-      ? admin.from("tow_requests").select("id,cargo_weight_kg").in("id", rawCandidates.map((row: any) => row.request_id).filter((id: unknown): id is string => typeof id === "string"))
+      ? admin.from("tow_requests").select("id,vehicle_weight_band").in("id", rawCandidates.map((row: any) => row.request_id).filter((id: unknown): id is string => typeof id === "string"))
       : Promise.resolve({ data: [], error: null }),
   ]);
   if (routeWeightError || requestWeightError) {
     console.error("matching load lookup failed", { source: "candidate_load" });
     return json({ error: { code: "service_unavailable" } }, 503);
   }
-  const availableWeight = typeof routeWeightRow?.available_weight_kg === "number" ? routeWeightRow.available_weight_kg : null;
-  const cargoWeightByRequest = new Map((requestWeightRows ?? []).map((row: any) => [row.id, typeof row.cargo_weight_kg === "number" ? row.cargo_weight_kg : null]));
+  const weightRank = (value: unknown): number | null => ({ up_to_1600: 1, "1600_to_2000": 2, "2000_to_2500": 3, over_2500: 4 }[String(value)] ?? null);
+  const routeWeightRank = weightRank(routeWeightRow?.max_vehicle_weight_band);
+  const requestWeightRankByRequest = new Map((requestWeightRows ?? []).map((row: any) => [row.id, weightRank(row.vehicle_weight_band)]));
   const working: MatchingCandidate[] = rawCandidates
     .map(normalizeCandidate)
     .filter((item): item is MatchingCandidate => item !== null)
     .filter((item) => {
-      const cargoWeight = cargoWeightByRequest.get(item.requestId) ?? null;
-      return availableWeight === null || cargoWeight === null || cargoWeight <= availableWeight;
+      const requestWeightRank = requestWeightRankByRequest.get(item.requestId) ?? null;
+      return routeWeightRank === null || requestWeightRank === null || requestWeightRank <= routeWeightRank;
     });
   let incomplete = false;
 

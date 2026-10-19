@@ -155,6 +155,7 @@ const validCollapsed = {
   requestedEndDate: null,
   dateMode: 'concrete',
   vehicle: 'Osobní automobil',
+  vehicleWeightBand: 'up_to_1600',
   loadingState: 'drive',
 };
 assert(createFormLogic.validateRequestForm(validCollapsed).valid === true, 'request form validates with collapsed precise places (public labels only)');
@@ -168,6 +169,7 @@ const validCapacityCollapsed = {
   routeSpaces: '1',
   routeMaxDeviationKm: '',
   routeVehicleTypes: 'Osobní automobil',
+  maxVehicleWeightBand: 'up_to_1600',
   routePriceMode: 'fixed',
   routePrice: '1200',
 };
