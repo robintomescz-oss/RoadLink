@@ -6,26 +6,22 @@ import { navigateLegacy } from "../navigation/navigationRef";
 
 /**
  * Logika dolní lišty přesunutá z App.tsx (handleBottomNavItemPress).
- * Přepnutí položky lišty je přepnutí sekce, ne "krok dál", proto se dělá
+ * Přepnutí položky lišty je přepnutí sekce, ne "krok dál", proto se dělí
  * reset zásobníku (stejně jako původní setScreen, který nemá historii).
+ *
+ * Liška má tři položky: Přehled · Trh · Profil.
+ * `Moje` je tab uvnitř Trhu, `Vytvořit` je kontextová akce v Trhu a SOS
+ * zůstává na hlavní obrazovce — proto tu žádné z nich nejsou.
  */
 export function useBottomNavPress() {
-  const { userId, setTransportTab } = useAppContext();
+  const { userId } = useAppContext();
 
   return function handleBottomNavItemPress(key: string) {
     if (key === "overview") {
       navigateLegacy("home");
       return;
     }
-    if (key === "mine") {
-      if (!userId) {
-        navigateLegacy("login");
-        return;
-      }
-      setTransportTab("mine");
-      navigateLegacy("transport");
-      return;
-    }
+    // Profil pro odhlášeného uživatele otevře přihlášení — beze změny.
     if (key === "profile" && !userId) {
       navigateLegacy("login");
       return;
@@ -37,19 +33,15 @@ export function useBottomNavPress() {
 /** Původní BottomNavigation() z App.tsx. Aktivní položku určuje route, na které je vykreslená. */
 export function AppBottomNav() {
   const route = useRoute();
-  const { transportTab } = useAppContext();
   const onItemPress = useBottomNavPress();
   const screen = route.name;
 
+  // `Trh` je aktivní i na obrazovkách detailu trasy — patří do stejného modulu.
   const activeKey =
     screen === "home" || screen === "overview"
       ? "overview"
-      : screen === "sos"
-      ? "sos"
-      : screen === "transport" && transportTab === "mine"
-      ? "mine"
-      : screen === "create"
-      ? "create"
+      : screen === "transport" || screen === "routeDetail"
+      ? "transport"
       : screen === "profile"
       ? "profile"
       : undefined;

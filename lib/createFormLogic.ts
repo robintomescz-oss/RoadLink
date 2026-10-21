@@ -205,18 +205,34 @@ export type RouteMetricsSubmitPreview = {
   readyToSubmit: boolean;
 };
 
-export function currentRouteMetricsPairKey(originPlaceId: string | null | undefined, destinationPlaceId: string | null | undefined) {
+/**
+ * Klíč ověřené trasy musí obsahovat i průjezdní body — „Plzeň → Praha“ a
+ * „Plzeň → Praha přes Ostravu“ mají stejné konce, ale jinou trasu i vzdálenost.
+ * Formát je shodný s `routePairKey` v `routeMetricsPreviewLogic`, aby šel
+ * aktuální náhled přímo porovnat s klíčem z kontraktu.
+ */
+export function currentRouteMetricsPairKey(
+  originPlaceId: string | null | undefined,
+  destinationPlaceId: string | null | undefined,
+  viaPlaceIds?: readonly string[] | null,
+) {
   const origin = typeof originPlaceId === "string" ? originPlaceId.trim() : "";
   const destination = typeof destinationPlaceId === "string" ? destinationPlaceId.trim() : "";
-  return origin && destination ? `${origin}::${destination}` : null;
+  if (!origin || !destination) return null;
+  const via = (viaPlaceIds ?? [])
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .filter(Boolean)
+    .join(",");
+  return via ? `${origin}::${destination}::via:${via}` : `${origin}::${destination}`;
 }
 
 export function routeMetricsSubmitBlockReason(input: {
   originPlaceId: string | null | undefined;
   destinationPlaceId: string | null | undefined;
+  viaPlaceIds?: readonly string[] | null;
   preview: RouteMetricsSubmitPreview;
 }) {
-  const pairKey = currentRouteMetricsPairKey(input.originPlaceId, input.destinationPlaceId);
+  const pairKey = currentRouteMetricsPairKey(input.originPlaceId, input.destinationPlaceId, input.viaPlaceIds);
   if (!pairKey) return "Vyberte výchozí a cílové místo";
   if (input.preview.status === "loading") return "Počítám trasu…";
   if (!input.preview.readyToSubmit || input.preview.status !== "success" || !input.preview.metrics || input.preview.pairKey !== pairKey) {
@@ -228,6 +244,7 @@ export function routeMetricsSubmitBlockReason(input: {
 export function buildRouteMetricsPayload(input: {
   originPlaceId: string;
   destinationPlaceId: string;
+  viaPlaceIds?: readonly string[] | null;
   preview: RouteMetricsSubmitPreview;
 }) {
   const blockReason = routeMetricsSubmitBlockReason(input);
@@ -243,7 +260,13 @@ export function buildRouteMetricsPayload(input: {
 /** Kolik průjezdních bodů smí trasa obsahovat; odpovídá DB a `MAX_VIA_PLACES`. */
 export const MAX_VIA_PLACES = 3;
 
-export type ViaPlace = { placeId: string; publicLabel: string };
+export type ViaPlace = {
+  placeId: string;
+  publicLabel: string;
+  /** Soukromé ověřené souřadnice z Place Details; volitelné kvůli starším datům. */
+  latitude?: number | null;
+  longitude?: number | null;
+};
 
 /**
  * Znormalizuje seznam průjezdních bodů a odmítne rozbitý vstup.
@@ -272,10 +295,47 @@ export function normalizeViaPlaces(input: {
     if (placeId === origin || placeId === destination) return null;
     if (seen.has(placeId)) return null;
     seen.add(placeId);
-    result.push({ placeId, publicLabel });
+    // Soukromé souřadnice se přidají jen jako platná dvojice čísel; neúplná
+    // dvojice se vynechá, aby se do DB nedostal rozbitý pár (hlídá i trigger).
+    const hasCoordinates = typeof place?.latitude === "number" && Number.isFinite(place.latitude)
+      && typeof place?.longitude === "number" && Number.isFinite(place.longitude);
+    result.push(hasCoordinates
+      ? { placeId, publicLabel, latitude: place.latitude, longitude: place.longitude }
+      : { placeId, publicLabel });
   }
 
   return result;
+}
+
+/**
+ * Posune průjezdný bod o jeden krok v seznamu (pořadí je pro matching
+ * zásadní: trasa má pevné pořadí odjezd → body → cíl).
+ *
+ * Čistá funkce bez vedlejších účinků: mimo rozsah vrátí beze změny kopii,
+ * aby se na malém displeji nedala změna „ztratit“ kliknutím mimo okraj.
+ */
+export function moveViaPlace<T>(places: readonly T[], fromIndex: number, toIndex: number): T[] {
+  const list = [...(places ?? [])];
+  if (fromIndex === toIndex) return list;
+  if (fromIndex < 0 || toIndex < 0) return list;
+  if (fromIndex >= list.length || toIndex >= list.length) return list;
+  const [moved] = list.splice(fromIndex, 1);
+  list.splice(toIndex, 0, moved);
+  return list;
+}
+
+/** Smí přidat průjezdný bod: ne duplicitní, ne odjezd/cíl, ne nad limit. */
+export function canAddViaPlace(input: {
+  viaPlaces: readonly ViaPlace[];
+  placeId: string;
+  originPlaceId?: string | null;
+  destinationPlaceId?: string | null;
+}) {
+  const placeId = typeof input.placeId === "string" ? input.placeId.trim() : "";
+  if (!placeId) return false;
+  if ((input.viaPlaces ?? []).length >= MAX_VIA_PLACES) return false;
+  if (placeId === input.originPlaceId || placeId === input.destinationPlaceId) return false;
+  return !(input.viaPlaces ?? []).some((place) => place.placeId === placeId);
 }
 
 export function capacitySnapshot(input: {

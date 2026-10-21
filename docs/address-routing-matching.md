@@ -137,6 +137,230 @@ Tyto kroky se provádějí ručně a v tomto pořadí. Dokud nejsou hotové, fun
 
 Bezpečnostní poznámky k harnessu: skript bez přepínače `--confirm-live-rate-limit-test` neprovede žádné síťové volání; volá výhradně RPC limiteru, nikdy Edge Function ani Google API; nepoužívá privilegovaný klíč; nečte ani nemění bucket tabulku a nikdy ji neresetuje; token ani ID uživatele nikdy nevypisuje.
 
+## Matching v2 – trasy s průjezdními body
+
+Matching v1 uměl vložit poptávku jen mezi odjezd a cíl přímé trasy, proto byly
+trasy s `via_place_ids` z předvýběru vyřazené. Matching v2 počítá celou
+plánovanou trasu:
+
+`start → průjezdní body v zadaném pořadí → cíl`
+
+Pro každou poptávku se vygenerují přípustná vložení nakládky a vykládky tak, aby
+zůstalo zachováno pořadí původních průjezdních bodů a nakládka byla před
+vykládkou. Body, které už na trase leží (odjezd, cíl, průjezdní bod), se
+nevkládají znovu. Google se volá s `optimizeWaypointOrder: false`, takže pořadí
+zastávek nemůže změnit. Vybere se varianta s nejmenší dodatečnou vzdáleností;
+při shodě rozhoduje kratší dodatečný čas a nakonec stabilní klíč varianty.
+
+Zajížďka se počítá proti uloženým metrikám celé trasy za stejných podmínek
+(TRAFFIC_UNAWARE). Drobné záporné rozdíly ze zaokrouhlení se srovnají na nulu,
+ale materiálně kratší varianta (rozdíl větší než 1 km) je odmítnuta jako
+nesrovnatelná, aby nevznikla falešná shoda. Nulová zajížďka znamená jen to, že
+naplánovaná trasa vede přes daná místa — ne že přepravník nakládku fyzicky
+zvládne.
+
+### Polohový předvýběr a řazení variant ze soukromých souřadnic
+
+Průjezdní body volné kapacity se ukládají i se svými soukromými souřadnicemi
+(`carrier_routes.via_latitudes`, `via_longitudes`) — stejně jako už jsou uložené
+souřadnice odjezdu a cíle. Do databáze se dostanou jen jako úplná dvojice se
+stejným počtem prvků, jako má `via_place_ids`; rozbitý pár odmítne validační
+trigger. Souřadnice jsou citlivá data: interní RPC je vrací jen `service_role` a
+veřejný feed volných kapacit je nikdy nevybírá.
+
+Edge Function díky tomu dělá dva levné kroky bez jediného Google volání:
+
+1. **Předvýběr kandidátů v SQL.** Databáze si drží ohraničující obdélník celé
+   naplánované trasy (`carrier_routes.bbox_*`, dopočítaný triggerem ze souřadnic
+   odjezdu, cíle i průjezdních bodů). RPC kandidáty nejprve odfiltruje
+   obdélníkem rozšířeným o `max_deviation_km` + 10 km rezerva a pak je seřadí
+   podle součtu havérsine vzdálenosti nakládky a vykládky od bodů celé trasy
+   (před termínem). Vrátí jen `MAX_MATCH_CANDIDATES` nejbližších, takže se
+   žádné široké okno netáhne přes síť. Protože se měří vůči celé trase, poptávka
+   poblíž vzdáleného průjezdního bodu se neztratí a kandidáti bez souřadnic se
+   filtru vyhnou — v pořadí skončí až na konci.
+2. **Řazení variant vložení.** Z hrubé havérsine zajížďky se seřadí varianty a
+   přesně přes Compute Routes se ověří jen `MAX_EXACT_VARIANTS_PER_CANDIDATE`
+   nejlepších. Přímé trasy mají jedinou variantu a chovají se jako dřív.
+
+Trasa s `n` průjezdními body má až `(n+1)(n+2)/2` přípustných vložení. Když
+souřadnice chybí (starší data), spadne server na záložní `computeRouteMatrix`
+(jedno Google volání) a teprve pak na deterministické pořadí. Matrix vrací jen
+čísla (žádnou geometrii ani adresy).
+
+### Prostorový předvýběr přes PostGIS (fázované zavedení)
+
+Předvýběr jde ještě dál: místo čtyř obyčejných sloupců `bbox_*` se trasa ukládá
+jako `route_line geography(LineString, 4326)` s GiST indexem a kandidáti se
+filtrují dotazem `ST_DWithin(route_line, bod, radius)` přímo v databázi.
+Řazení pak používá `ST_Distance` od trasy místo haversine vzdálenosti od
+nejbližšího bodu.
+
+Zavedení je rozdělené na čtyři kroky, aby se dalo mezi nimi zastavit a otočit
+zpět (čtvrtý je už úklid a je jednosměrný):
+
+0. `20261005145000_matching_bbox_without_via.sql` — oprava předchozí vrstvy
+   `bbox_*`: triggery považovaly trasu BEZ průjezdných bodů za trasu bez
+   geometrie (chybějící `via_latitudes` se splétlo s chybějícími souřadnicemi),
+   a tím jí zůstalo `bbox` i `route_line` NULL. Průjezdné body nejsou povinné;
+   rozhodnutí o úplnosti teď žije v jednom helperu
+   `carrier_route_via_coordinates_valid()`, který sdílejí všechny tři triggery.
+1. `20261005150000_enable_postgis.sql` — `create extension if not exists postgis
+   schema extensions` a okamžité ověření, že typ `geography(linestring)` existuje.
+   Kdyby extension nebylo v plánu dostupná, skript skončí chybou a další kroky se
+   nespustí.
+2. `20261005160000_carrier_route_spatial_line.sql` — sloupec `route_line`,
+   trigger `assign_carrier_route_line` (geometrii nikdy nezadává klient),
+   dopočet existujících řádků a GiST index.
+3. `20261005170000_matching_spatial_preselection.sql` — RPC přepsaná přes
+   `create or replace` (bez `DROP`, tedy bez okna bez grantu) s prostorovým
+   filtrem a řazením podle `ST_Distance`.
+4. `20261005180000_matching_spatial_cleanup.sql` — až po ověření produkčního
+   chodu: odstraní `bbox_*`, helper i starý trigger a nechá jediný zdroj pravdy
+   pro odvozenou geometrii.
+
+**Přesnost je omezená a je to záměrné.** `route_line` je lomená čára spojující
+krajní body a průjezdné body, nikoli vlastní silniční geometrie z Googlu. Vzdálenost
+se tedy počítá k této aproximaci a může podhodnotit skutečnou vzdálenost tam, kde
+silnice výrazně zatáčí. Pro předvýběr kandidátů je to přijatelné — je to filtr
+„nevylučujeme“, jehož účelem je ušetřit Google volání, a konečné rozhodnutí
+stejně ověřuje `google-route-matches` přes Compute Routes, kde se při nejistotě
+vrací `incomplete = true`. Užší, přesnější odhad by vyžadoval ukládat polyline
+z Google; to je věc pro samostatný návrh, ne pro tento krok.
+
+Proč filtr bezpečně netrhá platné shody: varianta trasy, která vloží vyzvednutí
+P a vyložení D, je oproti základní trase delší nejméně o
+`dist(P, trasa) + dist(D, trasa)` — silniční vzdálenost je vždy nejméně
+vzdálenost po nejkratším oblouku a obě odbočky jsou nesouběžné části trasy.
+Kandidát, jehož některý bod je dále než `max_deviation_km`, by tedy shodu
+stejně nedostal. Radius je povolená zajížďka + 10 km rezerva.
+
+Sloupce `bbox_*` se **nemížou hned** — zůstávají v databázi, dokud se nové RPC
+neověří v produkci; předchozí krok tak zůstává použitelný jako návratová cesta.
+Úklid je samostatný čtvrtý krok (viz níže) a jde o jednosměrnou změnu.
+
+### Úklid po ověření (`20261005180000_matching_spatial_cleanup.sql`)
+
+Teprve když prostorový předvýběr běží v produkci a chovává se správně, odstraní
+zastaralý mezikrok:
+
+* trigger `carrier_routes_bbox_assign`, funkci `assign_carrier_route_bbox()`,
+  indexy `carrier_routes_bbox_lat_idx`/`_lng_idx` a sloupce `bbox_min_lat`,
+  `bbox_max_lat`, `bbox_min_lng`, `bbox_max_lng` (jejich CHECK omezení zmizí
+  spolu se sloupci),
+* helper `roadlink_haversine_meters`.
+
+Zároveň přepojí odvozování geometrie na **jediný zdroj pravdy** — funkci
+`assign_carrier_route_geometry()` s triggerem `carrier_routes_route_geometry_assign`,
+a zahodí starou `assign_carrier_route_line()`. Chování je beze změny: klient
+geometrii nikdy nezadává, `search_path = ''` i revokace zůstávají. Validační
+trigger `carrier_routes_via_places_validate` zůstává nedotčený záměrně — hlídá
+vstup, odvozování je věc jediného triggeru.
+
+Migrace je idempotentní (každý `DROP` je přes `if exists`) a běží jako jedna
+transakce. Nejdřív běží blok předpokladů, který **skončí výjimkou a nic neuklidí**,
+pokud:
+
+1. RPC `get_route_matching_candidates_internal` ještě nečte `bbox_*` nebo
+   `roadlink_haversine_meters` (tedy je opravdu použitý prostorový krok),
+2. existuje trasa s úplnými souřadnicemi, která má `route_line IS NULL`,
+3. nad `carrier_routes` není platný a připravený GiST index.
+
+Migrace nemění žádná data (`route_line`, souřadnice i geometrie zůstávají),
+nemění RLS, grants ani RPC, neprovádí žádný `UPDATE`/`DELETE` a nesahá na
+veřejný feed. **Vratná není** — sloupce zmizí. Návratová cesta, když je nutná,
+je znovu aplikovat `20261005140000_matching_sql_geo_preselection.sql`.
+
+### Ověření po nasazení prostorových kroků
+
+Dva nástroje, oba read-only:
+
+1. **Smoke test v SQL** — `supabase/smoke/matching_spatial_smoke.sql`
+   (Supabase SQL Editor nebo `psql`). Ověří předpoklady (extension, typy, sloupec,
+   trigger, platný GiST index, RPC bez závislosti na `bbox_*`), pokrytí dat
+   (trasa s úplnými souřadnicemi má `route_line`), vypíše `EXPLAIN (ANALYZE,
+   BUFFERS)` — izolovanou sondu i celého dotazu předvýběru — a nakonec
+   automaticky ověří smlouvu RPC: limit, monotónní pořadí od nejbližšího
+   kandidáta a to, že kandidáti bez vypočtené vzdálenosti jsou až na konci.
+   V `EXPLAIN` je důležité rozlišit dvě situace. Izolovaná sonda (hledání
+   tras v okruhu napříč tabulkou) má v plánu `Index Scan`/`Bitmap Index Scan`
+   přes `carrier_routes_route_line_gist_idx`; `Seq Scan` tam znamená, že je v
+   datech málo tras a plánovač volí správně. **Plán samotného RPC ale GiST
+   nikdy neobsahuje** — RPC filtruje `cr.id = p_route_id`, tedy jednu trasu, a
+   prostorová podmínka se vyhodnocuje nad jediným řádkem; očekávaný je tedy
+   `Index Scan` po primárním klíči. Úzké místo předvýběru je spojení
+   s `tow_requests`, ne `carrier_routes`.
+   Podrobná diagnostika je v `supabase/smoke/matching_spatial_index_proof.sql`.
+   Kontrola „RPC nesahá na `bbox_*`“ je
+   historická — po úklidu (`20261005180000`) je triviálně splněná, ale nijak
+   neublíží, protože i pak má před úklidem co odhalit.
+2. **Živý harness RPC** — `.roadlink/matching-spatial-integration.mjs`
+   Ověří smlouvu RPC proti živé databázi: limit, pořadí, že cizí trasa nevrátí
+   nic a že cizí řidič neuvidí žádného kandidáta. Bez přepínače
+   `--confirm-live-spatial-smoke` skončí bez jediného síťového volání.
+   Neprochází se do běžného regresního runneru, nevolá Google API ani žádnou
+   Edge Function, nemění žádná data a nevypisuje place ID, souřadnice, geometrii
+   ani ID trasy — jen počty.
+
+Oba nástroje jsou staticky kryté regresí
+[.roadlink/matching-spatial-regression.js](../.roadlink/matching-spatial-regression.js),
+takže se smazání bezpečnostních mantinelů zachytí v běžném `npm run check`.
+
+### Omezení a neúplnost
+
+Havérsine i matrix jsou jen bodové odhady pro seřazení — rozhoduje vždy přesné
+ověření přes Compute Routes. Pokud se některé varianty nebo kandidáti neověří
+(vyčerpaný rozpočet, selhání Google, oříznutí na `MAX_MATCH_CANDIDATES`), odpověď
+má `incomplete = true` a UI to zobrazí („Výsledek může být neúplný“). Výsledek
+tedy není globálně nejlepší možné vložení, ale nejlepší z přesně ověřených
+variant; chyba Google API se nikdy netváří jako „žádné shody“.
+
+### Soukromí
+
+`via_latitudes`/`via_longitudes` zůstávají soukromé: jsou součástí interního RPC
+pro `service_role`, veřejný feed je nevybírá a do odpovědi klienta se nikdy
+dostanou jen ID poptávky, skóre, kilometry/minuty zajížďky a bezpečné důvody.
+Place ID, adresy ani souřadnice se nevrací.
+
+### Nasazení (ruční kroky)
+
+1. Aplikovat dopřednou migraci `20261005120000_matching_includes_via_routes.sql`
+   (interní RPC vrací `route_via_place_ids`; grant zůstává jen `service_role`).
+2. Aplikovat dopřednou migraci `20261005130000_matching_via_coordinates.sql`
+   (přidá `via_latitudes`/`via_longitudes`, validační trigger a RPC s polohou).
+3. Aplikovat dopřednou migraci `20261005140000_matching_sql_geo_preselection.sql`
+   (přidá `bbox_*`, trigger, indexy, funkci `roadlink_haversine_meters` a RPC
+   s polohovým filtrem a pořadím podle blízkosti).
+4. Aplikovat `20261005145000_matching_bbox_without_via.sql` hned po kroku 3 —
+   opravuje trigger, který trasám bez průjezdných bodů nechal `bbox` NULL.
+5. Aplikovat `20261005150000_enable_postgis.sql` — pokud skončí chybou, zastavit
+   a zjistit, zda je prostorová extension v plánu dostupná.
+6. Aplikovat `20261005160000_carrier_route_spatial_line.sql` a read-only ověřit,
+   že `route_line` je naplněný u tras se souřadnicemi.
+7. Teprve poté `20261005170000_matching_spatial_preselection.sql`.
+8. Ověřit nasazení: `supabase/smoke/matching_spatial_smoke.sql` (předpoklady,
+   pokrytí, `EXPLAIN`, smlouva RPC) a volitelně
+   `.roadlink/matching-spatial-integration.mjs --confirm-live-spatial-smoke`.
+9. Nasadit Edge Function `google-route-matches`.
+10. Počkat na ověřený produkční chod (alespoň pár dní reálných dotazů) a teprve
+    pak aplikovat `20261005180000_matching_spatial_cleanup.sql`. Migrace nejdřív
+    ověří předpoklady a při nesplnění skončí výjimkou bez jakékoli změny. Je
+    jednosměrná — návrat je znovu aplikovat `20261005140000`.
+10. Ověřit read-only, že RPC vrací `route_via_place_ids`, `route_via_latitudes`,
+    `route_via_longitudes`, souřadnice poptávky a `route_proximity_meters`, že
+    `anon` ani `authenticated` nemají EXECUTE a že `security definer` +
+    `search_path = ''` zůstaly.
+11. Ověřit limity Google Routes pro mezilehlé body: maximum je 25 intermediátů,
+    matching v2 jich použije nejvýše 6 (3 vias + nakládka + vykládka + odjezd).
+12. Po úklidu znovu pustit smoke test — celý musí doběhnout bez výjimky.
+
+Vědomé omezení kroku s `bbox_*`: btree index nad dvěma sloupci obdélníku plné
+prostorové dotazy neobslouží. Po zavedení a **ověření** `route_line` tento krok
+slouží už jen jako návratová cesta a je odstraňován migrací
+`20261005180000_matching_spatial_cleanup.sql` — viz výše.
+
+Nic z toho se v tomto kroku nenasazuje.
+
 ## Podmínky zahájení integrace
 
 - Google Cloud projekt s aktivním billingem;

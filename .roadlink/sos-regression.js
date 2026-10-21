@@ -272,9 +272,13 @@ assert(summary.vehicleLabel.includes("Škoda"), "souhrn obsahuje vozidlo");
   assert(navigator.includes('name="sos"'), "SOS route je v navigátoru");
   const route = read("screens/Sos/SosRoute.tsx");
   assert(route.includes("SosScreen") && route.includes('useHardwareBackTo("home")'), "SOS route používá nový screen a vrací se na Přehled");
+  // Zjednodušení navigace (2026-10-03): SOS se ze spodní lišty odstranilo,
+  // ale musí zůstat dostupné z hlavní obrazovky přes velkou kartu. Tísňové
+  // volání na průvodci zůstává všude.
   const bottomNav = read("components/BottomNav.tsx");
-  assert(bottomNav.includes('key: "sos"'), "SOS je v hlavní navigaci");
-  assert(bottomNav.includes("bottomNavSosButton"), "SOS tlačítko má vlastní výrazný styl");
+  assert(!bottomNav.includes('key: "sos"'), "SOS už není položkou spodní lišty");
+  const homeRoute = read("screens/Home/HomeRoute.tsx");
+  assert(homeRoute.includes("onSos") && /navigateLegacy\("sos"\)/.test(homeRoute), "SOS zůstává dostupné z hlavní obrazovky");
   const screen = read("screens/Sos/SosScreen.tsx");
   assert(screen.includes("EmergencyCallBar") && screen.includes("TÍSŇOVÉ VOLÁNÍ"), "tísňové volání je dostupné na všech krocích");
   assert(screen.includes("accessibilityRole") && screen.includes("accessibilityLiveRegion"), "obrazovka používá role a live region");

@@ -5,7 +5,7 @@ import Svg, { Circle, Path, Rect } from "react-native-svg";
  * Sdílí vizuální styl s ikonami Global Home (viewBox 48, stroke 3,
  * kulaté konce) — jednotná tloušťka a velikost na spodní liště.
  */
-export type NavIconName = "dashboard" | "create" | "mine" | "person" | "sos";
+export type NavIconName = "dashboard" | "market" | "person";
 
 export function NavIcon({ name, color, size = 24 }: { name: NavIconName; color: string; size?: number }) {
   return (
@@ -17,18 +17,14 @@ export function NavIcon({ name, color, size = 24 }: { name: NavIconName; color: 
           <Rect x="7" y="27" width="14" height="14" rx="3" />
           <Rect x="27" y="27" width="14" height="14" rx="3" />
         </>
-      ) : name === "sos" ? (
+      ) : name === "market" ? (
+        // Trh: stříška stánku — dva výkladce a pult. Odlišuje se od „mine“
+        // (dokument) i od domečku, aby položka nebyla zaměnitelná.
         <>
-          <Path d="M13 34V23a11 11 0 0 1 22 0v11Z" />
-          <Path d="M9 39h30" />
-          <Path d="M24 4v5M7 11l4 4M41 11l-4 4" />
-        </>
-      ) : name === "mine" ? (
-        <>
-          <Path d="M10 10h18l10 10v18H10z" />
-          <Path d="M28 10v10h10" />
-          <Path d="M16 28h16" />
-          <Path d="M16 35h12" />
+          <Path d="M8 21h32" />
+          <Path d="M11 21v-9h26v9" />
+          <Path d="M17 21v-6h14v6" />
+          <Path d="M9 12l4-6h22l4 6" />
         </>
       ) : (
         <>

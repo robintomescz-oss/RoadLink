@@ -223,11 +223,6 @@ export const styles = StyleSheet.create({
   bottomNavIcon: { color: DESIGN.colors.textSecondary, fontSize: 23, lineHeight: 27, fontWeight: "700" },
   bottomNavText: { color: DESIGN.colors.textSecondary, fontSize: 12, lineHeight: 16, fontWeight: "600" },
   bottomNavTextActive: { color: DESIGN.colors.primary },
-  bottomNavPlusCircle: { width: 48, height: 48, borderRadius: 24, overflow: "hidden", backgroundColor: DESIGN.colors.actionBlue, alignItems: "center", justifyContent: "center", marginTop: -16, shadowColor: DESIGN.colors.actionBlue, shadowOpacity: 0.3, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 4 },
-  bottomNavPlusGlyph: { color: DESIGN.colors.surface, fontSize: 28, lineHeight: 30, fontWeight: "700", marginTop: -3 },
-  bottomNavCreateLabel: { color: DESIGN.colors.textSecondary, fontSize: 12, lineHeight: 16, fontWeight: "600" },
-  bottomNavSosButton: { width: 46, height: 46, borderRadius: 12, backgroundColor: DESIGN.colors.danger, alignItems: "center", justifyContent: "center", marginTop: -12, shadowColor: DESIGN.colors.danger, shadowOpacity: 0.35, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 4 },
-  bottomNavSosText: { color: DESIGN.colors.surface, fontSize: 15, fontWeight: "900", letterSpacing: 0.5 },
   profileHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
   profileBack: { color: DESIGN.colors.textPrimary, fontSize: 16, fontWeight: "700" },
   profileHeaderIcon: { color: DESIGN.colors.primary, fontSize: 24 },
@@ -243,6 +238,9 @@ export const styles = StyleSheet.create({
   profileLinkText: { color: DESIGN.colors.textSecondary, marginTop: 5 },
   // Redesign profilu do karet: kompaktní stavové řádky a nadpisy karet.
   profileCardHeading: { color: DESIGN.colors.textPrimary, fontSize: 16, fontWeight: "800", marginBottom: 4 },
+  // Dvě sekce profilu (Můj účet a SOS / Přepravce) — vizuální hierarchie.
+  profileSectionTitle: { color: DESIGN.colors.textPrimary, fontSize: 19, fontWeight: "800", marginTop: DESIGN.spacing.lg, marginBottom: 2 },
+  profileSectionHint: { color: DESIGN.colors.textSecondary, fontSize: 12, lineHeight: 17, marginBottom: DESIGN.spacing.sm },
   // Krátké vysvětlení pod nadpisem karty (např. k čemu karta slouží).
   profileCardHint: { color: DESIGN.colors.textSecondary, fontSize: 12, lineHeight: 17, marginTop: 2, marginBottom: 8 },
   profileSummaryRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 7, borderTopWidth: 1, borderTopColor: DESIGN.colors.border },
@@ -256,6 +254,13 @@ export const styles = StyleSheet.create({
   customerContent: { padding: 20, paddingTop: 18, paddingBottom: 32 },
   scroll: { flex: 1 },
   bigTitle: { fontSize: 24, fontWeight: "800", color: DESIGN.colors.textPrimary, marginBottom: DESIGN.spacing.sm },
+  // Kontextová akce vytvoření v obrazovce Trh. Kompaktní, ale výrazná:
+  // sedí mezi ScrollView a spodní lištou, takže ji UI nepřekrývá.
+  transportCreateBar: { paddingHorizontal: DESIGN.spacing.lg, paddingTop: DESIGN.spacing.sm, paddingBottom: DESIGN.spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: DESIGN.colors.border, backgroundColor: DESIGN.colors.surface },
+  transportCreateAction: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 48, borderRadius: DESIGN.radius.large, backgroundColor: DESIGN.colors.primary, paddingHorizontal: DESIGN.spacing.md },
+  transportCreateActionPlus: { color: DESIGN.colors.surface, fontSize: 22, fontWeight: "700", lineHeight: 26 },
+  transportCreateActionText: { color: DESIGN.colors.surface, fontSize: 14, fontWeight: "800", letterSpacing: 0.2, flexShrink: 1, textAlign: "center" },
+
   primary: { backgroundColor: DESIGN.colors.primary, borderRadius: DESIGN.radius.large, paddingVertical: DESIGN.spacing.md, paddingHorizontal: DESIGN.spacing.lg, alignItems: "center", marginTop: DESIGN.spacing.lg },
   primaryDisabled: { opacity: 0.55 },
   primaryText: { color: DESIGN.colors.surface, fontSize: 14, fontWeight: "800", letterSpacing: 0.2 },

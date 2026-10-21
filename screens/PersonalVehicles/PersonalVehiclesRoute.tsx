@@ -55,7 +55,9 @@ export default function PersonalVehiclesRoute() {
       </View>
 
       <Text style={styles.empty}>
-        Soukromá vozidla pro rychlé předvyplnění v SOS. Nejsou součástí přepravního trhu ani doporučených shod.
+        Osobní vozidla slouží k rychlejšímu vyplnění SOS – předvyplní značku, model a registraci.
+        Je to volitelný údaj a zůstává soukromý: neukládáme VIN, číslo pojistné smlouvy ani přesnou polohu.
+        Vozidla nejsou součástí přepravního trhu ani doporučených shod.
       </Text>
 
       {personalVehiclesLoading ? (
@@ -71,7 +73,7 @@ export default function PersonalVehiclesRoute() {
         </ScrollView>
       ) : personalVehicles.length === 0 ? (
         <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-          <Text style={styles.empty}>Zatím nemáte uložené žádné vozidlo.</Text>
+          <Text style={styles.empty}>Zatím nemáte uložené žádné vozidlo. Přidání je volitelné a usnadní vyplnění SOS.</Text>
           <TouchableOpacity style={styles.primary} onPress={goToAdd} accessibilityLabel="Přidat moje vozidlo">
             <Text style={styles.primaryText}>Přidat moje vozidlo</Text>
           </TouchableOpacity>

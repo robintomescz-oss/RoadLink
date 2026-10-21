@@ -22,7 +22,8 @@ function loadTs(file, stubs = {}) {
 }
 
 const migration = read("supabase/migrations/0017_matching_candidate_preselection.sql");
-const viaGuardMigration = read("supabase/migrations/20261001090000_matching_excludes_via_routes.sql");
+const viaMigration = read("supabase/migrations/20261005120000_matching_includes_via_routes.sql");
+const coordinatesMigration = read("supabase/migrations/20261005130000_matching_via_coordinates.sql");
 const index = read("supabase/functions/google-route-matches/index.ts");
 const config = read("supabase/config.toml");
 const requestLogic = loadTs("supabase/functions/google-route-matches/matchingRequest.ts", {
@@ -46,16 +47,32 @@ assert(/revoke all[\s\S]*from authenticated/i.test(migration));
 assert(/grant execute[\s\S]*to service_role/i.test(migration));
 assert(!/grant execute[\s\S]*to (anon|authenticated)/i.test(migration));
 assert(!/\b(delete|truncate|drop table|update|insert into)\b/i.test(migration), "draft migration mutates no business data");
-assert(/coalesce\(cardinality\(cr\.via_place_ids\), 0\) = 0/i.test(viaGuardMigration), "matching v1 excludes routes with via points instead of calculating a misleading detour");
-assert(/security definer/i.test(viaGuardMigration) && /set search_path = ''/i.test(viaGuardMigration), "via guard keeps the internal RPC hardening");
-assert(!/\b(delete|truncate|drop table|update|insert into)\b/i.test(viaGuardMigration), "via guard mutates no business data");
+assert(/route_via_place_ids text\[\]/i.test(viaMigration), "matching v2 returns the carrier via points");
+assert(/cr\.via_place_ids/i.test(viaMigration), "matching v2 selects the carrier via points");
+assert(!/coalesce\(cardinality\(cr\.via_place_ids\), 0\) = 0/i.test(viaMigration), "matching v2 no longer excludes routes with via points");
+assert(/security definer/i.test(viaMigration) && /set search_path = ''/i.test(viaMigration), "via migration keeps the internal RPC hardening");
+assert(/revoke all[\s\S]*from anon/i.test(viaMigration) && /revoke all[\s\S]*from authenticated/i.test(viaMigration), "via migration revokes anon and authenticated");
+assert(/grant execute[\s\S]*to service_role/i.test(viaMigration) && !/grant execute[\s\S]*to (anon|authenticated)/i.test(viaMigration), "via migration grants execute only to service_role");
+assert(!/\b(delete|truncate|drop table|update|insert into)\b/i.test(viaMigration), "via migration mutates no business data");
+assert(/via_latitudes double precision\[\]/i.test(coordinatesMigration) && /via_longitudes double precision\[\]/i.test(coordinatesMigration), "coordinate migration adds private via coordinate columns");
+assert(/validate_carrier_route_via_places/i.test(coordinatesMigration), "coordinate migration validates the coordinate pair and range");
+assert(/route_via_latitudes double precision\[\]/i.test(coordinatesMigration) && /request_pickup_lat double precision/i.test(coordinatesMigration), "matching RPC returns route and request coordinates");
+assert(/limit least\(greatest\(coalesce\(p_limit, 5\), 1\), 25\)/i.test(coordinatesMigration), "matching RPC can fetch a wider candidate window");
+assert(/security definer/i.test(coordinatesMigration) && /set search_path = ''/i.test(coordinatesMigration), "coordinate migration keeps the internal RPC hardening");
+assert(/grant execute[\s\S]*to service_role/i.test(coordinatesMigration) && !/grant execute[\s\S]*to (anon|authenticated)/i.test(coordinatesMigration), "coordinate migration grants execute only to service_role");
+assert(!/\b(delete from|truncate table|update public\.|insert into public\.|drop table)\b/i.test(coordinatesMigration), "coordinate migration mutates no business data");
 
 assert(/\[functions\.google-route-matches\][\s\S]*verify_jwt = true/.test(config));
 assert(/resolveUserId\(token\)/.test(index));
 assert(/SUPABASE_SERVICE_ROLE_KEY/.test(index));
 assert(/get_route_matching_candidates_internal/.test(index));
 assert(/p_driver_id: identity\.userId/.test(index));
-assert(/for \(const candidate of candidates\)[\s\S]*consumeGoogleRoutesRateLimit\(token\)[\s\S]*fetch\(MATCHING_COMPUTE_URL/.test(index), "each Google call consumes its own limiter slot");
+assert(/takeGoogleCall[\s\S]*consumeGoogleRoutesRateLimit\(token\)/.test(index), "every Google call goes through the shared limiter helper");
+assert(/for \(const candidate of working\)[\s\S]*takeGoogleCall\(\)[\s\S]*fetch\(MATCHING_COMPUTE_URL/.test(index), "each exact route call consumes its own limiter slot");
+assert(/p_limit: MAX_MATCH_CANDIDATES/.test(index), "matching asks the RPC only for preselected candidates");
+assert(/buildRouteCoordinateMap\(candidate\)[\s\S]*rankVariantsByCoordinates/.test(index), "variant ranking prefers stored coordinates before the matrix");
+assert(!/MAX_CANDIDATE_FETCH|selectGeoPreselectedCandidates/.test(index), "candidate preselection moved into SQL");
+assert(/MATCHING_MATRIX_URL/.test(index) && /takeGoogleCall\(\)[\s\S]*fetch\(MATCHING_MATRIX_URL/.test(index), "the matrix screening also consumes a limiter slot");
 assert(!/console\.(log|error|warn)\([^\n]*(token|userId|placeId|body)/i.test(index));
 assert(/matches\.sort\(\(a, b\) => b\.score - a\.score/.test(index));
 
@@ -147,7 +164,8 @@ const routeDetail = read("screens/Transport/RouteDetailRoute.tsx");
 assert(/activeRoute\.driverId === userId[\s\S]*DOPORUČENÉ SHODY/.test(routeDetail), "matching UI is shown only in the owner branch");
 assert(/fetchRouteMatches\(activeRouteId\)/.test(routeDetail));
 assert(/Nabídka se nikdy neodešle automaticky/.test(routeDetail));
-assert(/Automatické shody zatím fungují jen pro přímé trasy bez průjezdních bodů/.test(routeDetail), "owner sees a clear matching limitation for a via route");
+assert(!/Automatické shody zatím fungují jen pro přímé trasy bez průjezdních bodů/.test(routeDetail), "via routes are no longer excluded in the matching UI");
+assert(/včetně průjezdních bodů/.test(routeDetail), "owner sees that matching uses the full planned route");
 assert(/loadAuthorizedJobDetail\(match\.requestId\)/.test(routeDetail));
 assert(!/submitInterest\(match\.requestId\)/.test(routeDetail), "opening a match performs no mutation");
 

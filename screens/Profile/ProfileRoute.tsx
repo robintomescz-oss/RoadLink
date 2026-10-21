@@ -11,10 +11,10 @@ import { useHardwareBackTo } from "../../hooks/useBackHandlers";
 /**
  * screen === "profile" z App.tsx.
  *
- * Redesign do karet: výchozí stav je krátký read-only souhrn (osobní údaje,
- * přepravní profil, vozidla, ověření/pojištění, moje přeprava, účet). Dlouhé
- * editační formuláře se otevřou až akcí „Upravit“ — business logika (hooky,
- * payloady, Supabase) zůstává beze změny.
+ * Dvě srozumitelné sekce: „Můj účet a SOS“ (osobní údaje + osobní vozidla pro
+ * předvyplnění SOS) a „Přepravce“ (přepravní profil, technika, ověření a moje
+ * přepravy). Výchozí stav je krátký read-only souhrn; dlouhé editační formuláře
+ * se otevřou až akcí „Upravit“. Datová ani auth logika se nemění.
  */
 export default function ProfileRoute() {
   const { profileState, authState, userId, setTransportTab, personalVehiclesState } = useAppContext();
@@ -60,6 +60,10 @@ export default function ProfileRoute() {
     signOutUser();
   };
 
+  // Při editaci se skrývá spodní lišta, aby nešlo omylem opustit rozpracované údaje.
+  const editing = profileEditing || carrierProfileEditing;
+  const bottomNav = editing ? null : <BottomNav />;
+
   if (profileLoading && !profile) {
     return (
       <SafeAreaView style={styles.container}>
@@ -67,7 +71,7 @@ export default function ProfileRoute() {
         <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
           <Text style={styles.empty}>Načítám profil…</Text>
         </ScrollView>
-        <BottomNav />
+        {bottomNav}
       </SafeAreaView>
     );
   }
@@ -80,7 +84,7 @@ export default function ProfileRoute() {
         <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
           <Text style={styles.empty}>Pro zobrazení profilu se přihlaste.</Text>
         </ScrollView>
-        <BottomNav />
+        {bottomNav}
       </SafeAreaView>
     );
   }
@@ -91,7 +95,13 @@ export default function ProfileRoute() {
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {profile ? (
           <>
-            {/* A. Osobní údaje */}
+            {/* ── SEKCE 1: Můj účet a SOS ─────────────────────────────── */}
+            <Text style={styles.profileSectionTitle}>Můj účet a SOS</Text>
+            <Text style={styles.profileSectionHint}>
+              Osobní vozidlo pomůže rychleji vyplnit SOS. Je volitelné a zůstává soukromé.
+            </Text>
+
+            {/* Osobní údaje */}
             {profileEditing ? (
               <View style={styles.profileCard}>
                 <Text style={styles.profileCardHeading}>Osobní údaje</Text>
@@ -127,7 +137,37 @@ export default function ProfileRoute() {
               </View>
             )}
 
-            {/* B. Přepravní profil */}
+            {/* Moje vozidla — soukromá vozidla, jen pro SOS. */}
+            <View style={styles.profileCard}>
+              <Text style={styles.profileCardHeading}>Moje vozidla</Text>
+              {/* Chyba načtení se nesmí převést na „Žádné vozidlo“ — to by
+                  tvrdilo, že uživatel žádné nemá, a přitom je jen nelze načíst. */}
+              <Text style={styles.profileSummaryValue}>
+                {personalVehiclesLoading
+                  ? "Načítám moje vozidla…"
+                  : personalVehiclesError
+                  ? "Nepodařilo se načíst"
+                  : personalVehicles.length === 0
+                  ? "Žádné vozidlo"
+                  : personalVehicles.length === 1
+                  ? "1 vozidlo"
+                  : `${personalVehicles.length} vozidel`}
+              </Text>
+              <Text style={styles.profileCardHint}>Soukromá vozidla pro rychlé předvyplnění v SOS. Nejsou součástí přepravního trhu.</Text>
+              <TouchableOpacity style={styles.customerActionRow} onPress={() => navigateLegacy("personalVehicles")} accessibilityLabel="Spravovat moje vozidla">
+                <Text style={styles.customerActionIcon}>▤</Text>
+                <Text style={styles.customerActionText}>Spravovat moje vozidla</Text>
+                <Text style={styles.customerActionArrow}>›</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* ── SEKCE 2: Přepravce ───────────────────────────────────── */}
+            <Text style={styles.profileSectionTitle}>Přepravce</Text>
+            <Text style={styles.profileSectionHint}>
+              Profil, technika a ověření pro nabídky přepravy a volnou kapacitu.
+            </Text>
+
+            {/* Přepravní profil */}
             {carrierProfileLoading && !carrierProfile ? (
               <View style={styles.profileCard}>
                 <Text style={styles.profileCardHeading}>Přepravní profil</Text>
@@ -234,41 +274,21 @@ export default function ProfileRoute() {
               </View>
             )}
 
-            {/* C. Přepravní vozidla — zůstávají navázaná na přepravní profil */}
+            {/* Přepravní vozidla — technika navázaná na přepravní profil. */}
             <View style={styles.profileCard}>
               <Text style={styles.profileCardHeading}>Přepravní vozidla</Text>
               <Text style={styles.profileSummaryValue}>
                 {vehiclesLoading ? "Načítám vozidla…" : vehicles.length === 0 ? "Žádná vozidla" : vehicles.length === 1 ? "1 vozidlo" : `${vehicles.length} vozidel`}
               </Text>
               <Text style={styles.profileCardHint}>Odtahová technika pro kapacitu, nabídky a shody.</Text>
-              <TouchableOpacity style={styles.primary} onPress={() => navigateLegacy("vehicles")}>
-                <Text style={styles.primaryText}>Spravovat přepravní vozidla</Text>
+              <TouchableOpacity style={styles.customerActionRow} onPress={() => navigateLegacy("vehicles")} accessibilityLabel="Spravovat přepravní vozidla">
+                <Text style={styles.customerActionIcon}>▤</Text>
+                <Text style={styles.customerActionText}>Spravovat přepravní vozidla</Text>
+                <Text style={styles.customerActionArrow}>›</Text>
               </TouchableOpacity>
             </View>
 
-            {/* C2. Moje vozidla — soukromá vozidla, jen pro SOS. */}
-            <View style={styles.profileCard}>
-              <Text style={styles.profileCardHeading}>Moje vozidla</Text>
-              {/* Chyba načtení se nesmí převést na „Žádné vozidlo“ — to by
-                  tvrdilo, že uživatel žádné nemá, a přitom je jen nelze načíst. */}
-              <Text style={styles.profileSummaryValue}>
-                {personalVehiclesLoading
-                  ? "Načítám moje vozidla…"
-                  : personalVehiclesError
-                  ? "Nepodařilo se načíst"
-                  : personalVehicles.length === 0
-                  ? "Žádné vozidlo"
-                  : personalVehicles.length === 1
-                  ? "1 vozidlo"
-                  : `${personalVehicles.length} vozidel`}
-              </Text>
-              <Text style={styles.profileCardHint}>Soukromá vozidla pro rychlé předvyplnění v SOS. Nejsou součástí přepravního trhu.</Text>
-              <TouchableOpacity style={styles.primary} onPress={() => navigateLegacy("personalVehicles")}>
-                <Text style={styles.primaryText}>Spravovat moje vozidla</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* D. Ověření a pojištění */}
+            {/* Ověření a pojištění */}
             <View style={styles.profileCard}>
               <Text style={styles.profileCardHeading}>Ověření a pojištění</Text>
               <View style={styles.profileSummaryRow}>
@@ -280,27 +300,27 @@ export default function ProfileRoute() {
                 <Text style={styles.profileSummaryValue}>{insuranceStatus || "Zatím bez stavu"}</Text>
               </View>
             </View>
+
+            {/* Moje přepravy */}
+            <View style={styles.profileCard}>
+              <Text style={styles.profileCardHeading}>Moje přepravy</Text>
+              <TouchableOpacity style={styles.customerActionRow} onPress={openMyTransport} accessibilityLabel="Otevřít moje přepravní poptávky">
+                <Text style={styles.customerActionIcon}>▤</Text>
+                <Text style={styles.customerActionText}>Moje poptávky</Text>
+                <Text style={styles.customerActionArrow}>›</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.customerActionRow} onPress={openMyTransport} accessibilityLabel="Otevřít moji aktivitu v přepravě">
+                <Text style={styles.customerActionIcon}>▤</Text>
+                <Text style={styles.customerActionText}>Moje aktivita</Text>
+                <Text style={styles.customerActionArrow}>›</Text>
+              </TouchableOpacity>
+            </View>
           </>
         ) : (
           <Text style={styles.empty}>Profil se nepodařilo načíst.</Text>
         )}
 
-        {/* E. Moje přeprava */}
-        <View style={styles.profileCard}>
-          <Text style={styles.profileCardHeading}>Moje přeprava</Text>
-          <TouchableOpacity style={styles.customerActionRow} onPress={openMyTransport} accessibilityLabel="Otevřít moje přepravní poptávky">
-            <Text style={styles.customerActionIcon}>▤</Text>
-            <Text style={styles.customerActionText}>Moje poptávky</Text>
-            <Text style={styles.customerActionArrow}>›</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.customerActionRow} onPress={openMyTransport} accessibilityLabel="Otevřít moji aktivitu v přepravě">
-            <Text style={styles.customerActionIcon}>▤</Text>
-            <Text style={styles.customerActionText}>Moje aktivita</Text>
-            <Text style={styles.customerActionArrow}>›</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* F. Účet */}
+        {/* Účet */}
         <TouchableOpacity
           style={styles.profileLogoutRow}
           onPress={handleSignOut}
@@ -311,7 +331,7 @@ export default function ProfileRoute() {
           <Text style={styles.profileLogoutText}>{signOutLoading ? "Odhlašuji…" : "Odhlásit se"}</Text>
         </TouchableOpacity>
       </ScrollView>
-      <BottomNav />
+      {bottomNav}
     </SafeAreaView>
   );
 }

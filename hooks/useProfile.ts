@@ -32,6 +32,9 @@ export function useProfile({ userId, screen }: { userId: string | null; screen: 
   const [profilePhone, setProfilePhone] = useState("");
   const [carrierProfile, setCarrierProfile] = useState<CarrierProfile | null>(null);
   const [carrierProfileLoading, setCarrierProfileLoading] = useState(false);
+  // Uživatel bez aktivovaného přepravního profilu: obrazovka vozidel z toho udělá
+  // prázdný stav s nabídkou aktivace místo jen prázdného seznamu.
+  const [carrierProfileMissing, setCarrierProfileMissing] = useState(false);
   const [carrierProfileEditing, setCarrierProfileEditing] = useState(false);
   const [carrierDisplayName, setCarrierDisplayName] = useState("");
   const [carrierBusinessType, setCarrierBusinessType] = useState<"individual" | "company">("individual");
@@ -183,12 +186,14 @@ export function useProfile({ userId, screen }: { userId: string | null; screen: 
       setCarrierProfile(null);
       setVerificationStatus(null);
       setInsuranceStatus(null);
+      setCarrierProfileMissing(true);
       setCarrierProfileLoading(false);
       return;
     }
 
     const loadedProfile = data as CarrierProfile;
     setCarrierProfile(loadedProfile);
+    setCarrierProfileMissing(false);
     const formFields = mapCarrierProfileToFormFields(loadedProfile);
     setCarrierDisplayName(formFields.displayName);
     setCarrierBusinessType(formFields.businessType);
@@ -240,17 +245,32 @@ export function useProfile({ userId, screen }: { userId: string | null; screen: 
     if (!userId) return;
 
     setVehiclesLoading(true);
+    // Uživatel bez aktivovaného přepravního profilu prostě nemá žádná přepravní
+    // vozidla — to není chyba. `.single()` by na 0 řádcích vrátil PGRST116
+    // („Cannot coerce the result to a single JSON object“) a zalogoval by
+    // zbytečný error; `maybeSingle()` nechá stav prázdný.
     const { data: carrier, error: carrierError } = await supabase
       .from("carrier_profiles")
       .select("id")
       .eq("user_id", userId)
-      .single();
+      .maybeSingle();
 
-    if (carrierError || !carrier) {
-      console.error("Load carrier id:", carrierError?.message || "Carrier profile not found");
+    if (carrierError) {
+      console.error("Load carrier id:", carrierError.message);
       setVehiclesLoading(false);
       return;
     }
+
+    if (!carrier) {
+      // Bez přepravního profilu nejsou žádná přepravní vozidla (prázdný stav).
+      setVehicles([]);
+      setCarrierProfileMissing(true);
+      setVehiclesLoading(false);
+      return;
+    }
+
+    // Přepravní profil existuje — obrazovka nabídne rovnou přidání vozidla.
+    setCarrierProfileMissing(false);
 
     const { data, error } = await supabase
       .from("carrier_vehicles")
@@ -334,13 +354,16 @@ export function useProfile({ userId, screen }: { userId: string | null; screen: 
       return;
     }
 
+    // Bez aktivovaného přepravního profilu není kam vozidlo uložit. Používáme
+    // maybeSingle(), aby chybějící profil nevyvolal PGRST116, a stav uživatele
+    // nasměrujeme na aktivaci profilu místo vágního „nepodařilo se načíst“.
     const { data: carrier, error: carrierError } = await supabase
       .from("carrier_profiles")
       .select("id")
       .eq("user_id", userId)
-      .single();
+      .maybeSingle();
     if (carrierError || !carrier) {
-      Alert.alert("Chyba", "Profil přepravce se nepodařilo načíst.");
+      Alert.alert("Přepravní profil", "Nejdřív aktivujte přepravní profil v Profilu, pak můžete přidat vozidlo.");
       return;
     }
 
@@ -398,9 +421,9 @@ export function useProfile({ userId, screen }: { userId: string | null; screen: 
             .from("carrier_profiles")
             .select("id")
             .eq("user_id", userId)
-            .single();
+            .maybeSingle();
           if (carrierError || !carrier) {
-            Alert.alert("Chyba", "Profil přepravce se nepodařilo načíst.");
+            Alert.alert("Chyba", "Přepravní profil se nepodařilo načíst.");
             return;
           }
           const { error } = await supabase
@@ -511,6 +534,7 @@ export function useProfile({ userId, screen }: { userId: string | null; screen: 
     setProfile(null);
     setCarrierProfile(null);
     setVehicles([]);
+    setCarrierProfileMissing(false);
     setProfileEditing(false);
     setCarrierProfileEditing(false);
     setVehicleEditing(false);
@@ -542,6 +566,7 @@ export function useProfile({ userId, screen }: { userId: string | null; screen: 
     setProfilePhone,
     carrierProfile,
     carrierProfileLoading,
+    carrierProfileMissing,
     carrierProfileEditing,
     setCarrierProfileEditing,
     carrierDisplayName,

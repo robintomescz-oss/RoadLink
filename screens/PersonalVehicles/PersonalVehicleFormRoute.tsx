@@ -3,7 +3,6 @@ import { ScrollView, Text, TextInput, TouchableOpacity, View } from "react-nativ
 
 import { SafeAreaView } from "../../components/SafeAreaViewCompat";
 import { AppHeader as Header } from "../../components/AppHeader";
-import { AppBottomNav as BottomNav } from "../../components/AppBottomNav";
 import { styles } from "../../lib/appStyles";
 import { useAppContext } from "../../contexts/AppContext";
 import { navigateLegacy } from "../../navigation/navigationRef";
@@ -177,7 +176,7 @@ export default function PersonalVehicleFormRoute() {
         />
 
         <Text style={styles.profileCardHint}>
-          Registrace a pojišťovna jsou soukromé. Neukládá se číslo smlouvy ani VIN.
+          Registrace a pojišťovna jsou soukromé. Neukládá se VIN, číslo pojistné smlouvy ani přesná poloha.
         </Text>
 
         {fieldError ? <Text style={styles.fieldError}>{fieldError}</Text> : null}
@@ -195,7 +194,6 @@ export default function PersonalVehicleFormRoute() {
           <Text style={styles.secondaryText}>Vymazat formulář</Text>
         </TouchableOpacity>
       </ScrollView>
-      <BottomNav />
     </SafeAreaView>
   );
 }

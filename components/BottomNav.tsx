@@ -4,19 +4,22 @@ import { styles } from "../lib/appStyles";
 import { NavIcon, type NavIconName } from "./NavIcons";
 
 /**
- * Spodní navigace. Logika navigace (přepnutí tabu, ochrana profilu)
+ * Spodní navigace. Logika navigace (ochrana profilu, přesměrování na login)
  * zůstává volající straně přes onItemPress — chování beze změny.
  *
- * SOS je výrazné červené tlačítko dostupné z každé obrazovky (požadavek
- * uživatele). Nikdy nevyžaduje přihlášení.
+ * Struktura: Přehled · Trh · Profil
  *
- * Struktura: Přehled · SOS · [centrální vytvoření] · Moje · Profil
+ * - `Přehled` není „Domů“: používá ikonu dashboardu, ne domečku.
+ * - `Trh` je hlavní pracovní prostor pro přepravu. Vytvoření poptávky nebo
+ *   kapacity do něj patří, proto je kontextová akce uvnitř obrazovky Trh,
+ *   ne v této liště.
+ * - SOS sem zámerě nepatří — zůstává dostupné z hlavní obrazovky přes velkou
+ *   kartu, aby nepředbíhalo ostatní položky a nezvyšovalo počet tapů.
+ * - `Moje` je tab uvnitř Trhu, ne položka spodní navigace.
  */
-const NAV_ITEMS: Array<{ key: string; label: string; icon: NavIconName | null }> = [
+const NAV_ITEMS: Array<{ key: string; label: string; icon: NavIconName }> = [
   { key: "overview", label: "Přehled", icon: "dashboard" },
-  { key: "sos", label: "SOS", icon: "sos" },
-  { key: "create", label: "Vytvořit", icon: null },
-  { key: "mine", label: "Moje", icon: "mine" },
+  { key: "transport", label: "Trh", icon: "market" },
   { key: "profile", label: "Profil", icon: "person" },
 ];
 
@@ -28,50 +31,8 @@ export function BottomNav({ screen, activeKey, onItemPress }: { screen: string; 
       <View style={styles.bottomNav} accessibilityRole="tablist">
         {NAV_ITEMS.map((item) => {
           const isActive = (activeKey || screen) === item.key;
-          const isCreate = item.icon === null;
-
-          if (item.key === "sos") {
-            const sosActive = (activeKey || screen) === "sos" || screen === "sos";
-            return (
-              <TouchableOpacity
-                key={item.key}
-                style={styles.bottomNavItem}
-                onPress={() => onItemPress(item.key)}
-                accessibilityRole="button"
-                accessibilityState={{ selected: sosActive }}
-                accessibilityLabel="SOS pomoc"
-                accessibilityHint="Otevře průvodce pro poruchu nebo nehodu. Tísňové volání nevyžaduje přihlášení."
-              >
-                <View style={styles.bottomNavSosButton}>
-                  <Text style={styles.bottomNavSosText}>SOS</Text>
-                </View>
-                <Text numberOfLines={1} style={styles.bottomNavCreateLabel}>
-                  {item.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          }
-
-          if (isCreate) {
-            return (
-              <TouchableOpacity
-                key={item.key}
-                style={styles.bottomNavItem}
-                onPress={() => onItemPress(item.key)}
-                accessibilityRole="button"
-                accessibilityLabel="Vytvořit nový požadavek"
-                accessibilityHint="Otevře výběr mezi poptávkou přepravy a nabídkou volné kapacity"
-              >
-                <View style={styles.bottomNavPlusCircle}>
-                  <Text style={styles.bottomNavPlusGlyph}>+</Text>
-                </View>
-                <Text style={styles.bottomNavCreateLabel}>{item.label}</Text>
-              </TouchableOpacity>
-            );
-          }
-
-          const iconName = item.icon as NavIconName;
           const iconColor = isActive ? styles.bottomNavTextActive.color : styles.bottomNavIcon.color;
+
           return (
             <TouchableOpacity
               key={item.key}
@@ -81,7 +42,7 @@ export function BottomNav({ screen, activeKey, onItemPress }: { screen: string; 
               accessibilityState={{ selected: isActive }}
               accessibilityLabel={item.label}
             >
-              <NavIcon name={iconName} color={iconColor} size={24} />
+              <NavIcon name={item.icon} color={iconColor} size={24} />
               <Text
                 numberOfLines={1}
                 style={[styles.bottomNavText, isActive && styles.bottomNavTextActive]}

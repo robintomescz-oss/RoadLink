@@ -3,7 +3,7 @@ import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from "reac
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { supabase } from "../../lib/supabase";
 import { canonicalVehicleType } from "../../lib/labels";
-import { buildRouteMetricsPayload, capacitySnapshot, normalizeViaPlaces, routeMetricsSubmitBlockReason, MAX_VIA_PLACES, type CapacityErrorKey, validateCapacityForm } from "../../lib/createFormLogic";
+import { buildRouteMetricsPayload, canAddViaPlace, capacitySnapshot, moveViaPlace, normalizeViaPlaces, routeMetricsSubmitBlockReason, MAX_VIA_PLACES, type CapacityErrorKey, validateCapacityForm } from "../../lib/createFormLogic";
 import { FormBackHeader, FormSection, FieldError, ReviewRow } from "../../components/form/FormParts";
 import { RouteMetricsPreviewCard } from "../../components/form/RouteMetricsPreviewCard";
 import { VerifiedLocationInput } from "../../components/form/VerifiedLocationInput";
@@ -48,6 +48,7 @@ export default function RouteFormRoute() {
   const capacityRouteBlockReason = routeMetricsSubmitBlockReason({
     originPlaceId: fromLocation?.placeId ?? null,
     destinationPlaceId: toLocation?.placeId ?? null,
+    viaPlaceIds: viaPlaces.map((place) => place.placeId),
     preview: routePreview,
   });
 
@@ -116,6 +117,11 @@ export default function RouteFormRoute() {
       return;
     }
 
+    // Soukromé souřadnice se ukládají jen jako úplný pár; neúplný pár by odmítl
+    // validační trigger. Chybí‑li jediná souřadnice, uloží se jen place ID.
+    const viaHasCoordinates = viaPlaceIds.length > 0
+      && viaPlaceIds.every((place) => Number.isFinite(place.latitude) && Number.isFinite(place.longitude));
+
     setCreatingRoute(true);
     try {
       // Veřejné labely (město/obec) — povinné, trimované, max 80 znaků;
@@ -135,6 +141,7 @@ export default function RouteFormRoute() {
       const routeMetricsPayload = buildRouteMetricsPayload({
         originPlaceId: fromLocation.placeId,
         destinationPlaceId: toLocation.placeId,
+        viaPlaceIds: viaPlaceIds.map((place) => place.placeId),
         preview: routePreview,
       });
       const departureAt = new Date(routeDepartureDate!);
@@ -156,6 +163,8 @@ export default function RouteFormRoute() {
         available_spaces: availableSpaces,
         via_place_ids: viaPlaceIds.length > 0 ? viaPlaceIds.map((place) => place.placeId) : null,
         via_public_labels: viaPlaceIds.length > 0 ? viaPlaceIds.map((place) => place.publicLabel) : null,
+        via_latitudes: viaHasCoordinates ? viaPlaceIds.map((place) => place.latitude) : null,
+        via_longitudes: viaHasCoordinates ? viaPlaceIds.map((place) => place.longitude) : null,
         vehicle_types: [vehicleType],
         price: routePriceMode === "negotiable" ? null : price,
         description: routeDescription,
@@ -193,8 +202,28 @@ export default function RouteFormRoute() {
           {viaPlaces.map((place, index) => (
             <View key={place.placeId} style={styles.viaRow}>
               <View style={styles.viaRowText}>
-                <Text style={styles.viaRowTitle}>Přes {place.publicLabel}</Text>
+                <Text style={styles.viaRowTitle}>{index + 1}. {place.publicLabel}</Text>
               </View>
+              {/* Pořadí je pro matching zásadní (odjezd → body → cíl), proto
+                  bod jde i přesunout. Ovládání je drobné a vejde se i na malý displej. */}
+              <TouchableOpacity
+                style={styles.viaRemove}
+                onPress={() => setViaPlaces((current) => moveViaPlace(current, index, index - 1))}
+                disabled={index === 0}
+                accessibilityRole="button"
+                accessibilityLabel={`Posunout průjezdní bod ${place.publicLabel} výš`}
+              >
+                <Text style={styles.viaRemoveText}>Výš</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.viaRemove}
+                onPress={() => setViaPlaces((current) => moveViaPlace(current, index, index + 1))}
+                disabled={index === viaPlaces.length - 1}
+                accessibilityRole="button"
+                accessibilityLabel={`Posunout průjezdní bod ${place.publicLabel} níž`}
+              >
+                <Text style={styles.viaRemoveText}>Níž</Text>
+              </TouchableOpacity>
               <TouchableOpacity
                 style={styles.viaRemove}
                 onPress={() => setViaPlaces((current) => current.filter((_, position) => position !== index))}
@@ -211,8 +240,17 @@ export default function RouteFormRoute() {
               placeholder="Např. Plzeň"
               value={null}
               onChange={(location) => {
+                // Neověřené místo se nikdy neuloží: do seznamu jde jen výsledek
+                // Place Details, a to ještě když není duplicita ani odjezd/cíl.
                 if (!location) return;
-                setViaPlaces((current) => (current.some((item) => item.placeId === location.placeId) ? current : [...current, location]));
+                const allowed = canAddViaPlace({
+                  viaPlaces,
+                  placeId: location.placeId,
+                  originPlaceId: fromLocation?.placeId ?? null,
+                  destinationPlaceId: toLocation?.placeId ?? null,
+                });
+                if (!allowed) return;
+                setViaPlaces((current) => [...current, location]);
                 setRouteErrors((current) => ({ ...current, route: undefined }));
               }}
               onError={(message) => setRouteErrors((current) => ({ ...current, route: message }))}

@@ -29,7 +29,13 @@ scripts/adb-e2e-runner.mjs
 !.roadlink/route-preview-regression.js
 !.roadlink/matching-v1-regression.js
 !.roadlink/matching-server-regression.js
+!.roadlink/matching-via-regression.js
+!.roadlink/matching-matrix-regression.js
+!.roadlink/matching-coordinates-regression.js
+!.roadlink/matching-spatial-regression.js
+!.roadlink/matching-spatial-integration.mjs
 !.roadlink/personal-vehicles-regression.js
+!.roadlink/bottom-nav-regression.js
 
 # Runtime snímky obrazovky a dočasné soubory v rootu
 /screen-devlauncher.png
@@ -37,3 +43,10 @@ scripts/adb-e2e-runner.mjs
 /m25c.diff
 /ollama.ollama-0.0.8.vsix
 /supabase/.temp/
+!.roadlink/via-privacy-migrations-regression.js
+!.roadlink/deployment-runbook-regression.js
+!.roadlink/spatial-index-proof-regression.js
+!.roadlink/sql-editor-bundle-regression.js
+
+# Pracovní report Freebuffu — zůstává jen lokálně, nesmí se dostat do PR ani do historie
+/.roadlink/freebuff-report.md

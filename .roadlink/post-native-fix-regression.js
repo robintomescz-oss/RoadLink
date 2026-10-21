@@ -63,7 +63,11 @@ assert(profileSource.includes('setTransportTab("mine")') && profileSource.includ
 assert(profileSource.split('openMyTransport').length >= 3, 'both Moje actions share one transport/mine handler');
 
 const bottomNavSource = read('components/AppBottomNav.tsx');
-assert(bottomNavSource.includes('setTransportTab("mine")') && bottomNavSource.includes('navigateLegacy("transport")'), 'BottomNav Moje opens transport/mine');
+// Zjednodušení navigace (2026-10-03): `Moje` se ze spodní lišty odstranilo.
+// Do tabu Moje se dostává z profilu (openMyTransport výše) a z taby uvnitř
+// obrazovky Trh, kde login guard řeší odhlášeného uživatele.
+assert(!/key === "mine"/.test(bottomNavSource), 'BottomNav no longer routes a Moje key');
+assert(bottomNavSource.includes('navigateLegacy("home")'), 'BottomNav still routes Přehled to home');
 
 const homeRouteSource = read('screens/Home/HomeRoute.tsx');
 assert(homeRouteSource.includes('setTransportTab("all")') && homeRouteSource.includes('navigateLegacy("transport")'), 'Global Home Trh přepravy opens transport/all');
@@ -115,6 +119,12 @@ assert(vehiclesSource.includes('useHardwareBackTo("profile")'), 'VehiclesRoute h
 assert(vehiclesSource.includes('‹ Profil'), 'VehiclesRoute has single top back action to profile');
 assert(!/Zpět na profil<\/Text>/.test(vehiclesSource), 'VehiclesRoute has no duplicate bottom back-to-profile');
 assert(!/Zpět na přehled<\/Text>/.test(vehiclesSource), 'VehiclesRoute has no bottom back-to-overview');
+
+// Prázdný stav bez přepravního profilu nabízí aktivaci, ne jen prázdný seznam.
+assert(vehiclesSource.includes('carrierProfileMissing'), 'VehiclesRoute distinguishes a missing carrier profile');
+assert(vehiclesSource.includes('Aktivovat přepravní profil'), 'VehiclesRoute offers profile activation in the empty state');
+assert(vehiclesSource.includes('activateCarrierProfile'), 'VehiclesRoute wires the activation action');
+assert(vehiclesSource.includes('loadVehicles'), 'VehiclesRoute reloads vehicles after activation');
 
 // ── 5. Veřejné/soukromé payloady lokalit ─────────────────────────────────────
 const createFormLogic = requireProductionTsModule('lib/createFormLogic.ts');
@@ -202,5 +212,28 @@ assert(profileSource.includes('Moje vozidla'), 'profile has a separate personal 
 assert(profileSource.includes('Spravovat moje vozidla'), 'personal vehicles card has a single manage action');
 assert((profileSource.match(/navigateLegacy\("vehicles"\)/g) || []).length === 1, 'carrier vehicles action opens only the carrier screen');
 assert((profileSource.match(/navigateLegacy\("personalVehicles"\)/g) || []).length === 1, 'personal vehicles action opens only the personal screen');
+
+// ── 6. Přepravní vozidla: chybějící přepravní profil není chyba ──────────────
+// Uživatel bez aktivovaného carrier_profiles nesmí na obrazovce „Přepravní
+// vozidla“ dostat PGRST116 („Cannot coerce the result to a single JSON object“),
+// ale prázdný stav. Načtení proto používá maybeSingle() a null řeší tiše.
+const useProfileSource = read('hooks/useProfile.ts');
+const loadVehiclesBlock = useProfileSource.slice(
+  useProfileSource.indexOf('async function loadVehicles'),
+  useProfileSource.indexOf('function resetVehicleForm')
+);
+const loadVehiclesCode = loadVehiclesBlock
+  .split('\n')
+  .filter((line) => !line.trimStart().startsWith('//'))
+  .join('\n');
+assert(loadVehiclesBlock.length > 0, 'useProfile has a loadVehicles block');
+assert(loadVehiclesCode.includes('.maybeSingle()'), 'loadVehicles tolerates a missing carrier profile');
+assert(!loadVehiclesCode.includes('.single()'), 'loadVehicles never uses single() for carrier_profiles');
+assert(/if \(!carrier\)[\s\S]*?setVehicles\(\[\]\)/.test(loadVehiclesBlock), 'loadVehicles clears to the empty state without a carrier profile');
+assert(loadVehiclesBlock.indexOf('if (carrierError)') < loadVehiclesBlock.indexOf('Load carrier id:'), 'carrier-id error is logged only for real errors');
+assert(
+  !/\.from\("carrier_profiles"\)\s*\n\s*\.select\([^)]*\)\s*\n\s*\.eq\([^)]*\)\s*\n\s*\.single\(\)/.test(useProfileSource),
+  'no carrier_profiles lookup uses .single()'
+);
 
 console.log('\nVŠECHNY KONTROLY PROŠLY.');
